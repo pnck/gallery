@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Compose-only app: the platform theme just hosts the splash/window;
+         all real theming happens in ui/theme/GalleryTheme. -->
+    <style name="Theme.ByosGallery" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
+</resources>

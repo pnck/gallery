@@ -1,12 +1,14 @@
 # Gradle files
 .gradle/
 build/
+.kotlin/
 
 # Local configuration file (sdk path, etc)
 local.properties
 
 # Log/OS Files
 *.log
+.DS_Store
 
 # Android Studio generated files and folders
 captures/
@@ -32,3 +34,12 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# OAuth client secrets (never commit real client IDs/secrets)
+secrets.properties
+
+# Personal dev-environment compose file (contains LAN addresses)
+claude-code.yml
+
+# Claude Code local settings
+.claude/settings.local.json

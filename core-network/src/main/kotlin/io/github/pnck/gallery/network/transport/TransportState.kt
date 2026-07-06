@@ -1,0 +1,24 @@
+package io.github.pnck.gallery.network.transport
+
+/** Connection state exposed to the UI via TransportController (Transport Design §3.1). */
+sealed interface TransportState {
+    data object Disconnected : TransportState
+    data object Connecting : TransportState
+    data class Connected(val localSocksPort: Int, val lastHandshakeEpoch: Long) : TransportState
+
+    /** Handshake stale / RTT abnormal, still usable. */
+    data class Degraded(val reason: String) : TransportState
+    data class Failed(val reason: String, val retryable: Boolean) : TransportState
+
+    /** Fallback to direct connection per [FallbackPolicy]. */
+    data object BypassedDirect : TransportState
+}
+
+/** What to do when the tunnel fails: block (default, avoids leaking intent) or go direct. */
+enum class FallbackPolicy { BLOCK, DIRECT }
+
+data class TransportHealth(
+    val handshakeOk: Boolean,
+    val rttMs: Long?,
+    val viaTunnel: Boolean,
+)
