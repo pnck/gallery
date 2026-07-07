@@ -37,7 +37,9 @@ dependencies {
     implementation(project(":core-provider"))
 
     implementation(libs.kotlinx.coroutines.android)
-    implementation(libs.androidx.room.runtime)
+    // api: GalleryDatabase (a RoomDatabase subtype) is provided to :app's DI graph,
+    // so the supertype must be visible to consumers.
+    api(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     implementation(libs.androidx.room.paging)
     ksp(libs.androidx.room.compiler)

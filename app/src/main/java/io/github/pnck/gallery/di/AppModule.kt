@@ -1,7 +1,6 @@
 package io.github.pnck.gallery.di
 
 import android.content.Context
-import androidx.room.Room
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -27,7 +26,7 @@ object AppModule {
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): GalleryDatabase =
-        Room.databaseBuilder(context, GalleryDatabase::class.java, GalleryDatabase.NAME).build()
+        GalleryDatabase.create(context)
 
     @Provides
     fun providePhotoDao(db: GalleryDatabase): PhotoDao = db.photoDao()

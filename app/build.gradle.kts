@@ -51,6 +51,15 @@ kotlin {
     }
 }
 
+configurations.configureEach {
+    resolutionStrategy {
+        // Hilt 2.58 (last AGP 8.x-compatible release) ships kotlin-metadata-jvm 2.2.20,
+        // which cannot read the 2.4.0 metadata emitted by Kotlin 2.3.x. Force the
+        // matching metadata library; drop this with the AGP 9 / Hilt 2.60 migration.
+        force("org.jetbrains.kotlin:kotlin-metadata-jvm:${libs.versions.kotlin.get()}")
+    }
+}
+
 dependencies {
     implementation(project(":core-domain"))
     implementation(project(":core-data"))
