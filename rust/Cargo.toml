@@ -1,0 +1,31 @@
+[package]
+name = "gallery-transport"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77"
+description = "BYOS Gallery Tier-1 transport core: local SOCKS5 inbound + (upcoming) userspace WireGuard chain, exposed to Kotlin via UniFFI."
+license = "Apache-2.0"
+
+[lib]
+name = "gallery_transport"
+# rlib so host integration tests can link; cdylib/staticlib for the Android build.
+crate-type = ["lib", "cdylib", "staticlib"]
+
+# Standalone binding generator (uniffi-bindgen) so no separate cargo install is needed.
+[[bin]]
+name = "uniffi-bindgen"
+path = "uniffi-bindgen.rs"
+
+[dependencies]
+uniffi = { version = "0.28", features = ["cli"] }
+log = "0.4"
+thiserror = "1"
+
+# boringtun + smoltcp land with the WgThenSocks dialer (T-502 phase 2); the SOCKS5
+# inbound + Direct/upstream dialer below is phase 1 and validates the whole pipeline.
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"
