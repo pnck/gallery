@@ -1,7 +1,7 @@
 # All versions verified against Google Maven / Maven Central on 2026-07-06.
 # Compose BOM 2026.04.01 / Coil 3.5.x / Telephoto 0.19.x are pinned by PRD v1.1 (§2.3).
 [versions]
-agp = "8.13.2"
+agp = "9.2.1"
 kotlin = "2.3.21"
 ksp = "2.3.9"
 # 2.59+ requires AGP 9; 2.58 is the last release compatible with AGP 8.x
