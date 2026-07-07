@@ -48,3 +48,10 @@ data class DriveChangeDTO(
     val removed: Boolean = false,
     val file: DriveFileDTO? = null,
 )
+
+/** Request body for the resumable-upload initiation call. */
+@JsonClass(generateAdapter = true)
+data class DriveUploadMetadata(
+    val name: String,
+    val mimeType: String? = null,
+)

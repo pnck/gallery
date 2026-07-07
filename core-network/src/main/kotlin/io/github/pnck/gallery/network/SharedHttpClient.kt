@@ -53,7 +53,8 @@ object SharedHttpClient {
     }
 }
 
-internal fun ProxySpec.toJavaProxy(): Proxy {
+/** Public: AppAuth's ConnectionBuilder (:core-provider) also routes through the insertion layer. */
+fun ProxySpec.toJavaProxy(): Proxy {
     val type = when (kind) {
         ProxyKind.SOCKS5 -> Proxy.Type.SOCKS
         ProxyKind.HTTP_CONNECT -> Proxy.Type.HTTP

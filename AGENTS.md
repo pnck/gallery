@@ -78,10 +78,23 @@ When a request conflicts with the PRD, say so and ask — don't silently deviate
   Versions were verified against Google Maven / Maven Central; Compose BOM 2026.04.01,
   Coil 3.5.x and Telephoto 0.19.x are pinned by PRD §2.3.
 
-## Current status (bootstrap, 2026-07)
+## Current status (M1+M2 core slice, 2026-07)
 
-Skeleton only: contracts, Room schema v1, DTOs, Retrofit surfaces, Compose shell with an
-empty timeline. Provider drivers (`GoogleDriveProvider` / `OneDriveProvider`), AuthManager
-impl, workers and RemoteMediator are `TODO(T-xxx)` stubs. Milestone order: PRD §13 (M1→M5;
-EPIC-5 transport is a parallel track). Open decisions D1–D9 / D-T2…D-T4 are listed in the
-PRD §12 and Transport Design §10 — ask the owner before resolving one in code.
+Implemented and building green:
+- T-101: `AppAuthManager` (Google, AppAuth browser flow, EncryptedSharedPreferences,
+  RouterConnectionBuilder so token traffic honors the insertion layer). OAuth client id
+  comes from gradle properties `GALLERY_GOOGLE_CLIENT_ID` / `GALLERY_OAUTH_REDIRECT_SCHEME`
+  (keep them OUT of the repo — ~/.gradle/gradle.properties or CI secrets).
+- T-102: `GoogleDriveProvider` — list/changes/delete/download/thumbnail + resumable
+  upload (single-shot PUT; chunked resume across worker wake-ups still TODO).
+- T-202: `MediaReconciler` (DataStore cursor) + `LocalMediaScanner`.
+- T-301: `ScanWorker`/`UploadWorker` (@HiltWorker in :app, logic in :core-data
+  processors), scan→upload unique chain in `SyncPipeline`.
+- T-402: timeline permission flow + sync indicator; Settings Google sign-in via
+  `OAuthCallbackActivity`.
+
+Still stubs/TODO: `OneDriveProvider` (T-103), downstream sync worker + RemoteMediator
+(T-303/T-402 tail), Coil fetcher for CLOUD_ONLY `provider://` URIs (T-401), free-up-space
+(T-302), detail viewer with Telephoto (T-403), ContentObserver debounce (T-304),
+transport EPIC-5. Open decisions D1–D9 / D-T2…D-T4: PRD §12, Transport Design §10 —
+ask the owner before resolving one in code.

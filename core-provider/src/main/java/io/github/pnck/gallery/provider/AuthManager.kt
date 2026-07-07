@@ -1,6 +1,7 @@
 package io.github.pnck.gallery.provider
 
 import android.content.Context
+import android.content.Intent
 import io.github.pnck.gallery.network.ApiResult
 
 /**
@@ -13,15 +14,29 @@ import io.github.pnck.gallery.network.ApiResult
 interface AuthManager {
     val providerType: ProviderType
 
+    /**
+     * Fires the browser-based authorization flow. The redirect lands back in the
+     * app via AppAuth's RedirectUriReceiverActivity, which forwards the completion
+     * intent to a host activity; that activity must call [handleAuthorizationResponse].
+     */
     suspend fun startAuthorization(context: Context): ApiResult<Unit>
 
-    /** Always returns a fresh token; refreshes internally when expired. */
+    /** Completes the code→token exchange from the completion intent. */
+    suspend fun handleAuthorizationResponse(intent: Intent): ApiResult<Unit>
+
+    /**
+     * Always returns a fresh token; refreshes internally when expired.
+     * @throws AuthNotAuthorizedException when no account is connected.
+     */
     suspend fun getValidAccessToken(): String
 
     fun isAuthorized(): Boolean
 
     suspend fun signOut()
 }
+
+class AuthNotAuthorizedException(provider: ProviderType) :
+    IllegalStateException("No authorized ${provider.name} account")
 
 /** OAuth endpoints & scopes per provider (PRD §5.3). */
 object OAuthConfig {

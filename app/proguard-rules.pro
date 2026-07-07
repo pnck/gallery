@@ -9,3 +9,7 @@
 
 # AppAuth uses reflection on browser descriptors.
 -keep class net.openid.appauth.** { *; }
+
+# Tink (pulled in by androidx.security:security-crypto) references errorprone's
+# compile-only annotations; they are absent at runtime by design.
+-dontwarn com.google.errorprone.annotations.**

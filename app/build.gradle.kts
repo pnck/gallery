@@ -20,8 +20,19 @@ android {
         versionCode = 1
         versionName = "0.1.0"
 
-        // AppAuth redirect scheme (PRD §5.2) — both providers redirect back on this scheme.
-        manifestPlaceholders["appAuthRedirectScheme"] = "io.github.pnck.gallery"
+        // AppAuth redirect scheme (PRD §5.2). For Google, set GALLERY_OAUTH_REDIRECT_SCHEME
+        // to the reversed client id (com.googleusercontent.apps.<id>); default scheme
+        // works for Microsoft. Keep OAuth config OUT of the repo: put these in
+        // ~/.gradle/gradle.properties or CI secrets.
+        val redirectScheme = providers.gradleProperty("GALLERY_OAUTH_REDIRECT_SCHEME")
+            .getOrElse("io.github.pnck.gallery")
+        manifestPlaceholders["appAuthRedirectScheme"] = redirectScheme
+        buildConfigField("String", "OAUTH_REDIRECT_URI", "\"$redirectScheme:/oauth2redirect\"")
+        buildConfigField(
+            "String",
+            "GOOGLE_OAUTH_CLIENT_ID",
+            "\"${providers.gradleProperty("GALLERY_GOOGLE_CLIENT_ID").getOrElse("")}\"",
+        )
     }
 
     buildTypes {
@@ -42,6 +53,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -69,6 +81,7 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.activity.compose)
 
     implementation(platform(libs.androidx.compose.bom))
@@ -83,9 +96,17 @@ dependencies {
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     implementation(libs.androidx.hilt.navigation.compose)
+    implementation(libs.androidx.hilt.work)
+    ksp(libs.androidx.hilt.compiler)
 
     implementation(libs.androidx.paging.compose)
     implementation(libs.androidx.work.runtime.ktx)
+
+    // Retrofit stack assembled in DI (:app owns wiring; contracts live in :core-provider)
+    implementation(libs.retrofit)
+    implementation(libs.retrofit.converter.moshi)
+    implementation(libs.moshi)
+    implementation(libs.appauth)
 
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)

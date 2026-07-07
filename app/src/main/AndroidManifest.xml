@@ -35,7 +35,23 @@
         <!-- AppAuth redirect capture (PRD §5.2). The scheme comes from
              manifestPlaceholders["appAuthRedirectScheme"] in build.gradle.kts;
              AppAuth's RedirectUriReceiverActivity is contributed by the library
-             manifest and picks the placeholder up automatically. -->
+             manifest and picks the placeholder up automatically. This activity
+             receives the completion intent and finishes the token exchange. -->
+        <activity
+            android:name=".auth.OAuthCallbackActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- On-demand WorkManager init: HiltWorkerFactory comes from GalleryApp
+             (Configuration.Provider), so the default initializer must go. -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                tools:node="remove" />
+        </provider>
     </application>
 
 </manifest>
