@@ -1,6 +1,5 @@
 package io.github.pnck.gallery.provider
 
-import android.content.Context
 import android.net.Uri
 import io.github.pnck.gallery.network.ApiResult
 import io.github.pnck.gallery.provider.api.GraphApiService
@@ -15,13 +14,9 @@ import java.io.InputStream
  */
 class OneDriveProvider(
     private val api: GraphApiService,
-    private val authManager: AuthManager,
 ) : ICloudStorageProvider {
 
     override val providerType: ProviderType = ProviderType.ONE_DRIVE
-
-    override suspend fun authenticate(context: Context): ApiResult<Unit> =
-        authManager.startAuthorization(context)
 
     override suspend fun listPhotos(pageToken: String?): ApiResult<CloudPage> {
         TODO("T-103: children + nextLink paging, quickXorHash → ContentHash.QuickXor")

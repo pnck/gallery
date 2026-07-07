@@ -15,6 +15,12 @@
     <string name="settings_google_disconnected">Not connected — tap to sign in (no GMS required)</string>
     <string name="auth_success">Google Drive connected</string>
     <string name="auth_failed">Sign-in failed: %1$s</string>
+    <string name="cancel">Cancel</string>
+
+    <!-- Device flow (ADR-0001) -->
+    <string name="auth_device_title">Connect Google Drive</string>
+    <string name="auth_device_body">On any device that can reach Google, open:\n\n%2$s\n\nand enter this code:\n\n%1$s\n\nWaiting for approval…</string>
+    <string name="auth_device_open">Open on this device</string>
     <string name="settings_free_space">Free up space</string>
     <string name="settings_free_space_hint">Remove local copies of already-synced photos</string>
     <string name="settings_transport">Network acceleration</string>

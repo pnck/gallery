@@ -1,6 +1,5 @@
 package io.github.pnck.gallery.provider
 
-import android.content.Context
 import android.net.Uri
 import io.github.pnck.gallery.network.ApiResult
 import java.io.InputStream
@@ -14,8 +13,9 @@ import java.io.InputStream
 interface ICloudStorageProvider {
     val providerType: ProviderType
 
-    /** Launches the AppAuth browser-based authorization flow. */
-    suspend fun authenticate(context: Context): ApiResult<Unit>
+    // Authentication is the AuthManager's job (device flow, ADR-0001), driven by
+    // the Settings UI. Providers only make authenticated calls — the shared client's
+    // interceptor injects the Bearer token (PRD §8.3).
 
     /**
      * Initial full listing, page by page.

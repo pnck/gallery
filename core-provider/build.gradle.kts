@@ -1,6 +1,6 @@
 // :core-provider — the reusable virtual backend: ICloudStorageProvider contract,
-// Google Drive / OneDrive drivers, AuthManager (AppAuth). Android dependency is
-// minimal (AppAuth needs a Context) — PRD §2.2.
+// Google Drive / OneDrive drivers, AuthManager (OAuth device flow, ADR-0001).
+// Android dependency is minimal (Context for EncryptedSharedPreferences) — PRD §2.2.
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
@@ -36,7 +36,6 @@ dependencies {
     implementation(libs.retrofit.converter.moshi)
     implementation(libs.moshi)
     ksp(libs.moshi.codegen)
-    implementation(libs.appauth)
     implementation(libs.androidx.security.crypto)
 
     testImplementation(libs.junit)

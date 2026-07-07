@@ -1,11 +1,14 @@
 package io.github.pnck.gallery.ui.settings
 
+import android.content.Intent
+import androidx.core.net.toUri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -14,6 +17,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -29,8 +33,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.pnck.gallery.R
 
 /**
- * Settings (PRD §9.1): account connection (T-101), plus placeholders for
- * free-up-space (T-302) and the transport layer (EPIC-5).
+ * Settings (PRD §9.1): device-flow account connection (ADR-0001), plus
+ * placeholders for free-up-space (T-302) and the transport layer (EPIC-5).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -41,7 +45,6 @@ fun SettingsScreen(
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
 
-    // Re-check auth state when returning from the browser flow.
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -49,6 +52,39 @@ fun SettingsScreen(
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    state.pendingChallenge?.let { challenge ->
+        AlertDialog(
+            onDismissRequest = viewModel::cancelPending,
+            title = { Text(stringResource(R.string.auth_device_title)) },
+            text = {
+                Text(
+                    stringResource(
+                        R.string.auth_device_body,
+                        challenge.userCode,
+                        challenge.verificationUrl,
+                    ),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    // Best-effort: open the verification page on this device if it can
+                    // reach it; otherwise the user types the code on a second screen.
+                    runCatching {
+                        context.startActivity(
+                            Intent(Intent.ACTION_VIEW, challenge.verificationUrl.toUri())
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    }
+                }) { Text(stringResource(R.string.auth_device_open)) }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::cancelPending) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
     }
 
     Scaffold(
@@ -66,8 +102,7 @@ fun SettingsScreen(
         Column(Modifier.fillMaxSize().padding(padding)) {
             ListItem(
                 modifier = Modifier.clickable {
-                    if (state.googleAuthorized) viewModel.signOutGoogle()
-                    else viewModel.signInGoogle(context)
+                    if (state.googleAuthorized) viewModel.signOutGoogle() else viewModel.signInGoogle()
                 },
                 headlineContent = { Text(stringResource(R.string.settings_google_account)) },
                 supportingContent = {

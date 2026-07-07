@@ -20,18 +20,19 @@ android {
         versionCode = 1
         versionName = "0.1.0"
 
-        // AppAuth redirect scheme (PRD §5.2). For Google, set GALLERY_OAUTH_REDIRECT_SCHEME
-        // to the reversed client id (com.googleusercontent.apps.<id>); default scheme
-        // works for Microsoft. Keep OAuth config OUT of the repo: put these in
-        // ~/.gradle/gradle.properties or CI secrets.
-        val redirectScheme = providers.gradleProperty("GALLERY_OAUTH_REDIRECT_SCHEME")
-            .getOrElse("io.github.pnck.gallery")
-        manifestPlaceholders["appAuthRedirectScheme"] = redirectScheme
-        buildConfigField("String", "OAUTH_REDIRECT_URI", "\"$redirectScheme:/oauth2redirect\"")
+        // Device-flow OAuth (ADR-0001). Create a Google OAuth client of type
+        // "TVs and Limited Input devices"; it has a client_secret (not a true
+        // secret for a public client, but required). Keep OAuth config OUT of the
+        // repo: put these in ~/.gradle/gradle.properties or CI secrets.
         buildConfigField(
             "String",
             "GOOGLE_OAUTH_CLIENT_ID",
             "\"${providers.gradleProperty("GALLERY_GOOGLE_CLIENT_ID").getOrElse("")}\"",
+        )
+        buildConfigField(
+            "String",
+            "GOOGLE_OAUTH_CLIENT_SECRET",
+            "\"${providers.gradleProperty("GALLERY_GOOGLE_CLIENT_SECRET").getOrElse("")}\"",
         )
     }
 
@@ -106,7 +107,6 @@ dependencies {
     implementation(libs.retrofit)
     implementation(libs.retrofit.converter.moshi)
     implementation(libs.moshi)
-    implementation(libs.appauth)
 
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)

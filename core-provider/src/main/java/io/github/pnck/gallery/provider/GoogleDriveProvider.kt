@@ -1,7 +1,6 @@
 package io.github.pnck.gallery.provider
 
 import android.content.ContentResolver
-import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import io.github.pnck.gallery.network.ApiResult
@@ -24,14 +23,10 @@ import java.io.InputStream
  */
 class GoogleDriveProvider(
     private val api: DriveApiService,
-    private val authManager: AuthManager,
     private val resolver: ContentResolver,
 ) : ICloudStorageProvider {
 
     override val providerType: ProviderType = ProviderType.G_DRIVE
-
-    override suspend fun authenticate(context: Context): ApiResult<Unit> =
-        authManager.startAuthorization(context)
 
     override suspend fun listPhotos(pageToken: String?): ApiResult<CloudPage> =
         safeApiCall({ api.listFiles(pageToken = pageToken) }) { body ->

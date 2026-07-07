@@ -62,11 +62,18 @@ When a request conflicts with the PRD, say so and ask — don't silently deviate
 8. **Insertion layer** (Transport Design §3.0, G5): the gallery kernel has zero compile-time
    dependency on transport. Transport off must equal "never integrated" byte-for-byte —
    `SharedHttpClientTest` pins this; keep it green.
-9. **Forbidden**: Android `VpnService`, WebView OAuth (`disallowed_useragent`), HTTP/3/QUIC,
-   absolute file paths for media (content:// URIs only), photos written to DCIM from the app.
+9. **Forbidden**: Android `VpnService` (never, not even transiently for login —
+   ADR-0001), WebView OAuth (`disallowed_useragent`), HTTP/3/QUIC, absolute file
+   paths for media (content:// URIs only), photos written to DCIM from the app.
 
-10. **One OkHttpClient** (PRD §8.1): Retrofit, Coil and AppAuth's ConnectionBuilder share the
-    singleton from `SharedHttpClient` / `AppModule`. Don't construct ad-hoc clients.
+11. **Auth is device flow** (ADR-0001, supersedes PRD §5.2): sign-in uses the OAuth
+    Device Authorization Grant — the phone shows a `user_code`, the user approves in
+    any browser that can reach Google, the phone polls the token endpoint. Both calls
+    ride the shared OkHttpClient (hence the tunnel). No on-device browser/WebView.
+    Token exchange + refresh are hand-rolled; no AppAuth.
+
+10. **One OkHttpClient** (PRD §8.1): Retrofit and Coil share the singleton from
+    `SharedHttpClient` / `AppModule`. Don't construct ad-hoc clients.
 
 ## Conventions
 

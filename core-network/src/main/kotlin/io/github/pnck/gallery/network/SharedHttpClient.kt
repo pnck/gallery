@@ -17,8 +17,8 @@ import okhttp3.Protocol
 /**
  * Factory for the single shared [OkHttpClient] (PRD §8.1).
  *
- * - Retrofit, Coil and AppAuth's ConnectionBuilder all reuse this one instance,
- *   sharing the connection pool and — when the transport is enabled — one tunnel.
+ * - Retrofit (Drive + device-flow token calls) and Coil all reuse this one
+ *   instance, sharing the pool and — when the transport is enabled — one tunnel.
  * - HTTP/2 over TCP is forced; HTTP/3(QUIC/UDP) is excluded because the SOCKS
  *   tunnel only carries TCP (PRD §8.4.6).
  * - The transport is injected as a dynamic [ProxySelector] reading the
@@ -53,7 +53,6 @@ object SharedHttpClient {
     }
 }
 
-/** Public: AppAuth's ConnectionBuilder (:core-provider) also routes through the insertion layer. */
 fun ProxySpec.toJavaProxy(): Proxy {
     val type = when (kind) {
         ProxyKind.SOCKS5 -> Proxy.Type.SOCKS
