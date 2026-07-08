@@ -1502,10 +1502,15 @@ public object FfiConverterTypeWgCore: FfiConverter<WgCore, Pointer> {
 
 data class TransportHealth (
     /**
-     * For phase 1, "handshake" == listener is up. WG handshake fields arrive in phase 2.
+     * In WgThenSocks mode this is the real WireGuard handshake state; in
+     * Direct/SocksUpstream it means the local SOCKS5 listener is up.
      */
     var `handshakeOk`: kotlin.Boolean, 
     var `localSocksPort`: kotlin.UShort?, 
+    /**
+     * Unix epoch seconds of the last completed WG handshake (WgThenSocks only).
+     */
+    var `lastHandshakeEpoch`: kotlin.Long?, 
     var `rttMs`: kotlin.Long?
 ) {
     
@@ -1521,18 +1526,21 @@ public object FfiConverterTypeTransportHealth: FfiConverterRustBuffer<TransportH
             FfiConverterBoolean.read(buf),
             FfiConverterOptionalUShort.read(buf),
             FfiConverterOptionalLong.read(buf),
+            FfiConverterOptionalLong.read(buf),
         )
     }
 
     override fun allocationSize(value: TransportHealth) = (
             FfiConverterBoolean.allocationSize(value.`handshakeOk`) +
             FfiConverterOptionalUShort.allocationSize(value.`localSocksPort`) +
+            FfiConverterOptionalLong.allocationSize(value.`lastHandshakeEpoch`) +
             FfiConverterOptionalLong.allocationSize(value.`rttMs`)
     )
 
     override fun write(value: TransportHealth, buf: ByteBuffer) {
             FfiConverterBoolean.write(value.`handshakeOk`, buf)
             FfiConverterOptionalUShort.write(value.`localSocksPort`, buf)
+            FfiConverterOptionalLong.write(value.`lastHandshakeEpoch`, buf)
             FfiConverterOptionalLong.write(value.`rttMs`, buf)
     }
 }
@@ -1562,6 +1570,28 @@ sealed class CoreConfig {
         companion object
     }
     
+    /**
+     * Primary accelerated path (Transport §2.1): build a userspace WireGuard
+     * tunnel to `endpoint`, then chain to the in-tunnel upstream SOCKS5. Keys are
+     * standard WireGuard base64; `interface_addresses` are the tunnel-interior
+     * CIDRs (e.g. "10.0.0.2/32"). `endpoint` is host:port — a domain is resolved
+     * once, directly, at start (the WG endpoint is public and reachable without
+     * the tunnel; everything past it rides encrypted).
+     */
+    data class WgThenSocks(
+        val `privateKey`: kotlin.String, 
+        val `peerPublicKey`: kotlin.String, 
+        val `presharedKey`: kotlin.String?, 
+        val `endpoint`: kotlin.String, 
+        val `interfaceAddresses`: List<kotlin.String>, 
+        val `keepaliveSecs`: kotlin.UShort, 
+        val `upstreamHost`: kotlin.String, 
+        val `upstreamPort`: kotlin.UShort, 
+        val `upstreamUsername`: kotlin.String?, 
+        val `upstreamPassword`: kotlin.String?) : CoreConfig() {
+        companion object
+    }
+    
 
     
     companion object
@@ -1575,6 +1605,18 @@ public object FfiConverterTypeCoreConfig : FfiConverterRustBuffer<CoreConfig>{
         return when(buf.getInt()) {
             1 -> CoreConfig.Direct
             2 -> CoreConfig.SocksUpstream(
+                FfiConverterString.read(buf),
+                FfiConverterUShort.read(buf),
+                FfiConverterOptionalString.read(buf),
+                FfiConverterOptionalString.read(buf),
+                )
+            3 -> CoreConfig.WgThenSocks(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterOptionalString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterSequenceString.read(buf),
+                FfiConverterUShort.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterUShort.read(buf),
                 FfiConverterOptionalString.read(buf),
@@ -1601,6 +1643,22 @@ public object FfiConverterTypeCoreConfig : FfiConverterRustBuffer<CoreConfig>{
                 + FfiConverterOptionalString.allocationSize(value.`password`)
             )
         }
+        is CoreConfig.WgThenSocks -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`privateKey`)
+                + FfiConverterString.allocationSize(value.`peerPublicKey`)
+                + FfiConverterOptionalString.allocationSize(value.`presharedKey`)
+                + FfiConverterString.allocationSize(value.`endpoint`)
+                + FfiConverterSequenceString.allocationSize(value.`interfaceAddresses`)
+                + FfiConverterUShort.allocationSize(value.`keepaliveSecs`)
+                + FfiConverterString.allocationSize(value.`upstreamHost`)
+                + FfiConverterUShort.allocationSize(value.`upstreamPort`)
+                + FfiConverterOptionalString.allocationSize(value.`upstreamUsername`)
+                + FfiConverterOptionalString.allocationSize(value.`upstreamPassword`)
+            )
+        }
     }
 
     override fun write(value: CoreConfig, buf: ByteBuffer) {
@@ -1615,6 +1673,20 @@ public object FfiConverterTypeCoreConfig : FfiConverterRustBuffer<CoreConfig>{
                 FfiConverterUShort.write(value.`port`, buf)
                 FfiConverterOptionalString.write(value.`username`, buf)
                 FfiConverterOptionalString.write(value.`password`, buf)
+                Unit
+            }
+            is CoreConfig.WgThenSocks -> {
+                buf.putInt(3)
+                FfiConverterString.write(value.`privateKey`, buf)
+                FfiConverterString.write(value.`peerPublicKey`, buf)
+                FfiConverterOptionalString.write(value.`presharedKey`, buf)
+                FfiConverterString.write(value.`endpoint`, buf)
+                FfiConverterSequenceString.write(value.`interfaceAddresses`, buf)
+                FfiConverterUShort.write(value.`keepaliveSecs`, buf)
+                FfiConverterString.write(value.`upstreamHost`, buf)
+                FfiConverterUShort.write(value.`upstreamPort`, buf)
+                FfiConverterOptionalString.write(value.`upstreamUsername`, buf)
+                FfiConverterOptionalString.write(value.`upstreamPassword`, buf)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
@@ -1676,6 +1748,22 @@ sealed class TransportException: kotlin.Exception() {
             get() = ""
     }
     
+    class WgConfig(
+        
+        val `msg`: kotlin.String
+        ) : TransportException() {
+        override val message
+            get() = "msg=${ `msg` }"
+    }
+    
+    class WgStart(
+        
+        val `msg`: kotlin.String
+        ) : TransportException() {
+        override val message
+            get() = "msg=${ `msg` }"
+    }
+    
     class Unimplemented(
         
         val `what`: kotlin.String
@@ -1704,7 +1792,13 @@ public object FfiConverterTypeTransportError : FfiConverterRustBuffer<TransportE
                 FfiConverterString.read(buf),
                 )
             2 -> TransportException.AlreadyRunning()
-            3 -> TransportException.Unimplemented(
+            3 -> TransportException.WgConfig(
+                FfiConverterString.read(buf),
+                )
+            4 -> TransportException.WgStart(
+                FfiConverterString.read(buf),
+                )
+            5 -> TransportException.Unimplemented(
                 FfiConverterString.read(buf),
                 )
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
@@ -1721,6 +1815,16 @@ public object FfiConverterTypeTransportError : FfiConverterRustBuffer<TransportE
             is TransportException.AlreadyRunning -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
+            )
+            is TransportException.WgConfig -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`msg`)
+            )
+            is TransportException.WgStart -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`msg`)
             )
             is TransportException.Unimplemented -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
@@ -1741,8 +1845,18 @@ public object FfiConverterTypeTransportError : FfiConverterRustBuffer<TransportE
                 buf.putInt(2)
                 Unit
             }
-            is TransportException.Unimplemented -> {
+            is TransportException.WgConfig -> {
                 buf.putInt(3)
+                FfiConverterString.write(value.`msg`, buf)
+                Unit
+            }
+            is TransportException.WgStart -> {
+                buf.putInt(4)
+                FfiConverterString.write(value.`msg`, buf)
+                Unit
+            }
+            is TransportException.Unimplemented -> {
+                buf.putInt(5)
                 FfiConverterString.write(value.`what`, buf)
                 Unit
             }
@@ -1930,6 +2044,34 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
         } else {
             buf.put(1)
             FfiConverterString.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.String>> {
+    override fun read(buf: ByteBuffer): List<kotlin.String> {
+        val len = buf.getInt()
+        return List<kotlin.String>(len) {
+            FfiConverterString.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<kotlin.String>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterString.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<kotlin.String>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterString.write(it, buf)
         }
     }
 }

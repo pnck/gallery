@@ -9,10 +9,14 @@
 //! boringtun+smoltcp WireGuard tunnel (`WgThenSocks`) without changing this surface.
 
 mod socks;
+mod wg;
 
+use std::net::ToSocketAddrs;
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
+
+use wg::{WgParams, WgTunnel};
 
 uniffi::setup_scaffolding!();
 
@@ -24,7 +28,24 @@ pub enum CoreConfig {
     /// Chain every CONNECT to an upstream SOCKS5, preserving the hostname so DNS
     /// resolves at the upstream (remote DNS, Transport Design §4.2).
     SocksUpstream { host: String, port: u16, username: Option<String>, password: Option<String> },
-    // WgThenSocks { wg: WgParams, upstream_host: String, upstream_port: u16 } — phase 2 (T-502).
+    /// Primary accelerated path (Transport §2.1): build a userspace WireGuard
+    /// tunnel to `endpoint`, then chain to the in-tunnel upstream SOCKS5. Keys are
+    /// standard WireGuard base64; `interface_addresses` are the tunnel-interior
+    /// CIDRs (e.g. "10.0.0.2/32"). `endpoint` is host:port — a domain is resolved
+    /// once, directly, at start (the WG endpoint is public and reachable without
+    /// the tunnel; everything past it rides encrypted).
+    WgThenSocks {
+        private_key: String,
+        peer_public_key: String,
+        preshared_key: Option<String>,
+        endpoint: String,
+        interface_addresses: Vec<String>,
+        keepalive_secs: u16,
+        upstream_host: String,
+        upstream_port: u16,
+        upstream_username: Option<String>,
+        upstream_password: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -38,9 +59,12 @@ pub enum CoreState {
 
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct TransportHealth {
-    /// For phase 1, "handshake" == listener is up. WG handshake fields arrive in phase 2.
+    /// In WgThenSocks mode this is the real WireGuard handshake state; in
+    /// Direct/SocksUpstream it means the local SOCKS5 listener is up.
     pub handshake_ok: bool,
     pub local_socks_port: Option<u16>,
+    /// Unix epoch seconds of the last completed WG handshake (WgThenSocks only).
+    pub last_handshake_epoch: Option<i64>,
     pub rtt_ms: Option<i64>,
 }
 
@@ -50,6 +74,10 @@ pub enum TransportError {
     Bind { msg: String },
     #[error("core already running")]
     AlreadyRunning,
+    #[error("invalid WireGuard config: {msg}")]
+    WgConfig { msg: String },
+    #[error("failed to start WireGuard tunnel: {msg}")]
+    WgStart { msg: String },
     #[error("not yet implemented: {what}")]
     Unimplemented { what: String },
 }
@@ -72,6 +100,9 @@ pub struct WgCore {
 struct CoreInner {
     running: bool,
     listener_thread: Option<JoinHandle<()>>,
+    /// Present only in WgThenSocks mode; kept alive for the session and consulted
+    /// by `health()`. Dropping it stops the WG driver thread.
+    tunnel: Option<Arc<WgTunnel>>,
 }
 
 #[uniffi::export]
@@ -79,7 +110,7 @@ impl WgCore {
     #[uniffi::constructor]
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
-            inner: Mutex::new(CoreInner { running: false, listener_thread: None }),
+            inner: Mutex::new(CoreInner { running: false, listener_thread: None, tunnel: None }),
             shutdown: Arc::new(AtomicBool::new(false)),
             port: Arc::new(AtomicU16::new(0)),
             callback: Mutex::new(None),
@@ -96,7 +127,49 @@ impl WgCore {
         self.emit(CoreState::Starting);
         self.shutdown.store(false, Ordering::SeqCst);
 
-        let dialer = socks::Dialer::from_config(&config);
+        // WgThenSocks needs the live tunnel woven into the dialer; every other mode
+        // maps straight from the config.
+        let dialer = match &config {
+            CoreConfig::WgThenSocks {
+                private_key,
+                peer_public_key,
+                preshared_key,
+                endpoint,
+                interface_addresses,
+                keepalive_secs,
+                upstream_host,
+                upstream_port,
+                upstream_username,
+                upstream_password,
+            } => {
+                let resolved = resolve_endpoint(endpoint)
+                    .map_err(|msg| TransportError::WgConfig { msg })?;
+                let params = WgParams::parse(
+                    private_key,
+                    peer_public_key,
+                    preshared_key.as_deref(),
+                    &resolved,
+                    interface_addresses,
+                    *keepalive_secs,
+                )
+                .map_err(|msg| TransportError::WgConfig { msg })?;
+                let tunnel = Arc::new(
+                    WgTunnel::start(params).map_err(|e| TransportError::WgStart { msg: e.to_string() })?,
+                );
+                inner.tunnel = Some(Arc::clone(&tunnel));
+                socks::Dialer::WgThenSocks {
+                    tunnel,
+                    host: upstream_host.clone(),
+                    port: *upstream_port,
+                    auth: match (upstream_username, upstream_password) {
+                        (Some(u), Some(p)) => Some((u.clone(), p.clone())),
+                        _ => None,
+                    },
+                }
+            }
+            _ => socks::Dialer::from_config(&config),
+        };
+
         let listener = socks::bind_loopback().map_err(|e| TransportError::Bind { msg: e.to_string() })?;
         let bound_port = listener.local_addr().map(|a| a.port()).unwrap_or(0);
         self.port.store(bound_port, Ordering::SeqCst);
@@ -120,10 +193,17 @@ impl WgCore {
     }
 
     pub fn health(&self) -> TransportHealth {
-        let running = self.inner.lock().unwrap().running;
+        let inner = self.inner.lock().unwrap();
+        // In WgThenSocks mode "handshake_ok" reflects the real WireGuard handshake;
+        // in Direct/SocksUpstream it means the local listener is up.
+        let (handshake_ok, last_handshake_epoch) = match &inner.tunnel {
+            Some(t) => (t.handshake_ok(), t.last_handshake_epoch()),
+            None => (inner.running, None),
+        };
         TransportHealth {
-            handshake_ok: running,
+            handshake_ok,
             local_socks_port: self.local_socks_port(),
+            last_handshake_epoch,
             rtt_ms: None,
         }
     }
@@ -140,6 +220,8 @@ impl WgCore {
             inner = self.inner.lock().unwrap();
         }
         inner.running = false;
+        // Dropping the tunnel signals its driver thread to shut down.
+        inner.tunnel = None;
         self.port.store(0, Ordering::SeqCst);
         drop(inner);
         self.emit(CoreState::Stopped);
@@ -155,5 +237,18 @@ impl WgCore {
         if let Some(cb) = self.callback.lock().unwrap().as_ref() {
             cb.on_state(state);
         }
+    }
+}
+
+/// Resolve a `host:port` WireGuard endpoint to an `ip:port` literal. The WG
+/// endpoint is public and reachable without the tunnel, so this direct DNS
+/// lookup does not leak the accelerated traffic (Transport §2.1).
+fn resolve_endpoint(endpoint: &str) -> Result<String, String> {
+    let mut it = endpoint
+        .to_socket_addrs()
+        .map_err(|e| format!("cannot resolve endpoint '{endpoint}': {e}"))?;
+    match it.next() {
+        Some(addr) => Ok(addr.to_string()),
+        None => Err(format!("endpoint '{endpoint}' resolved to no addresses")),
     }
 }

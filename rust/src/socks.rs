@@ -1,8 +1,13 @@
 //! Minimal SOCKS5 inbound + outbound dialer (RFC 1928), std-only.
 //!
 //! Inbound: no-auth SOCKS5 accepting CONNECT to IPv4 / IPv6 / domain targets.
-//! Outbound: Direct dial, or chain to an upstream SOCKS5 preserving the hostname
-//! so DNS resolves at the far end (remote DNS, Transport Design §4.2).
+//! Outbound: Direct dial, a chain to an upstream SOCKS5, or (phase 2) that same
+//! upstream SOCKS5 reached *through* the userspace WireGuard tunnel. The hostname
+//! is preserved end-to-end so DNS resolves at the far end (remote DNS, §4.2).
+//!
+//! The outbound connection is abstracted as a [`Conn`] (Read + Write + a
+//! TcpStream-like clone) so the SOCKS5 client handshake and the bidirectional
+//! splice work identically over a real socket or a tunnel-backed stream.
 
 use crate::CoreConfig;
 use std::io::{self, Read, Write};
@@ -10,6 +15,8 @@ use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+
+use crate::wg::WgTunnel;
 
 const VER: u8 = 0x05;
 const CMD_CONNECT: u8 = 0x01;
@@ -21,37 +28,98 @@ const REP_GENERAL_FAIL: u8 = 0x01;
 
 /// Target address, kept as sent (domains are NOT resolved locally).
 #[derive(Clone, Debug)]
-enum Target {
+pub enum Target {
     Ip(std::net::IpAddr, u16),
     Domain(String, u16),
+}
+
+/// A duplex byte stream that can be split into two owned halves for the splice
+/// loop — mirroring [`TcpStream::try_clone`]. Implemented by real sockets and by
+/// the WireGuard tunnel stream.
+pub trait Conn: Read + Write + Send {
+    fn try_clone_box(&self) -> io::Result<Box<dyn Conn>>;
+    /// Half-close the write direction (SOCKS splice signals EOF this way).
+    fn shutdown_write(&self);
+}
+
+impl Conn for TcpStream {
+    fn try_clone_box(&self) -> io::Result<Box<dyn Conn>> {
+        Ok(Box::new(self.try_clone()?))
+    }
+    fn shutdown_write(&self) {
+        let _ = self.shutdown(std::net::Shutdown::Write);
+    }
 }
 
 #[derive(Clone)]
 pub enum Dialer {
     Direct,
-    Socks { host: String, port: u16, auth: Option<(String, String)> },
+    Socks {
+        host: String,
+        port: u16,
+        auth: Option<(String, String)>,
+    },
+    /// Reach the upstream SOCKS5 through the WireGuard tunnel (phase 2, T-502).
+    WgThenSocks {
+        tunnel: Arc<WgTunnel>,
+        host: String,
+        port: u16,
+        auth: Option<(String, String)>,
+    },
 }
 
 impl Dialer {
     pub fn from_config(config: &CoreConfig) -> Dialer {
         match config {
             CoreConfig::Direct => Dialer::Direct,
-            CoreConfig::SocksUpstream { host, port, username, password } => Dialer::Socks {
+            CoreConfig::SocksUpstream {
+                host,
+                port,
+                username,
+                password,
+            } => Dialer::Socks {
                 host: host.clone(),
                 port: *port,
-                auth: match (username, password) {
-                    (Some(u), Some(p)) => Some((u.clone(), p.clone())),
-                    _ => None,
-                },
+                auth: pair(username, password),
             },
+            // WgThenSocks is assembled in WgCore::start (it needs the live tunnel);
+            // it never arrives here as a bare config.
+            CoreConfig::WgThenSocks { .. } => Dialer::Direct,
         }
     }
 
-    fn dial(&self, target: &Target) -> io::Result<TcpStream> {
+    fn dial(&self, target: &Target) -> io::Result<Box<dyn Conn>> {
         match self {
-            Dialer::Direct => dial_direct(target),
-            Dialer::Socks { host, port, auth } => dial_via_socks(host, *port, auth.as_ref(), target),
+            Dialer::Direct => Ok(Box::new(dial_direct(target)?)),
+            Dialer::Socks { host, port, auth } => {
+                let mut up = TcpStream::connect((host.as_str(), *port))?;
+                up.set_nodelay(true).ok();
+                up.set_read_timeout(Some(Duration::from_secs(30)))?;
+                socks5_client_handshake(&mut up, auth.as_ref(), target)?;
+                // Handshake done; the persistent splice must not time out on idle.
+                up.set_read_timeout(None).ok();
+                Ok(Box::new(up))
+            }
+            Dialer::WgThenSocks {
+                tunnel,
+                host,
+                port,
+                auth,
+            } => {
+                // Dial the upstream SOCKS5's IP:port *inside* the tunnel, then run
+                // the identical SOCKS5 client handshake over the tunnel stream.
+                let mut up = tunnel.dial(host, *port)?;
+                socks5_client_handshake(&mut up, auth.as_ref(), target)?;
+                Ok(Box::new(up))
+            }
         }
+    }
+}
+
+fn pair(u: &Option<String>, p: &Option<String>) -> Option<(String, String)> {
+    match (u, p) {
+        (Some(u), Some(p)) => Some((u.clone(), p.clone())),
+        _ => None,
     }
 }
 
@@ -116,7 +184,9 @@ fn handle_client(mut client: TcpStream, dialer: &Dialer) -> io::Result<()> {
     match dialer.dial(&target) {
         Ok(upstream) => {
             reply(&mut client, REP_OK)?;
-            splice(client, upstream)
+            // Clear the handshake-phase timeout for the long-lived splice.
+            client.set_read_timeout(None).ok();
+            splice(Box::new(client), upstream)
         }
         Err(e) => {
             let _ = reply(&mut client, REP_GENERAL_FAIL);
@@ -180,17 +250,13 @@ fn dial_direct(target: &Target) -> io::Result<TcpStream> {
     Ok(stream)
 }
 
-/// Chain to an upstream SOCKS5, forwarding the target verbatim (remote DNS).
-fn dial_via_socks(
-    host: &str,
-    port: u16,
+/// Run the SOCKS5 client handshake against an upstream over any duplex stream,
+/// forwarding `target` verbatim so DNS resolves at the upstream (remote DNS).
+pub fn socks5_client_handshake<S: Read + Write>(
+    up: &mut S,
     auth: Option<&(String, String)>,
     target: &Target,
-) -> io::Result<TcpStream> {
-    let mut up = TcpStream::connect((host, port))?;
-    up.set_nodelay(true).ok();
-    up.set_read_timeout(Some(Duration::from_secs(30)))?;
-
+) -> io::Result<()> {
     // Greeting: offer no-auth (0x00) and, if configured, user/pass (0x02).
     if auth.is_some() {
         up.write_all(&[VER, 0x02, 0x00, 0x02])?;
@@ -217,10 +283,18 @@ fn dial_via_socks(
             let mut st = [0u8; 2];
             up.read_exact(&mut st)?;
             if st[1] != 0x00 {
-                return Err(io::Error::new(io::ErrorKind::PermissionDenied, "upstream auth failed"));
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "upstream auth failed",
+                ));
             }
         }
-        _ => return Err(io::Error::new(io::ErrorKind::PermissionDenied, "no acceptable auth")),
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "no acceptable auth",
+            ))
+        }
     }
 
     // CONNECT, preserving hostname for remote DNS.
@@ -249,7 +323,10 @@ fn dial_via_socks(
     let mut rhead = [0u8; 4];
     up.read_exact(&mut rhead)?;
     if rhead[1] != REP_OK {
-        return Err(io::Error::new(io::ErrorKind::ConnectionRefused, "upstream CONNECT failed"));
+        return Err(io::Error::new(
+            io::ErrorKind::ConnectionRefused,
+            "upstream CONNECT failed",
+        ));
     }
     let skip = match rhead[3] {
         ATYP_IPV4 => 4,
@@ -263,21 +340,21 @@ fn dial_via_socks(
     };
     let mut discard = vec![0u8; skip + 2];
     up.read_exact(&mut discard)?;
-    Ok(up)
+    Ok(())
 }
 
 /// Bidirectional copy between client and upstream until either side closes.
-fn splice(client: TcpStream, upstream: TcpStream) -> io::Result<()> {
-    let c2 = client.try_clone()?;
-    let u2 = upstream.try_clone()?;
-    let t = std::thread::spawn(move || copy_half(client, upstream));
-    copy_half(u2, c2)?;
+fn splice(client: Box<dyn Conn>, upstream: Box<dyn Conn>) -> io::Result<()> {
+    let client_rd = client.try_clone_box()?;
+    let upstream_rd = upstream.try_clone_box()?;
+    // client -> upstream on a worker thread; upstream -> client on this one.
+    let t = std::thread::spawn(move || copy_half(client_rd, upstream));
+    copy_half(upstream_rd, client)?;
     let _ = t.join();
     Ok(())
 }
 
-fn copy_half(mut from: TcpStream, mut to: TcpStream) -> io::Result<()> {
-    from.set_read_timeout(None).ok();
+fn copy_half(mut from: Box<dyn Conn>, mut to: Box<dyn Conn>) -> io::Result<()> {
     let mut buf = [0u8; 16 * 1024];
     loop {
         let n = match from.read(&mut buf) {
@@ -288,6 +365,6 @@ fn copy_half(mut from: TcpStream, mut to: TcpStream) -> io::Result<()> {
         };
         to.write_all(&buf[..n])?;
     }
-    let _ = to.shutdown(std::net::Shutdown::Write);
+    to.shutdown_write();
     Ok(())
 }

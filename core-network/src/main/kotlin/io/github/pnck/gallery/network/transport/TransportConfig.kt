@@ -15,6 +15,8 @@ data class WgConfig(
     val peerPublicKey: String,
     val presharedKey: String?,
     val endpoint: Endpoint,
+    /** The tunnel-interior interface address(es), e.g. "10.0.0.2/32" (wg-quick `Address`). */
+    val interfaceAddresses: List<String>,
     val allowedIps: List<String>,
     val dns: List<String>,
     val persistentKeepaliveSeconds: Int = 25,

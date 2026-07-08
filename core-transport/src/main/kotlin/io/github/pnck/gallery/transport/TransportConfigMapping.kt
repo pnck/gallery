@@ -7,14 +7,10 @@ import uniffi.gallery_transport.CoreConfig
  * Maps the Kotlin [TransportConfig] (Transport §3.1) onto the Rust core's
  * [CoreConfig] FFI enum.
  *
- * Phase 1 of the Rust core (this build) implements only Direct dialing and an
- * upstream-SOCKS5 chain. The remaining modes surface as explicit failures rather
- * than silently degrading:
- *  - [TransportConfig.HttpOnly] — the core speaks SOCKS5 upstream only; an HTTP
- *    CONNECT proxy chain is not implemented (and is a non-goal for the accelerator).
- *  - [TransportConfig.WgThenSocks] — needs the userspace WireGuard tunnel (T-502
- *    phase 2). Until boringtun+smoltcp land, requesting it is a hard error so the
- *    UI never believes it is tunneling when it is not.
+ * The Rust core implements Direct dialing, an upstream-SOCKS5 chain, and the full
+ * WgThenSocks path (boringtun+smoltcp, T-502). Only [TransportConfig.HttpOnly]
+ * surfaces as an explicit failure: the core speaks SOCKS5 upstream only, and an
+ * HTTP CONNECT proxy chain is a non-goal for the accelerator.
  */
 internal fun TransportConfig.toCoreConfig(): CoreConfig = when (this) {
     is TransportConfig.Direct -> CoreConfig.Direct
@@ -31,8 +27,19 @@ internal fun TransportConfig.toCoreConfig(): CoreConfig = when (this) {
             "HttpOnly transport is not supported by the Rust core (SOCKS5 upstream only).",
         )
 
-    is TransportConfig.WgThenSocks ->
-        throw UnsupportedOperationException(
-            "WgThenSocks requires the userspace WireGuard tunnel (T-502 phase 2), not yet built.",
-        )
+    is TransportConfig.WgThenSocks -> CoreConfig.WgThenSocks(
+        privateKey = wg.privateKey,
+        peerPublicKey = wg.peerPublicKey,
+        presharedKey = wg.presharedKey,
+        // The core resolves a domain endpoint once, directly, at start.
+        endpoint = "${wg.endpoint.host}:${wg.endpoint.port}",
+        interfaceAddresses = wg.interfaceAddresses,
+        keepaliveSecs = wg.persistentKeepaliveSeconds.toUShort(),
+        upstreamHost = upstreamSocks.host,
+        upstreamPort = upstreamSocks.port.toUShort(),
+        // Upstream SOCKS auth is not modelled on WgThenSocks yet (LAN accelerator
+        // is typically unauthenticated); wire it here when TransportConfig grows it.
+        upstreamUsername = null,
+        upstreamPassword = null,
+    )
 }
