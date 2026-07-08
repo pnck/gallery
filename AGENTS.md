@@ -30,15 +30,20 @@ When a request conflicts with the PRD, say so and ask — don't silently deviate
 ## Module map & dependency rules (hard constraints)
 
 ```
-:app          → :core-data, :core-provider, :core-network, :core-domain   (Android, Compose+Hilt)
+:app          → :core-data, :core-provider, :core-network, :core-transport, :core-domain  (Android, Compose+Hilt)
 :core-data    → :core-domain, :core-provider                              (Android: Room/MediaStore/WorkManager)
 :core-provider→ :core-network                                             (minimal Android: AppAuth Context)
+:core-transport→ :core-network                                            (Android: Rust .so via UniFFI/JNA — EPIC-5)
 :core-network → (nothing internal)                                        (pure Kotlin JVM)
 :core-domain  → (nothing internal)                                        (pure Kotlin JVM)
 ```
 
 - Never add an Android dependency to `:core-domain` or `:core-network` — they must stay
-  JVM-pure (future KMP `commonMain`).
+  JVM-pure (future KMP `commonMain`). `:core-transport` is Android-only by design (it
+  loads the native `.so`); nothing depends on it except `:app`'s DI, so invariant #8 holds.
+- `:core-transport` holds the Rust core (`rust/`), the checked-in UniFFI bindings
+  (`src/main/uniffi`, regenerate with `regen-bindings.sh` — never hand-edit), and the
+  cargo-ndk `.so` build (gated behind `-Pgallery.buildRust=true`; CI-only, see ADR-0002).
 - Hilt/DI wiring lives in `:app/di` only. Core modules use plain constructor injection.
 - The UI may only consume `TimelinePhoto` (domain). DTOs (`provider/dto`) and Room entities
   never cross their module boundary.

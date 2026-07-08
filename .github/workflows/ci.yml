@@ -33,9 +33,57 @@ jobs:
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
 
+      # ── Rust transport core (EPIC-5). The runner is x86_64, so unlike the arm64
+      # dev container the Android NDK toolchains are native and cargo-ndk works. ──
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('rust/Cargo.toml', 'rust/src/**') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --version ^3 --locked
+
+      - name: Set up Android NDK
+        id: ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27c
+          local-cache: true
+
+      # The checked-in UniFFI Kotlin bindings must never drift from the Rust FFI
+      # surface. Regenerate from a host build and fail if they differ.
+      - name: Verify UniFFI bindings are up to date
+        run: |
+          bash core-transport/regen-bindings.sh
+          git diff --exit-code core-transport/src/main/uniffi \
+            || { echo "::error::UniFFI bindings are stale — run core-transport/regen-bindings.sh and commit."; exit 1; }
+
       # `build` = assemble + check: unit tests for all modules + Android Lint.
+      # -Pgallery.buildRust=true wires cargo-ndk into the Android build so the
+      # transport .so is cross-compiled and packaged per ABI.
       - name: Build
-        run: ./gradlew build --stacktrace
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+        run: ./gradlew build -Pgallery.buildRust=true --stacktrace
+
+      # Fail loudly if the transport core .so didn't make it into the APK — a
+      # silently-missing lib would only surface as a runtime UnsatisfiedLinkError.
+      - name: Verify transport .so is packaged
+        run: |
+          apk=app/build/outputs/apk/debug/app-debug.apk
+          echo "ABIs carrying libgallery_transport.so:"
+          unzip -l "$apk" | grep 'libgallery_transport.so' || {
+            echo "::error::libgallery_transport.so missing from $apk"; exit 1; }
 
       - name: Upload lint & test reports
         if: failure()

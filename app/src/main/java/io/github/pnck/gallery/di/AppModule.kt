@@ -20,6 +20,10 @@ import io.github.pnck.gallery.data.sync.UploadBatchProcessor
 import io.github.pnck.gallery.domain.PhotoRepository
 import io.github.pnck.gallery.network.SharedHttpClient
 import io.github.pnck.gallery.network.transport.OutboundRouter
+import io.github.pnck.gallery.transport.TransportController
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import io.github.pnck.gallery.provider.AuthManager
 import io.github.pnck.gallery.provider.GoogleDriveProvider
 import io.github.pnck.gallery.provider.ICloudStorageProvider
@@ -62,12 +66,19 @@ object AppModule {
     // ── Network (insertion layer + shared client, PRD §8) ─────────────────
 
     /**
-     * Identity router = true direct connection. EPIC-5 swaps this binding for
-     * the NetworkTransport implementation — nothing else in the graph changes.
+     * The transport controller owns the (optional) active NetworkTransport and a
+     * stable [OutboundRouter]. Off by default → its router returns null → NO_PROXY,
+     * i.e. byte-for-byte "never integrated" (invariant #8). A settings action can
+     * later call TransportController.connect without rebuilding the HTTP client.
      */
     @Provides
     @Singleton
-    fun provideOutboundRouter(): OutboundRouter = OutboundRouter.IDENTITY
+    fun provideTransportController(): TransportController =
+        TransportController(CoroutineScope(SupervisorJob() + Dispatchers.Default))
+
+    @Provides
+    @Singleton
+    fun provideOutboundRouter(controller: TransportController): OutboundRouter = controller.router
 
     @Provides
     @Singleton

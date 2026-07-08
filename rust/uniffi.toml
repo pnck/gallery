@@ -1,0 +1,9 @@
+# UniFFI Kotlin binding config (consumed by uniffi-bindgen; ADR-0002).
+#
+# android = true makes the generated cleaner use android.system.SystemCleaner
+# (API 33+) guarded by Build.VERSION.SDK_INT, falling back to JNA's cleaner on
+# older devices. The default (non-android) codegen probes java.lang.ref.Cleaner
+# via Class.forName, which is correct at runtime but trips Android Lint's NewApi
+# on minSdk 26. The android variant uses guards lint understands.
+[bindings.kotlin]
+android = true

@@ -15,6 +15,7 @@ navigationCompose = "2.9.8"
 # lifecycle 2.11 / core 1.19 require AGP 9.1 / compileSdk 37 — bump with the AGP 9 migration
 lifecycle = "2.10.0"
 coreKtx = "1.18.0"
+annotation = "1.9.1"
 coil = "3.5.0"
 telephoto = "0.19.0"
 retrofit = "3.0.0"
@@ -27,6 +28,9 @@ work = "2.11.2"
 securityCrypto = "1.1.0"
 datastorePreferences = "1.2.1"
 coroutines = "1.11.0"
+# JNA is the runtime UniFFI Kotlin bindings use to reach the Rust .so (ADR-0002).
+# On Android it MUST be the @aar variant so JNA's own per-ABI .so is bundled.
+jna = "5.14.0"
 junit = "4.13.2"
 turbine = "1.2.1"
 
@@ -38,6 +42,7 @@ kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-cor
 
 # AndroidX core
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+androidx-annotation = { group = "androidx.annotation", name = "annotation", version.ref = "annotation" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
 androidx-lifecycle-viewmodel-compose = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-compose", version.ref = "lifecycle" }
 androidx-lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "lifecycle" }
@@ -91,6 +96,9 @@ appauth = { group = "net.openid", name = "appauth", version.ref = "appauth" }
 coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref = "coil" }
 coil-network-okhttp = { group = "io.coil-kt.coil3", name = "coil-network-okhttp", version.ref = "coil" }
 telephoto-zoomable-coil3 = { group = "me.saket.telephoto", name = "zoomable-image-coil3", version.ref = "telephoto" }
+
+# Transport (UniFFI runtime)
+jna = { group = "net.java.dev.jna", name = "jna", version.ref = "jna" }
 
 # Test
 junit = { group = "junit", name = "junit", version.ref = "junit" }

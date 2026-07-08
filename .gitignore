@@ -46,3 +46,6 @@ claude-code.yml
 
 # Rust
 rust/target/
+
+# Rust .so built by cargo-ndk (a build artifact; produced fresh in CI per ABI)
+core-transport/src/main/jniLibs/

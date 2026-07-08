@@ -78,6 +78,7 @@ dependencies {
     implementation(project(":core-data"))
     implementation(project(":core-provider"))
     implementation(project(":core-network"))
+    implementation(project(":core-transport"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
