@@ -72,6 +72,18 @@ jobs:
           git diff --exit-code core-transport/src/main/uniffi \
             || { echo "::error::UniFFI bindings are stale — run core-transport/regen-bindings.sh and commit."; exit 1; }
 
+      # Surface whether the OAuth client id was injected, WITHOUT printing its value
+      # — a stale/misnamed secret otherwise fails silently (green build, can't sign in).
+      - name: Check OAuth client id is injected
+        env:
+          CID: ${{ secrets.GALLERY_GOOGLE_CLIENT_ID }}
+        run: |
+          if [ -z "$CID" ]; then
+            echo "::warning::GALLERY_GOOGLE_CLIENT_ID is empty — the APK will build but cannot sign in."
+          else
+            echo "OAuth client id present (length ${#CID})."
+          fi
+
       # `build` = assemble + check: unit tests for all modules + Android Lint.
       # -Pgallery.buildRust=true wires cargo-ndk into the Android build so the
       # transport .so is cross-compiled and packaged per ABI. The OAuth client id/
