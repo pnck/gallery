@@ -586,6 +586,20 @@ impl Driver {
                     self.last_handshake_epoch.store(secs, Ordering::SeqCst);
                 }
             }
+
+            // 9. Reap fully-closed connections so long sessions don't accumulate
+            //    smoltcp sockets (each holds 128 KiB of buffers).
+            conns.retain(|shared| {
+                let g = shared.inner.lock().unwrap();
+                let drained = g.recv_finished && g.app_write_closed && g.to_socket.is_empty();
+                drop(g);
+                if drained && sockets.get::<tcp::Socket>(shared.handle).state() == tcp::State::Closed {
+                    sockets.remove(shared.handle);
+                    false
+                } else {
+                    true
+                }
+            });
         }
     }
 

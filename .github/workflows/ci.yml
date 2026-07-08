@@ -53,12 +53,16 @@ jobs:
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --version ^3 --locked
 
-      - name: Set up Android NDK
-        id: ndk
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: r27c
-          local-cache: true
+      # Use the NDK preinstalled on the runner image (a complete llvm toolchain
+      # boringtun/ring can compile against). The nttld/setup-ndk r27c package ships
+      # without the clang symlink `ring`'s build script expects, so we avoid it.
+      - name: Select Android NDK
+        run: |
+          ndk="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_ROOT}"
+          test -x "$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" \
+            || { echo "::error::no usable NDK clang under $ndk"; exit 1; }
+          echo "ANDROID_NDK_HOME=$ndk" >> "$GITHUB_ENV"
+          echo "Using NDK at $ndk"
 
       # The checked-in UniFFI Kotlin bindings must never drift from the Rust FFI
       # surface. Regenerate from a host build and fail if they differ.
@@ -72,8 +76,6 @@ jobs:
       # -Pgallery.buildRust=true wires cargo-ndk into the Android build so the
       # transport .so is cross-compiled and packaged per ABI.
       - name: Build
-        env:
-          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
         run: ./gradlew build -Pgallery.buildRust=true --stacktrace
 
       # Fail loudly if the transport core .so didn't make it into the APK — a
