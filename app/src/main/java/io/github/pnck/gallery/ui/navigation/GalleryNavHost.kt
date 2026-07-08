@@ -8,12 +8,14 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import io.github.pnck.gallery.ui.detail.PhotoDetailScreen
 import io.github.pnck.gallery.ui.settings.SettingsScreen
+import io.github.pnck.gallery.ui.settings.TransportScreen
 import io.github.pnck.gallery.ui.timeline.TimelineScreen
 
-/** Three-screen NavHost (PRD §9.1): timeline / photo detail / settings. */
+/** NavHost (PRD §9.1): timeline / photo detail / settings, plus the transport debug screen. */
 object Routes {
     const val TIMELINE = "timeline"
     const val SETTINGS = "settings"
+    const val TRANSPORT = "transport"
     const val PHOTO_DETAIL = "photo/{photoId}"
 
     fun photoDetail(photoId: String) = "photo/$photoId"
@@ -40,7 +42,13 @@ fun GalleryNavHost() {
             )
         }
         composable(Routes.SETTINGS) {
-            SettingsScreen(onBack = { navController.popBackStack() })
+            SettingsScreen(
+                onBack = { navController.popBackStack() },
+                onTransportClick = { navController.navigate(Routes.TRANSPORT) },
+            )
+        }
+        composable(Routes.TRANSPORT) {
+            TransportScreen(onBack = { navController.popBackStack() })
         }
     }
 }

@@ -40,6 +40,7 @@ import io.github.pnck.gallery.R
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
+    onTransportClick: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
@@ -127,6 +128,7 @@ fun SettingsScreen(
             )
             HorizontalDivider()
             ListItem(
+                modifier = Modifier.clickable(onClick = onTransportClick),
                 headlineContent = { Text(stringResource(R.string.settings_transport)) },
                 supportingContent = { Text(stringResource(R.string.settings_transport_hint)) },
             )

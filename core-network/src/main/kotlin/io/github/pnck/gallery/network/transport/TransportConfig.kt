@@ -34,5 +34,7 @@ sealed interface TransportConfig {
     data class WgThenSocks(
         val wg: WgConfig,
         val upstreamSocks: Endpoint,
+        /** Optional auth for the in-tunnel upstream SOCKS5 (RFC 1929). */
+        val upstreamAuth: Cred? = null,
     ) : TransportConfig
 }

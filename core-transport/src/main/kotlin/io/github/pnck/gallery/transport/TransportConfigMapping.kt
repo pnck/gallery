@@ -37,9 +37,7 @@ internal fun TransportConfig.toCoreConfig(): CoreConfig = when (this) {
         keepaliveSecs = wg.persistentKeepaliveSeconds.toUShort(),
         upstreamHost = upstreamSocks.host,
         upstreamPort = upstreamSocks.port.toUShort(),
-        // Upstream SOCKS auth is not modelled on WgThenSocks yet (LAN accelerator
-        // is typically unauthenticated); wire it here when TransportConfig grows it.
-        upstreamUsername = null,
-        upstreamPassword = null,
+        upstreamUsername = upstreamAuth?.username,
+        upstreamPassword = upstreamAuth?.password,
     )
 }

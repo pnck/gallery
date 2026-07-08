@@ -74,9 +74,15 @@ jobs:
 
       # `build` = assemble + check: unit tests for all modules + Android Lint.
       # -Pgallery.buildRust=true wires cargo-ndk into the Android build so the
-      # transport .so is cross-compiled and packaged per ABI.
+      # transport .so is cross-compiled and packaged per ABI. The OAuth client id/
+      # secret come from repo secrets (empty if unset — the APK then builds but
+      # cannot sign in; provide them to produce a login-capable artifact).
       - name: Build
-        run: ./gradlew build -Pgallery.buildRust=true --stacktrace
+        run: >-
+          ./gradlew build -Pgallery.buildRust=true
+          -PGALLERY_GOOGLE_CLIENT_ID=${{ secrets.GALLERY_GOOGLE_CLIENT_ID }}
+          -PGALLERY_GOOGLE_CLIENT_SECRET=${{ secrets.GALLERY_GOOGLE_CLIENT_SECRET }}
+          --stacktrace
 
       # Fail loudly if the transport core .so didn't make it into the APK — a
       # silently-missing lib would only surface as a runtime UnsatisfiedLinkError.
