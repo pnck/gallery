@@ -745,11 +745,53 @@ impl Driver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use smoltcp::iface::{Config, Interface, SocketSet};
+    use smoltcp::socket::tcp;
+    use smoltcp::wire::{HardwareAddress, IpAddress, IpCidr, IpEndpoint};
 
     fn keypair() -> (StaticSecret, PublicKey) {
         let sk = StaticSecret::random_from_rng(rand::rngs::OsRng);
         let pk = PublicKey::from(&sk);
         (sk, pk)
+    }
+
+    /// The tunnel interface is e.g. 10.94.1.5/32 but the upstream SOCKS (and any
+    /// service) can live on a DIFFERENT remote subnet (192.168.94.x) reached
+    /// through the WG peer. Confirm smoltcp actually routes such off-link targets
+    /// out the device (i.e. into the tunnel) rather than dropping them.
+    #[test]
+    fn routes_offlink_remote_subnet_through_the_tunnel_device() {
+        let mut device = TunDevice::new();
+        let mut config = Config::new(HardwareAddress::Ip);
+        config.random_seed = 1;
+        let mut iface = Interface::new(config, &mut device, SmolInstant::from_millis(0));
+
+        let ifaddr: std::net::Ipv4Addr = "10.94.1.5".parse().unwrap();
+        iface.update_ip_addrs(|a| {
+            let _ = a.push(IpCidr::new(IpAddress::from(ifaddr), 32));
+        });
+        if let IpAddress::Ipv4(gw) = IpAddress::from(ifaddr) {
+            let _ = iface.routes_mut().add_default_ipv4_route(gw);
+        }
+
+        let mut sockets = SocketSet::new(Vec::new());
+        let rx = tcp::SocketBuffer::new(vec![0u8; 4096]);
+        let tx = tcp::SocketBuffer::new(vec![0u8; 4096]);
+        let mut sock = tcp::Socket::new(rx, tx);
+        let target: std::net::Ipv4Addr = "192.168.94.10".parse().unwrap();
+        sock.connect(iface.context(), IpEndpoint::new(IpAddress::from(target), 1080), 49152)
+            .expect("connect should be accepted");
+        let _h = sockets.add(sock);
+
+        for i in 0..8 {
+            iface.poll(SmolInstant::from_millis(i * 10), &mut device, &mut sockets);
+        }
+
+        let dsts: Vec<String> = device.outbound.iter().map(|p| ip_dst(p)).collect();
+        assert!(
+            dsts.iter().any(|d| d == "192.168.94.10"),
+            "expected a SYN routed to the off-link target through the device; got {dsts:?}",
+        );
     }
 
     /// Drive two Tunns against each other purely in memory and confirm a WireGuard
