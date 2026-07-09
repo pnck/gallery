@@ -77,6 +77,7 @@ fun TransportScreen(
     var endpoint by rememberSaveable { mutableStateOf("") }
     var srvName by rememberSaveable { mutableStateOf("") }
     var interfaceAddress by rememberSaveable { mutableStateOf("10.0.0.2/32") }
+    var dns by rememberSaveable { mutableStateOf("") }
     var keepalive by rememberSaveable { mutableStateOf("25") }
     var socksHost by rememberSaveable { mutableStateOf("") }
     var socksPort by rememberSaveable { mutableStateOf("1080") }
@@ -90,7 +91,7 @@ fun TransportScreen(
             wgEnabled = f.wgEnabled; socksEnabled = f.socksEnabled
             privateKey = f.privateKey; publicKey = s.publicKey; peerPublicKey = f.peerPublicKey
             presharedKey = f.presharedKey; useSrv = f.useSrv; endpoint = f.endpoint; srvName = f.srvName
-            interfaceAddress = f.interfaceAddress; keepalive = f.keepaliveSecs
+            interfaceAddress = f.interfaceAddress; dns = f.dns; keepalive = f.keepaliveSecs
             socksHost = f.socksHost; socksPort = f.socksPort; socksUser = f.socksUser; socksPass = f.socksPass
         }
     }
@@ -99,7 +100,7 @@ fun TransportScreen(
         wgEnabled = wgEnabled, socksEnabled = socksEnabled,
         privateKey = privateKey, peerPublicKey = peerPublicKey, presharedKey = presharedKey,
         useSrv = useSrv, endpoint = endpoint, srvName = srvName,
-        interfaceAddress = interfaceAddress, keepaliveSecs = keepalive,
+        interfaceAddress = interfaceAddress, dns = dns, keepaliveSecs = keepalive,
         socksHost = socksHost, socksPort = socksPort, socksUser = socksUser, socksPass = socksPass,
     )
 
@@ -174,6 +175,13 @@ fun TransportScreen(
                 }
 
                 field(interfaceAddress, { interfaceAddress = it }, "Interface address (e.g. 10.0.0.2/32)")
+                field(dns, { dns = it }, "DNS servers (WgOnly, comma-separated, e.g. 10.0.0.1)")
+                Text(
+                    "Used only in WG-only mode to resolve names over the tunnel. " +
+                        "Empty → local resolver (leaks DNS). WG+SOCKS resolves at the SOCKS exit.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 field(keepalive, { keepalive = it }, "Keepalive seconds", number = true)
             }
 

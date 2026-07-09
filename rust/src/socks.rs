@@ -94,9 +94,20 @@ impl Dialer {
         match self {
             Dialer::Direct => Ok(Box::new(dial_direct(target)?)),
             Dialer::WgDirect { tunnel } => {
-                // No SOCKS layer to preserve the hostname, so resolve domains
-                // locally (DNS leak) and connect to the IP through the tunnel.
-                let (ip, port) = resolve_for_tunnel(target)?;
+                // Resolve the target through the tunnel using the WG-configured DNS
+                // (no DNS leak). Fall back to a local lookup only if no DNS servers
+                // were configured. IP-literal targets need no resolution.
+                let (ip, port) = match target {
+                    Target::Ip(ip, port) => (*ip, *port),
+                    Target::Domain(host, port) => {
+                        let ip = if tunnel.has_dns() {
+                            tunnel.resolve(host)?
+                        } else {
+                            resolve_for_tunnel(target)?.0
+                        };
+                        (ip, *port)
+                    }
+                };
                 Ok(Box::new(tunnel.dial(&ip.to_string(), port)?))
             }
             Dialer::Socks { host, port, auth } => {

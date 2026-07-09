@@ -32,9 +32,9 @@ use boringtun::noise::{Tunn, TunnResult};
 use boringtun::x25519::{PublicKey, StaticSecret};
 use smoltcp::iface::{Config, Interface, SocketHandle, SocketSet};
 use smoltcp::phy::{Device, DeviceCapabilities, Medium};
-use smoltcp::socket::tcp;
+use smoltcp::socket::{dns, tcp};
 use smoltcp::time::Instant as SmolInstant;
-use smoltcp::wire::{HardwareAddress, IpAddress, IpCidr, IpEndpoint};
+use smoltcp::wire::{DnsQueryType, HardwareAddress, IpAddress, IpCidr, IpEndpoint};
 
 use crate::socks::Conn;
 
@@ -57,6 +57,9 @@ pub struct WgParams {
     pub endpoint: SocketAddr,
     /// The tunnel-interior interface address(es), e.g. 10.0.0.2/32.
     pub interface_addrs: Vec<IpCidr>,
+    /// WG-configured DNS servers (wg-quick `[Interface] DNS`); resolved over the
+    /// tunnel. Empty → fall back to the phone's local resolver (with a DNS leak).
+    pub dns_servers: Vec<IpAddress>,
     pub keepalive_secs: Option<u16>,
 }
 
@@ -68,6 +71,7 @@ impl WgParams {
         preshared_key_b64: Option<&str>,
         endpoint: &str,
         interface_addrs: &[String],
+        dns: &[String],
         keepalive_secs: u16,
     ) -> Result<WgParams, String> {
         let sk = decode_key(private_key_b64).map_err(|e| format!("private_key: {e}"))?;
@@ -86,12 +90,23 @@ impl WgParams {
         if addrs.is_empty() {
             return Err("interface address required (e.g. 10.0.0.2/32)".into());
         }
+        let dns_servers = dns
+            .iter()
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| {
+                s.trim()
+                    .parse::<IpAddr>()
+                    .map(IpAddress::from)
+                    .map_err(|_| format!("bad DNS server '{s}'"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(WgParams {
             private_key: StaticSecret::from(sk),
             peer_public_key: PublicKey::from(pk),
             preshared_key: psk,
             endpoint,
             interface_addrs: addrs,
+            dns_servers,
             keepalive_secs: if keepalive_secs == 0 { None } else { Some(keepalive_secs) },
         })
     }
@@ -236,12 +251,18 @@ enum Command {
         addr: IpEndpoint,
         reply: Sender<io::Result<Arc<ConnShared>>>,
     },
+    /// Resolve a hostname over the tunnel using the WG-configured DNS servers.
+    Resolve {
+        host: String,
+        reply: Sender<io::Result<IpAddr>>,
+    },
     Shutdown,
 }
 
 /// Handle to the running tunnel. Cloneable; the last drop stops the driver.
 pub struct WgTunnel {
     cmd: Sender<Command>,
+    has_dns: bool,
     handshake_ok: Arc<AtomicBool>,
     last_handshake_epoch: Arc<AtomicI64>,
     tx_bytes: Arc<AtomicU64>,
@@ -258,6 +279,7 @@ impl WgTunnel {
         udp.set_read_timeout(Some(TICK))?;
 
         let (cmd_tx, cmd_rx) = mpsc::channel::<Command>();
+        let has_dns = !params.dns_servers.is_empty();
         let handshake_ok = Arc::new(AtomicBool::new(false));
         let last_handshake_epoch = Arc::new(AtomicI64::new(0));
         let tx_bytes = Arc::new(AtomicU64::new(0));
@@ -279,6 +301,7 @@ impl WgTunnel {
 
         Ok(WgTunnel {
             cmd: cmd_tx,
+            has_dns,
             handshake_ok,
             last_handshake_epoch,
             tx_bytes,
@@ -313,6 +336,21 @@ impl WgTunnel {
         Ok(stream)
     }
 
+    /// Whether WG-configured DNS servers are available for in-tunnel resolution.
+    pub fn has_dns(&self) -> bool {
+        self.has_dns
+    }
+
+    /// Resolve `host` to an IP using the WG-configured DNS servers, over the tunnel.
+    pub fn resolve(&self, host: &str) -> io::Result<IpAddr> {
+        let (tx, rx) = mpsc::channel();
+        self.cmd
+            .send(Command::Resolve { host: host.to_string(), reply: tx })
+            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "tunnel driver stopped"))?;
+        rx.recv_timeout(Duration::from_secs(10))
+            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "in-tunnel DNS timed out"))?
+    }
+
     pub fn handshake_ok(&self) -> bool {
         self.handshake_ok.load(Ordering::SeqCst)
     }
@@ -341,6 +379,11 @@ impl Drop for WgTunnel {
         self.stopped.store(true, Ordering::SeqCst);
         let _ = self.cmd.send(Command::Shutdown);
     }
+}
+
+/// smoltcp IP address → std IP address (they share `core::net` underneath).
+fn ip_to_std(addr: IpAddress) -> IpAddr {
+    IpAddr::from(addr)
 }
 
 /// Human-readable destination address of a raw IPv4/IPv6 packet, for tracing.
@@ -513,6 +556,17 @@ impl Driver {
         let mut next_local_port: u16 = 49152;
         let mut scratch = [0u8; SCRATCH];
 
+        // In-tunnel DNS: a smoltcp DNS socket querying the WG-configured servers.
+        let dns_handle: Option<SocketHandle> = if params.dns_servers.is_empty() {
+            None
+        } else {
+            let queries: Vec<Option<dns::DnsQuery>> = (0..4).map(|_| None).collect();
+            let sock = dns::Socket::new(&params.dns_servers, queries);
+            Some(sockets.add(sock))
+        };
+        // Pending resolutions awaiting a smoltcp DNS answer.
+        let mut dns_pending: Vec<(dns::QueryHandle, StdInstant, Sender<io::Result<IpAddr>>)> = Vec::new();
+
         // WireGuard is lazy: without traffic it never initiates the first handshake,
         // so the peer would never see us. Proactively initiate now (and re-initiate
         // below until established), like a normal client with persistent keepalive.
@@ -548,6 +602,29 @@ impl Driver {
                             }
                         }
                     }
+                    Command::Resolve { host, reply } => match dns_handle {
+                        Some(h) => {
+                            let sock = sockets.get_mut::<dns::Socket>(h);
+                            match sock.start_query(iface.context(), &host, DnsQueryType::A) {
+                                Ok(q) => {
+                                    log::debug!("wg: in-tunnel DNS query for {host}");
+                                    dns_pending.push((q, StdInstant::now(), reply));
+                                }
+                                Err(e) => {
+                                    let _ = reply.send(Err(io::Error::new(
+                                        io::ErrorKind::Other,
+                                        format!("DNS query failed: {e:?}"),
+                                    )));
+                                }
+                            }
+                        }
+                        None => {
+                            let _ = reply.send(Err(io::Error::new(
+                                io::ErrorKind::Unsupported,
+                                "no WG DNS servers configured",
+                            )));
+                        }
+                    },
                 }
             }
 
@@ -574,6 +651,39 @@ impl Driver {
             // 3. Poll the netstack (drives TCP state machines; fills device.outbound).
             let now = SmolInstant::from_micros(smol_start.elapsed().as_micros() as i64);
             iface.poll(now, &mut device, &mut sockets);
+
+            // 3b. Complete in-tunnel DNS queries (or time them out).
+            if let Some(h) = dns_handle {
+                let sock = sockets.get_mut::<dns::Socket>(h);
+                dns_pending.retain(|(q, started, reply)| match sock.get_query_result(*q) {
+                    Ok(addrs) => {
+                        let result = addrs
+                            .first()
+                            .map(|a| ip_to_std(*a))
+                            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no DNS answer"));
+                        let _ = reply.send(result);
+                        false
+                    }
+                    Err(dns::GetQueryResultError::Pending) => {
+                        if started.elapsed() >= Duration::from_secs(8) {
+                            let _ = reply.send(Err(io::Error::new(
+                                io::ErrorKind::TimedOut,
+                                "in-tunnel DNS timed out",
+                            )));
+                            false
+                        } else {
+                            true
+                        }
+                    }
+                    Err(_) => {
+                        let _ = reply.send(Err(io::Error::new(
+                            io::ErrorKind::Other,
+                            "in-tunnel DNS query failed",
+                        )));
+                        false
+                    }
+                });
+            }
 
             // 4. Socket → app: pull decoded bytes out to app read buffers; update state.
             for shared in &conns {
@@ -863,13 +973,13 @@ mod tests {
         // Both keys decode to 32 bytes and the pair round-trips through parse().
         assert_eq!(decode_key(&kp.private_key).unwrap().len(), 32);
         assert_eq!(decode_key(&kp.public_key).unwrap().len(), 32);
-        WgParams::parse(&kp.private_key, &kp.public_key, None, "1.2.3.4:51820", &["10.0.0.2/32".into()], 25)
+        WgParams::parse(&kp.private_key, &kp.public_key, None, "1.2.3.4:51820", &["10.0.0.2/32".into()], &[], 25)
             .expect("generated keys should parse");
     }
 
     #[test]
     fn parse_rejects_bad_key() {
-        assert!(WgParams::parse("not-base64!!", "AAAA", None, "1.2.3.4:51820", &["10.0.0.2/32".into()], 25).is_err());
+        assert!(WgParams::parse("not-base64!!", "AAAA", None, "1.2.3.4:51820", &["10.0.0.2/32".into()], &[], 25).is_err());
     }
 
     #[test]
@@ -878,7 +988,7 @@ mod tests {
         let (_, pk) = keypair();
         let sk_b64 = base64::engine::general_purpose::STANDARD.encode(sk.to_bytes());
         let pk_b64 = base64::engine::general_purpose::STANDARD.encode(pk.to_bytes());
-        let p = WgParams::parse(&sk_b64, &pk_b64, None, "10.0.0.1:51820", &["10.0.0.2/32".into()], 25)
+        let p = WgParams::parse(&sk_b64, &pk_b64, None, "10.0.0.1:51820", &["10.0.0.2/32".into()], &[], 25)
             .expect("valid config should parse");
         assert_eq!(p.endpoint.port(), 51820);
         assert_eq!(p.keepalive_secs, Some(25));

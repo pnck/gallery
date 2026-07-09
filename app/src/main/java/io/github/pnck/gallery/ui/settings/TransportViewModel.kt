@@ -40,6 +40,7 @@ data class TransportForm(
     val endpoint: String,
     val srvName: String,
     val interfaceAddress: String,
+    val dns: String,
     val keepaliveSecs: String,
     val socksHost: String,
     val socksPort: String,
@@ -195,7 +196,8 @@ class TransportViewModel @Inject constructor(
             endpoint = resolved,
             interfaceAddresses = listOf(interfaceAddress.trim()),
             allowedIps = listOf("0.0.0.0/0"),
-            dns = emptyList(),
+            // WG-configured DNS (used for in-tunnel resolution in WgOnly mode).
+            dns = dns.split(Regex("[,\\s]+")).map { it.trim() }.filter { it.isNotBlank() },
             persistentKeepaliveSeconds = keepaliveSecs.trim().toIntOrNull() ?: 25,
         )
     }

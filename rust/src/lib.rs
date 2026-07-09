@@ -32,6 +32,9 @@ pub struct WgSettings {
     pub preshared_key: Option<String>,
     pub endpoint: String,
     pub interface_addresses: Vec<String>,
+    /// WG-configured DNS servers (wg-quick `[Interface] DNS`), resolved over the
+    /// tunnel in WgOnly mode. Empty → local resolver fallback (leaks DNS).
+    pub dns: Vec<String>,
     pub keepalive_secs: u16,
 }
 
@@ -291,6 +294,7 @@ fn start_tunnel(wg: &WgSettings) -> Result<Arc<WgTunnel>, TransportError> {
         wg.preshared_key.as_deref(),
         &resolved,
         &wg.interface_addresses,
+        &wg.dns,
         wg.keepalive_secs,
     )
     .map_err(|msg| TransportError::WgConfig { msg })?;

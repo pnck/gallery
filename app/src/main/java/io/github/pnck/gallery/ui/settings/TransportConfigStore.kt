@@ -47,6 +47,7 @@ class TransportConfigStore @Inject constructor(
             endpoint = prefs.getString(ENDPOINT, "").orEmpty(),
             srvName = prefs.getString(SRV_NAME, "").orEmpty(),
             interfaceAddress = prefs.getString(INTERFACE_ADDRESS, "10.0.0.2/32").orEmpty(),
+            dns = prefs.getString(DNS, "").orEmpty(),
             keepaliveSecs = prefs.getString(KEEPALIVE, "25").orEmpty(),
             socksHost = prefs.getString(SOCKS_HOST, "").orEmpty(),
             socksPort = prefs.getString(SOCKS_PORT, "1080").orEmpty(),
@@ -68,6 +69,7 @@ class TransportConfigStore @Inject constructor(
             .putString(ENDPOINT, form.endpoint)
             .putString(SRV_NAME, form.srvName)
             .putString(INTERFACE_ADDRESS, form.interfaceAddress)
+            .putString(DNS, form.dns)
             .putString(KEEPALIVE, form.keepaliveSecs)
             .putString(SOCKS_HOST, form.socksHost)
             .putString(SOCKS_PORT, form.socksPort)
@@ -87,6 +89,7 @@ class TransportConfigStore @Inject constructor(
         const val ENDPOINT = "endpoint"
         const val SRV_NAME = "srv_name"
         const val INTERFACE_ADDRESS = "interface_address"
+        const val DNS = "dns"
         const val KEEPALIVE = "keepalive"
         const val SOCKS_HOST = "socks_host"
         const val SOCKS_PORT = "socks_port"

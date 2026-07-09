@@ -46,5 +46,6 @@ private fun WgConfig.toWgSettings(): WgSettings = WgSettings(
     // The core resolves a domain endpoint once, directly, at start.
     endpoint = "${endpoint.host}:${endpoint.port}",
     interfaceAddresses = interfaceAddresses,
+    dns = dns,
     keepaliveSecs = persistentKeepaliveSeconds.toUShort(),
 )

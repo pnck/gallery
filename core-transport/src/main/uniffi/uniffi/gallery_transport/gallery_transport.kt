@@ -1603,6 +1603,11 @@ data class WgSettings (
     var `presharedKey`: kotlin.String?, 
     var `endpoint`: kotlin.String, 
     var `interfaceAddresses`: List<kotlin.String>, 
+    /**
+     * WG-configured DNS servers (wg-quick `[Interface] DNS`), resolved over the
+     * tunnel in WgOnly mode. Empty → local resolver fallback (leaks DNS).
+     */
+    var `dns`: List<kotlin.String>, 
     var `keepaliveSecs`: kotlin.UShort
 ) {
     
@@ -1620,6 +1625,7 @@ public object FfiConverterTypeWgSettings: FfiConverterRustBuffer<WgSettings> {
             FfiConverterOptionalString.read(buf),
             FfiConverterString.read(buf),
             FfiConverterSequenceString.read(buf),
+            FfiConverterSequenceString.read(buf),
             FfiConverterUShort.read(buf),
         )
     }
@@ -1630,6 +1636,7 @@ public object FfiConverterTypeWgSettings: FfiConverterRustBuffer<WgSettings> {
             FfiConverterOptionalString.allocationSize(value.`presharedKey`) +
             FfiConverterString.allocationSize(value.`endpoint`) +
             FfiConverterSequenceString.allocationSize(value.`interfaceAddresses`) +
+            FfiConverterSequenceString.allocationSize(value.`dns`) +
             FfiConverterUShort.allocationSize(value.`keepaliveSecs`)
     )
 
@@ -1639,6 +1646,7 @@ public object FfiConverterTypeWgSettings: FfiConverterRustBuffer<WgSettings> {
             FfiConverterOptionalString.write(value.`presharedKey`, buf)
             FfiConverterString.write(value.`endpoint`, buf)
             FfiConverterSequenceString.write(value.`interfaceAddresses`, buf)
+            FfiConverterSequenceString.write(value.`dns`, buf)
             FfiConverterUShort.write(value.`keepaliveSecs`, buf)
     }
 }

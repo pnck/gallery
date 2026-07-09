@@ -31,6 +31,10 @@ smoltcp = { version = "0.13", default-features = false, features = [
     "proto-ipv4",
     "proto-ipv6",
     "socket-tcp",
+    # In-tunnel DNS (WgOnly resolves via the WG-configured DNS over the tunnel,
+    # not the phone's local resolver — no DNS leak).
+    "socket-udp",
+    "socket-dns",
     # Route smoltcp's internal routing/dispatch traces through `log` → logcat,
     # so "can't reach X" issues (rejected routes, unreachable) are observable.
     "log",
