@@ -8,6 +8,7 @@ import io.github.pnck.gallery.network.transport.Endpoint
 import io.github.pnck.gallery.network.transport.TransportConfig
 import io.github.pnck.gallery.network.transport.TransportState
 import io.github.pnck.gallery.network.transport.WgConfig
+import io.github.pnck.gallery.discovery.SrvEndpointResolver
 import io.github.pnck.gallery.transport.TransportController
 import io.github.pnck.gallery.transport.WgKeypair
 import io.github.pnck.gallery.transport.WireguardTools
@@ -29,7 +30,10 @@ data class TransportForm(
     val privateKey: String,
     val peerPublicKey: String,
     val presharedKey: String,
+    /** When true, [srvName] is resolved via SRV/DoH; otherwise [endpoint] is used verbatim. */
+    val useSrv: Boolean,
     val endpoint: String,
+    val srvName: String,
     val interfaceAddress: String,
     val keepaliveSecs: String,
     val socksHost: String,
@@ -48,6 +52,7 @@ data class TransportForm(
 class TransportViewModel @Inject constructor(
     private val controller: TransportController,
     private val okHttpClient: OkHttpClient,
+    private val srvResolver: SrvEndpointResolver,
 ) : ViewModel() {
 
     val transportState: StateFlow<TransportState> =
@@ -64,14 +69,15 @@ class TransportViewModel @Inject constructor(
         }
     }
 
-    /** Build the config from the toggles + fields and connect. */
+    /** Build the config from the toggles + fields and connect. SRV endpoint
+     *  discovery (if enabled) is a network call, so building is done in the coroutine. */
     fun connect(form: TransportForm) {
-        val config = runCatching { form.toConfig() }.getOrElse {
-            _error.value = it.message ?: "invalid transport config"
-            return
-        }
         viewModelScope.launch {
             _error.value = null
+            val config = runCatching { form.toConfig() }.getOrElse {
+                _error.value = it.message ?: "invalid transport config"
+                return@launch
+            }
             runCatching { controller.connect(config) }
                 .onSuccess {
                     // Drop pooled sockets so live connections re-dial via the new
@@ -90,7 +96,7 @@ class TransportViewModel @Inject constructor(
         }
     }
 
-    private fun TransportForm.toConfig(): TransportConfig {
+    private suspend fun TransportForm.toConfig(): TransportConfig {
         val wg = if (wgEnabled) buildWg() else null
         val socks = if (socksEnabled) buildSocksEndpoint() else null
         val socksAuth = if (socksEnabled) socksCred() else null
@@ -102,16 +108,20 @@ class TransportViewModel @Inject constructor(
         }
     }
 
-    private fun TransportForm.buildWg(): WgConfig {
+    private suspend fun TransportForm.buildWg(): WgConfig {
         require(privateKey.isNotBlank()) { "WireGuard private key is required" }
         require(peerPublicKey.isNotBlank()) { "Peer public key is required" }
         require(interfaceAddress.isNotBlank()) { "Interface address is required (e.g. 10.0.0.2/32)" }
-        val (host, port) = splitHostPort(endpoint, "WireGuard endpoint")
+        // Endpoint comes either from a hand-typed host:port or a fresh SRV lookup.
+        val resolved: Endpoint = if (useSrv) srvResolver.resolve(srvName) else {
+            val (host, port) = splitHostPort(endpoint, "WireGuard endpoint")
+            Endpoint(host, port)
+        }
         return WgConfig(
             privateKey = privateKey.trim(),
             peerPublicKey = peerPublicKey.trim(),
             presharedKey = presharedKey.trim().ifBlank { null },
-            endpoint = Endpoint(host, port),
+            endpoint = resolved,
             interfaceAddresses = listOf(interfaceAddress.trim()),
             allowedIps = listOf("0.0.0.0/0"),
             dns = emptyList(),

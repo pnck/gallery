@@ -115,4 +115,6 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    // Real org.json for local unit tests (the framework's is a throwing stub).
+    testImplementation(libs.org.json)
 }

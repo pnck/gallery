@@ -62,7 +62,9 @@ fun TransportScreen(
     var publicKey by rememberSaveable { mutableStateOf("") } // derived, shown to copy to the peer
     var peerPublicKey by rememberSaveable { mutableStateOf("") }
     var presharedKey by rememberSaveable { mutableStateOf("") }
+    var useSrv by rememberSaveable { mutableStateOf(false) }
     var endpoint by rememberSaveable { mutableStateOf("") }
+    var srvName by rememberSaveable { mutableStateOf("") }
     var interfaceAddress by rememberSaveable { mutableStateOf("10.0.0.2/32") }
     var keepalive by rememberSaveable { mutableStateOf("25") }
     var socksHost by rememberSaveable { mutableStateOf("") }
@@ -125,7 +127,21 @@ fun TransportScreen(
                 }
                 field(peerPublicKey, { peerPublicKey = it }, "Peer (server) public key (base64)")
                 field(presharedKey, { presharedKey = it }, "Preshared key (optional)")
-                field(endpoint, { endpoint = it }, "WG endpoint (host:port, e.g. vpn.example.com:51820)")
+
+                // Endpoint: hand-typed host:port, or "subscribed" from a DNS SRV
+                // record (re-resolved on every connect, so the server can move).
+                toggleRow("Endpoint from SRV record", useSrv) { useSrv = it }
+                if (useSrv) {
+                    field(srvName, { srvName = it }, "SRV name (e.g. _wireguard._udp.example.com)")
+                    Text(
+                        "Resolved fresh on each connect via DoH (dns.google / cloudflare).",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    field(endpoint, { endpoint = it }, "WG endpoint (host:port, e.g. vpn.example.com:51820)")
+                }
+
                 field(interfaceAddress, { interfaceAddress = it }, "Interface address (e.g. 10.0.0.2/32)")
                 field(keepalive, { keepalive = it }, "Keepalive seconds", number = true)
             }
@@ -156,7 +172,9 @@ fun TransportScreen(
                                 privateKey = privateKey,
                                 peerPublicKey = peerPublicKey,
                                 presharedKey = presharedKey,
+                                useSrv = useSrv,
                                 endpoint = endpoint,
+                                srvName = srvName,
                                 interfaceAddress = interfaceAddress,
                                 keepaliveSecs = keepalive,
                                 socksHost = socksHost,
