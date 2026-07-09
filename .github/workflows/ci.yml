@@ -92,6 +92,7 @@ jobs:
       - name: Build
         run: >-
           ./gradlew build -Pgallery.buildRust=true
+          -PGALLERY_VERSION_CODE=${{ github.run_number }}
           -PGALLERY_GOOGLE_CLIENT_ID=${{ secrets.GALLERY_GOOGLE_CLIENT_ID }}
           -PGALLERY_GOOGLE_CLIENT_SECRET=${{ secrets.GALLERY_GOOGLE_CLIENT_SECRET }}
           --stacktrace

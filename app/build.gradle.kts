@@ -11,14 +11,32 @@ android {
     namespace = "io.github.pnck.gallery"
     compileSdk = 36
 
+    // Fixed debug signing so every build (local AND CI) shares one key — otherwise
+    // AGP auto-generates a fresh debug keystore on each CI runner and installs fail
+    // with INSTALL_FAILED_UPDATE_INCOMPATIBLE. The debug keystore holds the well-
+    // known public debug credentials (android / androiddebugkey); it is NOT a
+    // release key and is safe to commit. Release signing is intentionally left
+    // unconfigured (add a real key out-of-repo before publishing).
+    signingConfigs {
+        getByName("debug") {
+            storeFile = rootProject.file("signing/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     defaultConfig {
         applicationId = "io.github.pnck.gallery"
         minSdk = 26
         // PRD §6.3 suggests 34; Google Play now requires >= 35 for new submissions,
         // and the permission matrix in §6.3 already covers API 34+ behavior.
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // Rolling version: CI passes -PGALLERY_VERSION_CODE=<github.run_number> so
+        // each artifact has a monotonically increasing code (installs upgrade cleanly
+        // now that the signature is stable); local builds default to 1.
+        versionCode = (providers.gradleProperty("GALLERY_VERSION_CODE").orNull ?: "1").toInt()
+        versionName = "0.1.0.${(providers.gradleProperty("GALLERY_VERSION_CODE").orNull ?: "1")}"
 
         // Device-flow OAuth (ADR-0001). Create a Google OAuth client of type
         // "TVs and Limited Input devices"; it has a client_secret (not a true

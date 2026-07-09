@@ -28,6 +28,9 @@ render.experimental.xml
 # Keystore files
 *.jks
 *.keystore
+# ...except the shared DEBUG keystore (public debug creds; keeps signatures stable
+# across local + CI so installs upgrade instead of failing UPDATE_INCOMPATIBLE).
+!signing/debug.keystore
 
 # Google Services (e.g. APIs or Firebase)
 google-services.json
