@@ -46,7 +46,7 @@ class TransportController(
     /** Start (or restart) the transport for [config]. Direct mode is a no-op router. */
     suspend fun connect(config: TransportConfig) {
         disconnect()
-        val transport = NativeNetworkTransport(config)
+        val transport = NativeNetworkTransport(config, scope)
         stateJob = scope.launch {
             transport.state.collect { _state.value = it }
         }

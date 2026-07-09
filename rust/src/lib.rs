@@ -73,6 +73,23 @@ pub fn generate_wireguard_keypair() -> WireguardKeypair {
     wg::generate_keypair()
 }
 
+/// Route `log` records to Android logcat under the `gallery-wg` tag, once.
+/// `adb logcat -s gallery-wg` shows the transport core's handshake progress.
+fn init_logging() {
+    #[cfg(target_os = "android")]
+    {
+        use std::sync::Once;
+        static INIT: Once = Once::new();
+        INIT.call_once(|| {
+            android_logger::init_once(
+                android_logger::Config::default()
+                    .with_tag("gallery-wg")
+                    .with_max_level(log::LevelFilter::Debug),
+            );
+        });
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum CoreState {
     Idle,
@@ -137,6 +154,7 @@ struct CoreInner {
 impl WgCore {
     #[uniffi::constructor]
     pub fn new() -> Arc<Self> {
+        init_logging();
         Arc::new(Self {
             inner: Mutex::new(CoreInner { running: false, listener_thread: None, tunnel: None }),
             shutdown: Arc::new(AtomicBool::new(false)),

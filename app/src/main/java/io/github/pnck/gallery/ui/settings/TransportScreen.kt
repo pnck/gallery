@@ -188,18 +188,20 @@ fun TransportScreen(
                 field(socksPass, { socksPass = it }, "SOCKS password (optional)", password = true)
             }
 
-            val connecting = state is TransportState.Connecting
             val connected = state is TransportState.Connected
+            // Connecting + Degraded both mean the tunnel is up and (re)trying.
+            val trying = state is TransportState.Connecting || state is TransportState.Degraded
+            val active = connected || trying
             Row(
                 Modifier.fillMaxWidth().padding(vertical = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Button(
                     onClick = { viewModel.connect(currentForm(), publicKey) },
-                    enabled = !connecting && !connected,
+                    enabled = !active,
                     modifier = Modifier.weight(1f),
                 ) {
-                    if (connecting) {
+                    if (trying) {
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                     } else {
                         Text(if (connected) "Connected" else "Connect")
@@ -207,7 +209,7 @@ fun TransportScreen(
                 }
                 OutlinedButton(
                     onClick = viewModel::disconnect,
-                    enabled = connected || connecting || state is TransportState.Failed,
+                    enabled = active || state is TransportState.Failed,
                     modifier = Modifier.weight(1f),
                 ) { Text("Disconnect") }
             }
@@ -251,6 +253,16 @@ private fun MonitorCard(state: TransportState, health: TransportHealth?, error: 
     Card(Modifier.fillMaxWidth().padding(top = 8.dp)) {
         Column(Modifier.padding(16.dp)) {
             Text(label, style = MaterialTheme.typography.titleMedium, color = labelColor)
+
+            // Show the actionable reason for degraded/failed states.
+            val reason = when (state) {
+                is TransportState.Degraded -> state.reason
+                is TransportState.Failed -> state.reason
+                else -> null
+            }
+            reason?.let {
+                Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
 
             if (state is TransportState.Connected) {
                 val port = (state as TransportState.Connected).localSocksPort

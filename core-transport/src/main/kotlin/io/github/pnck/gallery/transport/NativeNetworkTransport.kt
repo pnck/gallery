@@ -6,10 +6,15 @@ import io.github.pnck.gallery.network.transport.ProxySpec
 import io.github.pnck.gallery.network.transport.TransportConfig
 import io.github.pnck.gallery.network.transport.TransportHealth
 import io.github.pnck.gallery.network.transport.TransportState
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.gallery_transport.CoreState
 import uniffi.gallery_transport.StateCallback
@@ -30,12 +35,17 @@ import uniffi.gallery_transport.TransportHealth as CoreHealth
  */
 class NativeNetworkTransport(
     private val config: TransportConfig,
+    private val scope: CoroutineScope,
 ) : NetworkTransport {
 
     private val core: WgCore by lazy { WgCore() }
 
+    private val isWg = config is TransportConfig.WgThenSocks || config is TransportConfig.WgOnly
+
     private val _state = MutableStateFlow<TransportState>(TransportState.Disconnected)
     override val state: StateFlow<TransportState> = _state.asStateFlow()
+
+    private var handshakeJob: Job? = null
 
     /** Loopback SOCKS5 port; 0 when the core is down. Read on every proxyFor(). */
     @Volatile
@@ -64,7 +74,14 @@ class NativeNetworkTransport(
         try {
             val port = core.start(config.toCoreConfig()).toInt()
             localSocksPort = port
-            _state.value = TransportState.Connected(port, epochSeconds())
+            if (isWg) {
+                // core.start() only means the listener + WG driver are up — NOT that
+                // the tunnel handshaked. Stay Connecting and watch the real handshake.
+                monitorHandshake(port)
+            } else {
+                // Direct/SocksOnly have no handshake; the listener being up is "up".
+                _state.value = TransportState.Connected(port, epochSeconds())
+            }
         } catch (e: TransportException) {
             localSocksPort = 0
             _state.value = TransportState.Failed(e.message ?: "transport start failed", retryable = true)
@@ -72,7 +89,32 @@ class NativeNetworkTransport(
         }
     }
 
+    /** Poll the WG handshake and drive Connecting → Connected, with a helpful
+     *  Degraded reason if it stays down (keys / endpoint / peer misconfig). */
+    private fun monitorHandshake(port: Int) {
+        _state.value = TransportState.Connecting
+        handshakeJob?.cancel()
+        handshakeJob = scope.launch {
+            val startMs = System.currentTimeMillis()
+            while (isActive) {
+                val h = withContext(Dispatchers.IO) { core.health() }
+                val elapsed = System.currentTimeMillis() - startMs
+                _state.value = when {
+                    h.handshakeOk -> TransportState.Connected(port, h.lastHandshakeEpoch?.toLong() ?: epochSeconds())
+                    elapsed > HANDSHAKE_WARN_MS -> TransportState.Degraded(
+                        "No WireGuard handshake yet. Check: the server has YOUR public key as a peer, " +
+                            "the endpoint host:port is reachable, and the peer public key is correct.",
+                    )
+                    else -> TransportState.Connecting
+                }
+                delay(1_000)
+            }
+        }
+    }
+
     override suspend fun stop(): Unit = withContext(Dispatchers.IO) {
+        handshakeJob?.cancel()
+        handshakeJob = null
         core.stop()
         localSocksPort = 0
         _state.value = TransportState.Disconnected
@@ -96,5 +138,6 @@ class NativeNetworkTransport(
 
     private companion object {
         const val LOOPBACK = "127.0.0.1"
+        const val HANDSHAKE_WARN_MS = 12_000L
     }
 }

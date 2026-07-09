@@ -343,6 +343,21 @@ impl Drop for WgTunnel {
     }
 }
 
+/// Ask boringtun to (re)start the WireGuard handshake and send the initiation.
+/// `force_resend=false` makes it a no-op while an attempt is already in flight,
+/// so this is safe to call on a timer.
+fn initiate_handshake(tunn: &mut Tunn, udp: &UdpSocket, scratch: &mut [u8]) {
+    match tunn.format_handshake_initiation(scratch, false) {
+        TunnResult::WriteToNetwork(packet) => {
+            let _ = udp.send(packet);
+            log::debug!("wg: sent handshake initiation ({} bytes)", packet.len());
+        }
+        TunnResult::Done => {}
+        TunnResult::Err(e) => log::warn!("wg: handshake initiation error: {e:?}"),
+        _ => {}
+    }
+}
+
 // ── The application-facing blocking stream ───────────────────────────────────
 
 /// A blocking, TcpStream-like handle to one tunnelled TCP connection.
@@ -483,6 +498,14 @@ impl Driver {
         let mut next_local_port: u16 = 49152;
         let mut scratch = [0u8; SCRATCH];
 
+        // WireGuard is lazy: without traffic it never initiates the first handshake,
+        // so the peer would never see us. Proactively initiate now (and re-initiate
+        // below until established), like a normal client with persistent keepalive.
+        log::info!("wg: driver up, initiating handshake");
+        initiate_handshake(&mut tunn, &udp, &mut scratch);
+        let mut last_hs_attempt = StdInstant::now();
+        let mut established = false;
+
         loop {
             if self.stopped.load(Ordering::SeqCst) {
                 break;
@@ -610,6 +633,19 @@ impl Driver {
             self.rx_bytes.store(rx as u64, Ordering::SeqCst);
             let ok = since_handshake.is_some();
             self.handshake_ok.store(ok, Ordering::SeqCst);
+            // Log establish/lose transitions and keep re-initiating until up.
+            if ok && !established {
+                established = true;
+                log::info!("wg: handshake established");
+            } else if !ok && established {
+                established = false;
+                log::warn!("wg: handshake lost, re-initiating");
+            }
+            if !ok && last_hs_attempt.elapsed() >= Duration::from_secs(1) {
+                last_hs_attempt = StdInstant::now();
+                // No-op while an attempt is already in flight; resends after expiry.
+                initiate_handshake(&mut tunn, &udp, &mut scratch);
+            }
             if ok {
                 // Approximate wall-clock epoch of the last handshake.
                 if let Ok(now_sys) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
