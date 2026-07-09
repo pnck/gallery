@@ -10,15 +10,19 @@ import io.github.pnck.gallery.network.transport.TransportState
 import io.github.pnck.gallery.network.transport.WgConfig
 import io.github.pnck.gallery.discovery.SrvEndpointResolver
 import io.github.pnck.gallery.transport.TransportController
+import io.github.pnck.gallery.network.transport.TransportHealth
 import io.github.pnck.gallery.transport.WgKeypair
 import io.github.pnck.gallery.transport.WireguardTools
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -53,6 +57,7 @@ class TransportViewModel @Inject constructor(
     private val controller: TransportController,
     private val okHttpClient: OkHttpClient,
     private val srvResolver: SrvEndpointResolver,
+    private val configStore: TransportConfigStore,
 ) : ViewModel() {
 
     val transportState: StateFlow<TransportState> =
@@ -60,6 +65,45 @@ class TransportViewModel @Inject constructor(
 
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
+
+    /** Live health snapshot, refreshed ~1 Hz while connected (transfer bytes, handshake). */
+    private val _health = MutableStateFlow<TransportHealth?>(null)
+    val health: StateFlow<TransportHealth?> = _health.asStateFlow()
+
+    /** The persisted config to prefill the form with; null until loaded (off-main). */
+    private val _savedForm = MutableStateFlow<SavedTransport?>(null)
+    val savedForm: StateFlow<SavedTransport?> = _savedForm.asStateFlow()
+
+    private var pollJob: Job? = null
+
+    init {
+        // Load the saved config off the main thread (EncryptedSharedPreferences).
+        viewModelScope.launch {
+            _savedForm.value = withContext(Dispatchers.IO) { configStore.load() }
+        }
+        // Poll health only while connected; clear it otherwise.
+        viewModelScope.launch {
+            transportState.collect { st ->
+                if (st is TransportState.Connected) startPolling() else stopPolling()
+            }
+        }
+    }
+
+    private fun startPolling() {
+        if (pollJob?.isActive == true) return
+        pollJob = viewModelScope.launch {
+            while (isActive) {
+                _health.value = runCatching { controller.health() }.getOrNull()
+                delay(1_000)
+            }
+        }
+    }
+
+    private fun stopPolling() {
+        pollJob?.cancel()
+        pollJob = null
+        _health.value = null
+    }
 
     /** Generate a WireGuard keypair off the main thread and hand it back to the form. */
     fun generateKeypair(onGenerated: (WgKeypair) -> Unit) {
@@ -69,10 +113,12 @@ class TransportViewModel @Inject constructor(
         }
     }
 
-    /** Build the config from the toggles + fields and connect. SRV endpoint
-     *  discovery (if enabled) is a network call, so building is done in the coroutine. */
-    fun connect(form: TransportForm) {
+    /** Build the config from the toggles + fields and connect. The form is
+     *  persisted (encrypted) so it survives leaving the screen / restarts. SRV
+     *  endpoint discovery (if enabled) is a network call, done in the coroutine. */
+    fun connect(form: TransportForm, publicKey: String) {
         viewModelScope.launch {
+            withContext(Dispatchers.IO) { configStore.save(form, publicKey) }
             _error.value = null
             val config = runCatching { form.toConfig() }.getOrElse {
                 _error.value = it.message ?: "invalid transport config"

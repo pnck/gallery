@@ -17,8 +17,16 @@ sealed interface TransportState {
 /** What to do when the tunnel fails: block (default, avoids leaking intent) or go direct. */
 enum class FallbackPolicy { BLOCK, DIRECT }
 
+/**
+ * A point-in-time health snapshot, polled by the UI for live monitoring.
+ * Byte counters + handshake epoch are populated only for WireGuard modes.
+ */
 data class TransportHealth(
     val handshakeOk: Boolean,
     val rttMs: Long?,
     val viaTunnel: Boolean,
+    val lastHandshakeEpoch: Long? = null,
+    val txBytes: Long? = null,
+    val rxBytes: Long? = null,
+    val localSocksPort: Int? = null,
 )

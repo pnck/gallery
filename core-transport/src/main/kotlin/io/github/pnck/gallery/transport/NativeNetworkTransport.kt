@@ -83,9 +83,12 @@ class NativeNetworkTransport(
         TransportHealth(
             handshakeOk = h.handshakeOk,
             rttMs = h.rttMs,
-            // Phase 1: Direct/SocksOnly route through the local core but not a WG
-            // tunnel; only WgThenSocks (phase 2) rides an actual tunnel.
-            viaTunnel = config is TransportConfig.WgThenSocks,
+            // Only the WG modes ride an actual tunnel; Direct/SocksOnly do not.
+            viaTunnel = config is TransportConfig.WgThenSocks || config is TransportConfig.WgOnly,
+            lastHandshakeEpoch = h.lastHandshakeEpoch,
+            txBytes = h.txBytes?.toLong(),
+            rxBytes = h.rxBytes?.toLong(),
+            localSocksPort = h.localSocksPort?.toInt(),
         )
     }
 

@@ -88,8 +88,11 @@ pub struct TransportHealth {
     /// Direct/SocksUpstream it means the local SOCKS5 listener is up.
     pub handshake_ok: bool,
     pub local_socks_port: Option<u16>,
-    /// Unix epoch seconds of the last completed WG handshake (WgThenSocks only).
+    /// Unix epoch seconds of the last completed WG handshake (WG modes only).
     pub last_handshake_epoch: Option<i64>,
+    /// WireGuard data bytes sent / received through the tunnel (WG modes only).
+    pub tx_bytes: Option<u64>,
+    pub rx_bytes: Option<u64>,
     pub rtt_ms: Option<i64>,
 }
 
@@ -208,14 +211,21 @@ impl WgCore {
         let inner = self.inner.lock().unwrap();
         // In WgThenSocks mode "handshake_ok" reflects the real WireGuard handshake;
         // in Direct/SocksUpstream it means the local listener is up.
-        let (handshake_ok, last_handshake_epoch) = match &inner.tunnel {
-            Some(t) => (t.handshake_ok(), t.last_handshake_epoch()),
-            None => (inner.running, None),
+        let (handshake_ok, last_handshake_epoch, tx_bytes, rx_bytes) = match &inner.tunnel {
+            Some(t) => (
+                t.handshake_ok(),
+                t.last_handshake_epoch(),
+                Some(t.tx_bytes()),
+                Some(t.rx_bytes()),
+            ),
+            None => (inner.running, None, None, None),
         };
         TransportHealth {
             handshake_ok,
             local_socks_port: self.local_socks_port(),
             last_handshake_epoch,
+            tx_bytes,
+            rx_bytes,
             rtt_ms: None,
         }
     }

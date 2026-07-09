@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -13,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -24,27 +26,33 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import io.github.pnck.gallery.network.transport.TransportHealth
 import io.github.pnck.gallery.network.transport.TransportState
+import kotlinx.coroutines.delay
 
 /**
  * Debug screen for the transport layer (EPIC-5). WireGuard and the upstream SOCKS5
  * are independent switches, so any of Direct / SOCKS-only / WG-only / WG+SOCKS can
  * be brought up. WG offers on-device keypair generation and sensible defaults.
  *
- * Intentionally a raw form — the only on-device way to exercise the tunnel until
- * automatic enablement and secure (EncryptedSharedPreferences) config storage land.
+ * The config is persisted (encrypted) across visits/restarts; a live monitor at
+ * the top shows status, transfer counters and last-handshake time while connected.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,10 +62,11 @@ fun TransportScreen(
 ) {
     val state by viewModel.transportState.collectAsState()
     val error by viewModel.error.collectAsState()
+    val health by viewModel.health.collectAsState()
+    val saved by viewModel.savedForm.collectAsState()
 
     var wgEnabled by rememberSaveable { mutableStateOf(true) }
     var socksEnabled by rememberSaveable { mutableStateOf(true) }
-
     var privateKey by rememberSaveable { mutableStateOf("") }
     var publicKey by rememberSaveable { mutableStateOf("") } // derived, shown to copy to the peer
     var peerPublicKey by rememberSaveable { mutableStateOf("") }
@@ -71,6 +80,26 @@ fun TransportScreen(
     var socksPort by rememberSaveable { mutableStateOf("1080") }
     var socksUser by rememberSaveable { mutableStateOf("") }
     var socksPass by rememberSaveable { mutableStateOf("") }
+
+    // Prefill from the persisted config once it has loaded.
+    LaunchedEffect(saved) {
+        saved?.let { s ->
+            val f = s.form
+            wgEnabled = f.wgEnabled; socksEnabled = f.socksEnabled
+            privateKey = f.privateKey; publicKey = s.publicKey; peerPublicKey = f.peerPublicKey
+            presharedKey = f.presharedKey; useSrv = f.useSrv; endpoint = f.endpoint; srvName = f.srvName
+            interfaceAddress = f.interfaceAddress; keepalive = f.keepaliveSecs
+            socksHost = f.socksHost; socksPort = f.socksPort; socksUser = f.socksUser; socksPass = f.socksPass
+        }
+    }
+
+    fun currentForm() = TransportForm(
+        wgEnabled = wgEnabled, socksEnabled = socksEnabled,
+        privateKey = privateKey, peerPublicKey = peerPublicKey, presharedKey = presharedKey,
+        useSrv = useSrv, endpoint = endpoint, srvName = srvName,
+        interfaceAddress = interfaceAddress, keepaliveSecs = keepalive,
+        socksHost = socksHost, socksPort = socksPort, socksUser = socksUser, socksPass = socksPass,
+    )
 
     Scaffold(
         topBar = {
@@ -92,7 +121,7 @@ fun TransportScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            StatusCard(state = state, error = error)
+            MonitorCard(state = state, health = health, error = error)
 
             toggleRow("WireGuard tunnel", wgEnabled) { wgEnabled = it }
             if (wgEnabled) {
@@ -134,7 +163,7 @@ fun TransportScreen(
                 if (useSrv) {
                     field(srvName, { srvName = it }, "SRV name (e.g. _wireguard._udp.example.com)")
                     Text(
-                        "Resolved fresh on each connect via DoH (dns.google / cloudflare).",
+                        "Resolved fresh on each connect via system DNS (DoH fallback).",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -159,35 +188,26 @@ fun TransportScreen(
                 field(socksPass, { socksPass = it }, "SOCKS password (optional)", password = true)
             }
 
+            val connecting = state is TransportState.Connecting
+            val connected = state is TransportState.Connected
             Row(
                 Modifier.fillMaxWidth().padding(vertical = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Button(
-                    onClick = {
-                        viewModel.connect(
-                            TransportForm(
-                                wgEnabled = wgEnabled,
-                                socksEnabled = socksEnabled,
-                                privateKey = privateKey,
-                                peerPublicKey = peerPublicKey,
-                                presharedKey = presharedKey,
-                                useSrv = useSrv,
-                                endpoint = endpoint,
-                                srvName = srvName,
-                                interfaceAddress = interfaceAddress,
-                                keepaliveSecs = keepalive,
-                                socksHost = socksHost,
-                                socksPort = socksPort,
-                                socksUser = socksUser,
-                                socksPass = socksPass,
-                            ),
-                        )
-                    },
+                    onClick = { viewModel.connect(currentForm(), publicKey) },
+                    enabled = !connecting && !connected,
                     modifier = Modifier.weight(1f),
-                ) { Text("Connect") }
+                ) {
+                    if (connecting) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    } else {
+                        Text(if (connected) "Connected" else "Connect")
+                    }
+                }
                 OutlinedButton(
                     onClick = viewModel::disconnect,
+                    enabled = connected || connecting || state is TransportState.Failed,
                     modifier = Modifier.weight(1f),
                 ) { Text("Disconnect") }
             }
@@ -207,25 +227,80 @@ private fun toggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Un
     }
 }
 
+/** Live status + transfer/handshake monitor, WireGuard-app style. */
 @Composable
-private fun StatusCard(state: TransportState, error: String?) {
-    val (label, detail) = when (state) {
-        is TransportState.Disconnected -> "Disconnected" to "Direct — acceleration off"
-        is TransportState.Connecting -> "Connecting…" to "Bringing up the transport"
-        is TransportState.Connected ->
-            "Connected" to "Local SOCKS5 on 127.0.0.1:${state.localSocksPort} · last handshake @${state.lastHandshakeEpoch}"
-        is TransportState.Degraded -> "Degraded" to state.reason
-        is TransportState.Failed -> "Failed" to state.reason
-        is TransportState.BypassedDirect -> "Bypassed" to "Falling back to direct"
+private fun MonitorCard(state: TransportState, health: TransportHealth?, error: String?) {
+    // A 1 Hz clock so "x ago" keeps ticking even when byte counters are static.
+    var nowSec by remember { mutableLongStateOf(System.currentTimeMillis() / 1000) }
+    LaunchedEffect(state) {
+        while (state is TransportState.Connected) {
+            nowSec = System.currentTimeMillis() / 1000
+            delay(1_000)
+        }
     }
+
+    val (label, labelColor) = when (state) {
+        is TransportState.Disconnected -> "Disconnected" to MaterialTheme.colorScheme.onSurfaceVariant
+        is TransportState.Connecting -> "Connecting…" to MaterialTheme.colorScheme.primary
+        is TransportState.Connected -> "Connected" to Color(0xFF2E7D32)
+        is TransportState.Degraded -> "Degraded" to MaterialTheme.colorScheme.tertiary
+        is TransportState.Failed -> "Failed" to MaterialTheme.colorScheme.error
+        is TransportState.BypassedDirect -> "Bypassed (direct)" to MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
     Card(Modifier.fillMaxWidth().padding(top = 8.dp)) {
         Column(Modifier.padding(16.dp)) {
-            Text(label, style = MaterialTheme.typography.titleMedium)
-            Text(detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(label, style = MaterialTheme.typography.titleMedium, color = labelColor)
+
+            if (state is TransportState.Connected) {
+                val port = (state as TransportState.Connected).localSocksPort
+                Text(
+                    "Local SOCKS5: 127.0.0.1:$port",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (health?.viaTunnel == true) {
+                    Text(
+                        "Transfer: ↓ ${formatBytes(health.rxBytes)}  ↑ ${formatBytes(health.txBytes)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        "Latest handshake: ${relativeTime(health.lastHandshakeEpoch, nowSec)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (health.handshakeOk) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            MaterialTheme.colorScheme.error
+                        },
+                    )
+                }
+            }
+
             error?.let {
                 Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
             }
         }
+    }
+}
+
+private fun formatBytes(bytes: Long?): String {
+    val b = bytes ?: 0
+    if (b < 1024) return "$b B"
+    val kib = b / 1024.0
+    if (kib < 1024) return "%.1f KiB".format(kib)
+    val mib = kib / 1024.0
+    if (mib < 1024) return "%.1f MiB".format(mib)
+    return "%.2f GiB".format(mib / 1024.0)
+}
+
+private fun relativeTime(epochSec: Long?, nowSec: Long): String {
+    if (epochSec == null || epochSec <= 0) return "never"
+    val d = (nowSec - epochSec).coerceAtLeast(0)
+    return when {
+        d < 2 -> "just now"
+        d < 60 -> "${d}s ago"
+        d < 3600 -> "${d / 60}m ${d % 60}s ago"
+        else -> "${d / 3600}h ${(d % 3600) / 60}m ago"
     }
 }
 

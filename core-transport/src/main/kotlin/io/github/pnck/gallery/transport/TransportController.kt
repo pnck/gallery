@@ -1,6 +1,7 @@
 package io.github.pnck.gallery.transport
 
 import io.github.pnck.gallery.network.transport.NetworkTransport
+import io.github.pnck.gallery.network.transport.TransportHealth
 import io.github.pnck.gallery.network.transport.OutboundRouter
 import io.github.pnck.gallery.network.transport.ProxySpec
 import io.github.pnck.gallery.network.transport.TransportConfig
@@ -65,4 +66,7 @@ class TransportController(
 
     /** Current loopback route for [host], if the transport is up. */
     fun proxyFor(host: String): ProxySpec? = active?.proxyFor(host)
+
+    /** Poll a live health snapshot (transfer bytes, handshake) — null when off. */
+    suspend fun health(): TransportHealth? = active?.probe()
 }

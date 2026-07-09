@@ -168,10 +168,25 @@ fun SettingsScreen(
                 supportingContent = { Text(stringResource(R.string.settings_free_space_hint)) },
             )
             HorizontalDivider()
+            val transportState by viewModel.transportState.collectAsState()
+            val transportConnected = transportState is io.github.pnck.gallery.network.transport.TransportState.Connected
             ListItem(
                 modifier = Modifier.clickable(onClick = onTransportClick),
                 headlineContent = { Text(stringResource(R.string.settings_transport)) },
-                supportingContent = { Text(stringResource(R.string.settings_transport_hint)) },
+                supportingContent = {
+                    Text(
+                        if (transportConnected) {
+                            stringResource(R.string.settings_transport_connected)
+                        } else {
+                            stringResource(R.string.settings_transport_hint)
+                        },
+                        color = if (transportConnected) {
+                            androidx.compose.ui.graphics.Color(0xFF2E7D32)
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                },
             )
         }
     }

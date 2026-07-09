@@ -4,13 +4,18 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.pnck.gallery.network.ApiResult
+import io.github.pnck.gallery.network.transport.TransportState
 import io.github.pnck.gallery.provider.AuthManager
 import io.github.pnck.gallery.provider.DeviceAuthChallenge
+import io.github.pnck.gallery.transport.TransportController
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -36,10 +41,19 @@ data class SettingsState(
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val googleAuthManager: AuthManager,
+    transportController: TransportController,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SettingsState())
     val state = _state.asStateFlow()
+
+    /** Transport connection state, so Settings can show whether acceleration is up. */
+    val transportState: StateFlow<TransportState> =
+        transportController.state.stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            transportController.state.value,
+        )
 
     private var signInJob: Job? = null
 

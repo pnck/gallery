@@ -103,6 +103,8 @@ dependencies {
 
     implementation(libs.androidx.paging.compose)
     implementation(libs.androidx.work.runtime.ktx)
+    // Encrypted persistence for the transport config (WG keys are sensitive).
+    implementation(libs.androidx.security.crypto)
 
     // Retrofit stack assembled in DI (:app owns wiring; contracts live in :core-provider)
     implementation(libs.retrofit)

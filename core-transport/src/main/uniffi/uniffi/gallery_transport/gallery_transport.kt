@@ -1033,6 +1033,29 @@ public object FfiConverterUShort: FfiConverter<UShort, Short> {
 /**
  * @suppress
  */
+public object FfiConverterULong: FfiConverter<ULong, Long> {
+    override fun lift(value: Long): ULong {
+        return value.toULong()
+    }
+
+    override fun read(buf: ByteBuffer): ULong {
+        return lift(buf.getLong())
+    }
+
+    override fun lower(value: ULong): Long {
+        return value.toLong()
+    }
+
+    override fun allocationSize(value: ULong) = 8UL
+
+    override fun write(value: ULong, buf: ByteBuffer) {
+        buf.putLong(value.toLong())
+    }
+}
+
+/**
+ * @suppress
+ */
 public object FfiConverterLong: FfiConverter<Long, Long> {
     override fun lift(value: Long): Long {
         return value
@@ -1517,9 +1540,14 @@ data class TransportHealth (
     var `handshakeOk`: kotlin.Boolean, 
     var `localSocksPort`: kotlin.UShort?, 
     /**
-     * Unix epoch seconds of the last completed WG handshake (WgThenSocks only).
+     * Unix epoch seconds of the last completed WG handshake (WG modes only).
      */
     var `lastHandshakeEpoch`: kotlin.Long?, 
+    /**
+     * WireGuard data bytes sent / received through the tunnel (WG modes only).
+     */
+    var `txBytes`: kotlin.ULong?, 
+    var `rxBytes`: kotlin.ULong?, 
     var `rttMs`: kotlin.Long?
 ) {
     
@@ -1535,6 +1563,8 @@ public object FfiConverterTypeTransportHealth: FfiConverterRustBuffer<TransportH
             FfiConverterBoolean.read(buf),
             FfiConverterOptionalUShort.read(buf),
             FfiConverterOptionalLong.read(buf),
+            FfiConverterOptionalULong.read(buf),
+            FfiConverterOptionalULong.read(buf),
             FfiConverterOptionalLong.read(buf),
         )
     }
@@ -1543,6 +1573,8 @@ public object FfiConverterTypeTransportHealth: FfiConverterRustBuffer<TransportH
             FfiConverterBoolean.allocationSize(value.`handshakeOk`) +
             FfiConverterOptionalUShort.allocationSize(value.`localSocksPort`) +
             FfiConverterOptionalLong.allocationSize(value.`lastHandshakeEpoch`) +
+            FfiConverterOptionalULong.allocationSize(value.`txBytes`) +
+            FfiConverterOptionalULong.allocationSize(value.`rxBytes`) +
             FfiConverterOptionalLong.allocationSize(value.`rttMs`)
     )
 
@@ -1550,6 +1582,8 @@ public object FfiConverterTypeTransportHealth: FfiConverterRustBuffer<TransportH
             FfiConverterBoolean.write(value.`handshakeOk`, buf)
             FfiConverterOptionalUShort.write(value.`localSocksPort`, buf)
             FfiConverterOptionalLong.write(value.`lastHandshakeEpoch`, buf)
+            FfiConverterOptionalULong.write(value.`txBytes`, buf)
+            FfiConverterOptionalULong.write(value.`rxBytes`, buf)
             FfiConverterOptionalLong.write(value.`rttMs`, buf)
     }
 }
@@ -2081,6 +2115,38 @@ public object FfiConverterOptionalUShort: FfiConverterRustBuffer<kotlin.UShort?>
         } else {
             buf.put(1)
             FfiConverterUShort.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalULong: FfiConverterRustBuffer<kotlin.ULong?> {
+    override fun read(buf: ByteBuffer): kotlin.ULong? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterULong.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.ULong?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterULong.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.ULong?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterULong.write(value, buf)
         }
     }
 }

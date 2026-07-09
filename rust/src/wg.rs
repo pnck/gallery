@@ -22,7 +22,7 @@
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 use std::net::{IpAddr, SocketAddr, UdpSocket};
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant as StdInstant};
@@ -244,6 +244,8 @@ pub struct WgTunnel {
     cmd: Sender<Command>,
     handshake_ok: Arc<AtomicBool>,
     last_handshake_epoch: Arc<AtomicI64>,
+    tx_bytes: Arc<AtomicU64>,
+    rx_bytes: Arc<AtomicU64>,
     stopped: Arc<AtomicBool>,
 }
 
@@ -258,12 +260,16 @@ impl WgTunnel {
         let (cmd_tx, cmd_rx) = mpsc::channel::<Command>();
         let handshake_ok = Arc::new(AtomicBool::new(false));
         let last_handshake_epoch = Arc::new(AtomicI64::new(0));
+        let tx_bytes = Arc::new(AtomicU64::new(0));
+        let rx_bytes = Arc::new(AtomicU64::new(0));
         let stopped = Arc::new(AtomicBool::new(false));
 
         let driver = Driver {
             cmd_rx,
             handshake_ok: Arc::clone(&handshake_ok),
             last_handshake_epoch: Arc::clone(&last_handshake_epoch),
+            tx_bytes: Arc::clone(&tx_bytes),
+            rx_bytes: Arc::clone(&rx_bytes),
             stopped: Arc::clone(&stopped),
         };
         std::thread::Builder::new()
@@ -275,6 +281,8 @@ impl WgTunnel {
             cmd: cmd_tx,
             handshake_ok,
             last_handshake_epoch,
+            tx_bytes,
+            rx_bytes,
             stopped,
         })
     }
@@ -307,6 +315,15 @@ impl WgTunnel {
 
     pub fn handshake_ok(&self) -> bool {
         self.handshake_ok.load(Ordering::SeqCst)
+    }
+
+    /// WireGuard data bytes sent / received through the tunnel (boringtun stats).
+    pub fn tx_bytes(&self) -> u64 {
+        self.tx_bytes.load(Ordering::SeqCst)
+    }
+
+    pub fn rx_bytes(&self) -> u64 {
+        self.rx_bytes.load(Ordering::SeqCst)
     }
 
     pub fn last_handshake_epoch(&self) -> Option<i64> {
@@ -419,6 +436,8 @@ struct Driver {
     cmd_rx: Receiver<Command>,
     handshake_ok: Arc<AtomicBool>,
     last_handshake_epoch: Arc<AtomicI64>,
+    tx_bytes: Arc<AtomicU64>,
+    rx_bytes: Arc<AtomicU64>,
     stopped: Arc<AtomicBool>,
 }
 
@@ -585,8 +604,10 @@ impl Driver {
                 _ => {}
             }
 
-            // 8. Refresh handshake health from boringtun stats.
-            let (since_handshake, ..) = tunn.stats();
+            // 8. Refresh handshake health + transfer counters from boringtun stats.
+            let (since_handshake, tx, rx, ..) = tunn.stats();
+            self.tx_bytes.store(tx as u64, Ordering::SeqCst);
+            self.rx_bytes.store(rx as u64, Ordering::SeqCst);
             let ok = since_handshake.is_some();
             self.handshake_ok.store(ok, Ordering::SeqCst);
             if ok {
