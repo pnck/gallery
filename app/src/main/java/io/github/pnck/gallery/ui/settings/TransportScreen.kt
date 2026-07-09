@@ -20,6 +20,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -28,18 +29,22 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import io.github.pnck.gallery.network.transport.TransportState
 
 /**
- * Debug screen for the transport layer (EPIC-5): fill the WgThenSocks parameters
- * by hand, connect, and watch [TransportState]. This is intentionally a raw form —
- * it is the only on-device way to exercise the tunnel until automatic enablement
- * and secure config storage land.
+ * Debug screen for the transport layer (EPIC-5). WireGuard and the upstream SOCKS5
+ * are independent switches, so any of Direct / SOCKS-only / WG-only / WG+SOCKS can
+ * be brought up. WG offers on-device keypair generation and sensible defaults.
+ *
+ * Intentionally a raw form — the only on-device way to exercise the tunnel until
+ * automatic enablement and secure (EncryptedSharedPreferences) config storage land.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -50,11 +55,15 @@ fun TransportScreen(
     val state by viewModel.transportState.collectAsState()
     val error by viewModel.error.collectAsState()
 
+    var wgEnabled by rememberSaveable { mutableStateOf(true) }
+    var socksEnabled by rememberSaveable { mutableStateOf(true) }
+
     var privateKey by rememberSaveable { mutableStateOf("") }
+    var publicKey by rememberSaveable { mutableStateOf("") } // derived, shown to copy to the peer
     var peerPublicKey by rememberSaveable { mutableStateOf("") }
     var presharedKey by rememberSaveable { mutableStateOf("") }
     var endpoint by rememberSaveable { mutableStateOf("") }
-    var interfaceAddress by rememberSaveable { mutableStateOf("") }
+    var interfaceAddress by rememberSaveable { mutableStateOf("10.0.0.2/32") }
     var keepalive by rememberSaveable { mutableStateOf("25") }
     var socksHost by rememberSaveable { mutableStateOf("") }
     var socksPort by rememberSaveable { mutableStateOf("1080") }
@@ -64,7 +73,7 @@ fun TransportScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("WireGuard + SOCKS") },
+                title = { Text("Network acceleration") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -83,22 +92,56 @@ fun TransportScreen(
         ) {
             StatusCard(state = state, error = error)
 
-            field(privateKey, { privateKey = it }, "Private key (base64)")
-            field(peerPublicKey, { peerPublicKey = it }, "Peer public key (base64)")
-            field(presharedKey, { presharedKey = it }, "Preshared key (optional)")
-            field(endpoint, { endpoint = it }, "WG endpoint (host:port)")
-            field(interfaceAddress, { interfaceAddress = it }, "Interface address (e.g. 10.0.0.2/32)")
-            field(keepalive, { keepalive = it }, "Keepalive seconds", number = true)
+            toggleRow("WireGuard tunnel", wgEnabled) { wgEnabled = it }
+            if (wgEnabled) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            viewModel.generateKeypair { kp ->
+                                privateKey = kp.privateKey
+                                publicKey = kp.publicKey
+                            }
+                        },
+                    ) { Text("Generate keypair") }
+                    Text(
+                        "creates a new client key",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                field(privateKey, { privateKey = it }, "Private key (base64)")
+                if (publicKey.isNotBlank()) {
+                    OutlinedTextField(
+                        value = publicKey,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Your public key — add as a peer on the server") },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                field(peerPublicKey, { peerPublicKey = it }, "Peer (server) public key (base64)")
+                field(presharedKey, { presharedKey = it }, "Preshared key (optional)")
+                field(endpoint, { endpoint = it }, "WG endpoint (host:port, e.g. vpn.example.com:51820)")
+                field(interfaceAddress, { interfaceAddress = it }, "Interface address (e.g. 10.0.0.2/32)")
+                field(keepalive, { keepalive = it }, "Keepalive seconds", number = true)
+            }
 
-            Text(
-                "In-tunnel upstream SOCKS5",
-                style = MaterialTheme.typography.labelLarge,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-            field(socksHost, { socksHost = it }, "Upstream SOCKS host (in-tunnel IP)")
-            field(socksPort, { socksPort = it }, "Upstream SOCKS port", number = true)
-            field(socksUser, { socksUser = it }, "SOCKS username (optional)")
-            field(socksPass, { socksPass = it }, "SOCKS password (optional)", password = true)
+            toggleRow("Upstream SOCKS5", socksEnabled) { socksEnabled = it }
+            if (socksEnabled) {
+                Text(
+                    if (wgEnabled) "Reached through the tunnel (in-tunnel IP)" else "Reached directly",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                field(socksHost, { socksHost = it }, "SOCKS host")
+                field(socksPort, { socksPort = it }, "SOCKS port", number = true)
+                field(socksUser, { socksUser = it }, "SOCKS username (optional)")
+                field(socksPass, { socksPass = it }, "SOCKS password (optional)", password = true)
+            }
 
             Row(
                 Modifier.fillMaxWidth().padding(vertical = 12.dp),
@@ -106,24 +149,28 @@ fun TransportScreen(
             ) {
                 Button(
                     onClick = {
-                        viewModel.connectWgThenSocks(
-                            privateKey = privateKey,
-                            peerPublicKey = peerPublicKey,
-                            presharedKey = presharedKey,
-                            endpoint = endpoint,
-                            interfaceAddress = interfaceAddress,
-                            keepaliveSecs = keepalive,
-                            upstreamSocksHost = socksHost,
-                            upstreamSocksPort = socksPort,
-                            upstreamUser = socksUser,
-                            upstreamPass = socksPass,
+                        viewModel.connect(
+                            TransportForm(
+                                wgEnabled = wgEnabled,
+                                socksEnabled = socksEnabled,
+                                privateKey = privateKey,
+                                peerPublicKey = peerPublicKey,
+                                presharedKey = presharedKey,
+                                endpoint = endpoint,
+                                interfaceAddress = interfaceAddress,
+                                keepaliveSecs = keepalive,
+                                socksHost = socksHost,
+                                socksPort = socksPort,
+                                socksUser = socksUser,
+                                socksPass = socksPass,
+                            ),
                         )
                     },
-                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    modifier = Modifier.weight(1f),
                 ) { Text("Connect") }
                 OutlinedButton(
                     onClick = viewModel::disconnect,
-                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    modifier = Modifier.weight(1f),
                 ) { Text("Disconnect") }
             }
         }
@@ -131,10 +178,22 @@ fun TransportScreen(
 }
 
 @Composable
+private fun toggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(top = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, style = MaterialTheme.typography.titleMedium)
+        Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
+
+@Composable
 private fun StatusCard(state: TransportState, error: String?) {
     val (label, detail) = when (state) {
-        is TransportState.Disconnected -> "Disconnected" to "Direct — tunnel off"
-        is TransportState.Connecting -> "Connecting…" to "Bringing up the WireGuard tunnel"
+        is TransportState.Disconnected -> "Disconnected" to "Direct — acceleration off"
+        is TransportState.Connecting -> "Connecting…" to "Bringing up the transport"
         is TransportState.Connected ->
             "Connected" to "Local SOCKS5 on 127.0.0.1:${state.localSocksPort} · last handshake @${state.lastHandshakeEpoch}"
         is TransportState.Degraded -> "Degraded" to state.reason
@@ -169,6 +228,6 @@ private fun field(
         keyboardOptions = KeyboardOptions(
             keyboardType = if (number) KeyboardType.Number else KeyboardType.Text,
         ),
-        visualTransformation = if (password) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
+        visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
     )
 }

@@ -41,28 +41,37 @@ class TransportConfigMappingTest {
         assertEquals(null, core.password)
     }
 
+    private fun wgConfig() = io.github.pnck.gallery.network.transport.WgConfig(
+        privateKey = "priv",
+        peerPublicKey = "peer",
+        presharedKey = "psk",
+        endpoint = Endpoint("vpn.example.com", 51820),
+        interfaceAddresses = listOf("10.0.0.2/32"),
+        allowedIps = listOf("0.0.0.0/0"),
+        dns = emptyList(),
+        persistentKeepaliveSeconds = 25,
+    )
+
     @Test
-    fun `wgThenSocks maps wg params and upstream endpoint`() {
+    fun `wgOnly maps wg settings`() {
+        val core = TransportConfig.WgOnly(wgConfig()).toCoreConfig() as CoreConfig.WgOnly
+        assertEquals("priv", core.wg.privateKey)
+        assertEquals("vpn.example.com:51820", core.wg.endpoint)
+        assertEquals(listOf("10.0.0.2/32"), core.wg.interfaceAddresses)
+        assertEquals(25.toUShort(), core.wg.keepaliveSecs)
+    }
+
+    @Test
+    fun `wgThenSocks maps wg settings and upstream endpoint`() {
         val core = TransportConfig.WgThenSocks(
-            wg = io.github.pnck.gallery.network.transport.WgConfig(
-                privateKey = "priv",
-                peerPublicKey = "peer",
-                presharedKey = "psk",
-                endpoint = Endpoint("vpn.example.com", 51820),
-                interfaceAddresses = listOf("10.0.0.2/32"),
-                allowedIps = listOf("0.0.0.0/0"),
-                dns = emptyList(),
-                persistentKeepaliveSeconds = 25,
-            ),
+            wg = wgConfig(),
             upstreamSocks = Endpoint("10.0.0.5", 1080),
         ).toCoreConfig() as CoreConfig.WgThenSocks
 
-        assertEquals("priv", core.privateKey)
-        assertEquals("peer", core.peerPublicKey)
-        assertEquals("psk", core.presharedKey)
-        assertEquals("vpn.example.com:51820", core.endpoint)
-        assertEquals(listOf("10.0.0.2/32"), core.interfaceAddresses)
-        assertEquals(25.toUShort(), core.keepaliveSecs)
+        assertEquals("priv", core.wg.privateKey)
+        assertEquals("peer", core.wg.peerPublicKey)
+        assertEquals("psk", core.wg.presharedKey)
+        assertEquals("vpn.example.com:51820", core.wg.endpoint)
         assertEquals("10.0.0.5", core.upstreamHost)
         assertEquals(1080.toUShort(), core.upstreamPort)
     }

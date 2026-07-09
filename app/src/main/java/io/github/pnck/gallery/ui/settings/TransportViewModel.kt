@@ -9,19 +9,40 @@ import io.github.pnck.gallery.network.transport.TransportConfig
 import io.github.pnck.gallery.network.transport.TransportState
 import io.github.pnck.gallery.network.transport.WgConfig
 import io.github.pnck.gallery.transport.TransportController
+import io.github.pnck.gallery.transport.WgKeypair
+import io.github.pnck.gallery.transport.WireguardTools
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 
+/** All transport form fields, so the ViewModel owns validation + config building. */
+data class TransportForm(
+    val wgEnabled: Boolean,
+    val socksEnabled: Boolean,
+    val privateKey: String,
+    val peerPublicKey: String,
+    val presharedKey: String,
+    val endpoint: String,
+    val interfaceAddress: String,
+    val keepaliveSecs: String,
+    val socksHost: String,
+    val socksPort: String,
+    val socksUser: String,
+    val socksPass: String,
+)
+
 /**
- * Debug entry point for the transport layer (EPIC-5). Lets a tester bring up the
- * WgThenSocks tunnel by hand and observe [TransportState] — there is no automatic
- * enablement yet, so this is the only way to exercise the tunnel on-device.
+ * Debug entry point for the transport layer (EPIC-5). WireGuard and the upstream
+ * SOCKS5 are independent toggles → Direct / SocksOnly / WgOnly / WgThenSocks.
+ * There is no automatic enablement yet, so this is the only way to exercise the
+ * tunnel on-device.
  */
 @HiltViewModel
 class TransportViewModel @Inject constructor(
@@ -35,56 +56,29 @@ class TransportViewModel @Inject constructor(
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
-    /**
-     * Build a WgThenSocks config from the form and connect. `endpoint` is
-     * "host:port"; `interfaceAddress` is the tunnel-interior CIDR (e.g. 10.0.0.2/32).
-     */
-    fun connectWgThenSocks(
-        privateKey: String,
-        peerPublicKey: String,
-        presharedKey: String,
-        endpoint: String,
-        interfaceAddress: String,
-        keepaliveSecs: String,
-        upstreamSocksHost: String,
-        upstreamSocksPort: String,
-        upstreamUser: String,
-        upstreamPass: String,
-    ) {
-        val config = runCatching {
-            val (epHost, epPort) = splitHostPort(endpoint, "WireGuard endpoint")
-            val socksPort = upstreamSocksPort.trim().toIntOrNull()
-                ?: error("upstream SOCKS port must be a number")
-            TransportConfig.WgThenSocks(
-                wg = WgConfig(
-                    privateKey = privateKey.trim(),
-                    peerPublicKey = peerPublicKey.trim(),
-                    presharedKey = presharedKey.trim().ifBlank { null },
-                    endpoint = Endpoint(epHost, epPort),
-                    interfaceAddresses = listOf(interfaceAddress.trim()),
-                    // allowedIps/dns are informational for the Rust core (the netstack
-                    // routes everything out the single tunnel device); kept for parity.
-                    allowedIps = listOf("0.0.0.0/0"),
-                    dns = emptyList(),
-                    persistentKeepaliveSeconds = keepaliveSecs.trim().toIntOrNull() ?: 25,
-                ),
-                upstreamSocks = Endpoint(upstreamSocksHost.trim(), socksPort),
-                upstreamAuth = upstreamCred(upstreamUser, upstreamPass),
-            )
-        }.getOrElse {
+    /** Generate a WireGuard keypair off the main thread and hand it back to the form. */
+    fun generateKeypair(onGenerated: (WgKeypair) -> Unit) {
+        viewModelScope.launch {
+            val kp = withContext(Dispatchers.Default) { WireguardTools.generateKeypair() }
+            onGenerated(kp)
+        }
+    }
+
+    /** Build the config from the toggles + fields and connect. */
+    fun connect(form: TransportForm) {
+        val config = runCatching { form.toConfig() }.getOrElse {
             _error.value = it.message ?: "invalid transport config"
             return
         }
-
         viewModelScope.launch {
             _error.value = null
             runCatching { controller.connect(config) }
                 .onSuccess {
-                    // Drop pooled sockets so live connections re-dial via the tunnel
-                    // (SharedHttpClient KDoc): the router flipped under a built client.
+                    // Drop pooled sockets so live connections re-dial via the new
+                    // route (SharedHttpClient KDoc): the router flipped underneath.
                     okHttpClient.connectionPool.evictAll()
                 }
-                .onFailure { _error.value = it.message ?: "failed to start tunnel" }
+                .onFailure { _error.value = it.message ?: "failed to start transport" }
         }
     }
 
@@ -96,15 +90,49 @@ class TransportViewModel @Inject constructor(
         }
     }
 
-    private fun upstreamCred(user: String, pass: String): Cred? =
-        if (user.isBlank()) null else Cred(user.trim(), pass)
+    private fun TransportForm.toConfig(): TransportConfig {
+        val wg = if (wgEnabled) buildWg() else null
+        val socks = if (socksEnabled) buildSocksEndpoint() else null
+        val socksAuth = if (socksEnabled) socksCred() else null
+        return when {
+            wg != null && socks != null -> TransportConfig.WgThenSocks(wg, socks, socksAuth)
+            wg != null -> TransportConfig.WgOnly(wg)
+            socks != null -> TransportConfig.SocksOnly(socks, socksAuth)
+            else -> error("Enable WireGuard and/or the upstream SOCKS5 first")
+        }
+    }
+
+    private fun TransportForm.buildWg(): WgConfig {
+        require(privateKey.isNotBlank()) { "WireGuard private key is required" }
+        require(peerPublicKey.isNotBlank()) { "Peer public key is required" }
+        require(interfaceAddress.isNotBlank()) { "Interface address is required (e.g. 10.0.0.2/32)" }
+        val (host, port) = splitHostPort(endpoint, "WireGuard endpoint")
+        return WgConfig(
+            privateKey = privateKey.trim(),
+            peerPublicKey = peerPublicKey.trim(),
+            presharedKey = presharedKey.trim().ifBlank { null },
+            endpoint = Endpoint(host, port),
+            interfaceAddresses = listOf(interfaceAddress.trim()),
+            allowedIps = listOf("0.0.0.0/0"),
+            dns = emptyList(),
+            persistentKeepaliveSeconds = keepaliveSecs.trim().toIntOrNull() ?: 25,
+        )
+    }
+
+    private fun TransportForm.buildSocksEndpoint(): Endpoint {
+        require(socksHost.isNotBlank()) { "Upstream SOCKS host is required" }
+        val port = socksPort.trim().toIntOrNull() ?: error("Upstream SOCKS port must be a number")
+        return Endpoint(socksHost.trim(), port)
+    }
+
+    private fun TransportForm.socksCred(): Cred? =
+        if (socksUser.isBlank()) null else Cred(socksUser.trim(), socksPass)
 
     private fun splitHostPort(value: String, label: String): Pair<String, Int> {
-        val idx = value.trim().lastIndexOf(':')
-        require(idx > 0) { "$label must be host:port" }
-        val host = value.trim().substring(0, idx)
-        val port = value.trim().substring(idx + 1).toIntOrNull()
-            ?: error("$label port must be a number")
-        return host to port
+        val v = value.trim()
+        val idx = v.lastIndexOf(':')
+        require(idx > 0 && idx < v.length - 1) { "$label must be host:port" }
+        val port = v.substring(idx + 1).toIntOrNull() ?: error("$label port must be a number")
+        return v.substring(0, idx) to port
     }
 }

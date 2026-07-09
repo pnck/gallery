@@ -97,6 +97,17 @@ impl WgParams {
     }
 }
 
+/// Generate a WireGuard keypair (base64), equivalent to `wg genkey`/`wg pubkey`.
+pub fn generate_keypair() -> crate::WireguardKeypair {
+    let sk = StaticSecret::random_from_rng(rand::rngs::OsRng);
+    let pk = PublicKey::from(&sk);
+    let enc = base64::engine::general_purpose::STANDARD;
+    crate::WireguardKeypair {
+        private_key: enc.encode(sk.to_bytes()),
+        public_key: enc.encode(pk.to_bytes()),
+    }
+}
+
 fn decode_key(b64: &str) -> Result<[u8; 32], String> {
     let raw = base64::engine::general_purpose::STANDARD
         .decode(b64.trim())
@@ -723,6 +734,16 @@ mod tests {
             }
             other => panic!("expected tunnelled packet, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn generated_keypair_is_valid_and_parses() {
+        let kp = generate_keypair();
+        // Both keys decode to 32 bytes and the pair round-trips through parse().
+        assert_eq!(decode_key(&kp.private_key).unwrap().len(), 32);
+        assert_eq!(decode_key(&kp.public_key).unwrap().len(), 32);
+        WgParams::parse(&kp.private_key, &kp.public_key, None, "1.2.3.4:51820", &["10.0.0.2/32".into()], 25)
+            .expect("generated keys should parse");
     }
 
     #[test]

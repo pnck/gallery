@@ -20,32 +20,57 @@ use wg::{WgParams, WgTunnel};
 
 uniffi::setup_scaffolding!();
 
-/// Outbound routing for the local SOCKS5 inbound.
+/// Standard WireGuard parameters. Keys are standard WireGuard base64;
+/// `interface_addresses` are the tunnel-interior CIDRs (e.g. "10.0.0.2/32").
+/// `endpoint` is host:port — a domain is resolved once, directly, at start (the
+/// WG endpoint is public and reachable without the tunnel; everything past it
+/// rides encrypted).
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct WgSettings {
+    pub private_key: String,
+    pub peer_public_key: String,
+    pub preshared_key: Option<String>,
+    pub endpoint: String,
+    pub interface_addresses: Vec<String>,
+    pub keepalive_secs: u16,
+}
+
+/// Outbound routing for the local SOCKS5 inbound. WireGuard and the upstream
+/// SOCKS5 chain are independent (Direct / SOCKS only / WG only / WG + SOCKS).
 #[derive(Debug, Clone, uniffi::Enum)]
 pub enum CoreConfig {
     /// Dial targets directly (no acceleration). Baseline / fallback.
     Direct,
-    /// Chain every CONNECT to an upstream SOCKS5, preserving the hostname so DNS
-    /// resolves at the upstream (remote DNS, Transport Design §4.2).
+    /// Chain every CONNECT to an upstream SOCKS5 over the OS network, preserving
+    /// the hostname so DNS resolves at the upstream (remote DNS, Transport §4.2).
     SocksUpstream { host: String, port: u16, username: Option<String>, password: Option<String> },
-    /// Primary accelerated path (Transport §2.1): build a userspace WireGuard
-    /// tunnel to `endpoint`, then chain to the in-tunnel upstream SOCKS5. Keys are
-    /// standard WireGuard base64; `interface_addresses` are the tunnel-interior
-    /// CIDRs (e.g. "10.0.0.2/32"). `endpoint` is host:port — a domain is resolved
-    /// once, directly, at start (the WG endpoint is public and reachable without
-    /// the tunnel; everything past it rides encrypted).
+    /// WireGuard tunnel only: dial the target through the tunnel and out the WG
+    /// peer. Domains are resolved locally then connected by IP through the tunnel
+    /// (no in-tunnel resolver yet — this leaks DNS but tunnels the connection).
+    WgOnly { wg: WgSettings },
+    /// Primary accelerated path (Transport §2.1): WireGuard tunnel to `endpoint`,
+    /// then chain to the in-tunnel upstream SOCKS5 (remote DNS at the LAN exit).
     WgThenSocks {
-        private_key: String,
-        peer_public_key: String,
-        preshared_key: Option<String>,
-        endpoint: String,
-        interface_addresses: Vec<String>,
-        keepalive_secs: u16,
+        wg: WgSettings,
         upstream_host: String,
         upstream_port: u16,
         upstream_username: Option<String>,
         upstream_password: Option<String>,
     },
+}
+
+/// A freshly generated WireGuard keypair (base64), for the config UI.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct WireguardKeypair {
+    pub private_key: String,
+    pub public_key: String,
+}
+
+/// Generate a WireGuard keypair (equivalent to `wg genkey` / `wg pubkey`). The
+/// private key is a random x25519 secret; the public key is derived from it.
+#[uniffi::export]
+pub fn generate_wireguard_keypair() -> WireguardKeypair {
+    wg::generate_keypair()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -127,35 +152,22 @@ impl WgCore {
         self.emit(CoreState::Starting);
         self.shutdown.store(false, Ordering::SeqCst);
 
-        // WgThenSocks needs the live tunnel woven into the dialer; every other mode
-        // maps straight from the config.
+        // WG modes need the live tunnel woven into the dialer; the tunnel-less
+        // modes map straight from the config.
         let dialer = match &config {
+            CoreConfig::WgOnly { wg } => {
+                let tunnel = start_tunnel(wg)?;
+                inner.tunnel = Some(Arc::clone(&tunnel));
+                socks::Dialer::WgDirect { tunnel }
+            }
             CoreConfig::WgThenSocks {
-                private_key,
-                peer_public_key,
-                preshared_key,
-                endpoint,
-                interface_addresses,
-                keepalive_secs,
+                wg,
                 upstream_host,
                 upstream_port,
                 upstream_username,
                 upstream_password,
             } => {
-                let resolved = resolve_endpoint(endpoint)
-                    .map_err(|msg| TransportError::WgConfig { msg })?;
-                let params = WgParams::parse(
-                    private_key,
-                    peer_public_key,
-                    preshared_key.as_deref(),
-                    &resolved,
-                    interface_addresses,
-                    *keepalive_secs,
-                )
-                .map_err(|msg| TransportError::WgConfig { msg })?;
-                let tunnel = Arc::new(
-                    WgTunnel::start(params).map_err(|e| TransportError::WgStart { msg: e.to_string() })?,
-                );
+                let tunnel = start_tunnel(wg)?;
                 inner.tunnel = Some(Arc::clone(&tunnel));
                 socks::Dialer::WgThenSocks {
                     tunnel,
@@ -240,9 +252,26 @@ impl WgCore {
     }
 }
 
-/// Resolve a `host:port` WireGuard endpoint to an `ip:port` literal. The WG
-/// endpoint is public and reachable without the tunnel, so this direct DNS
-/// lookup does not leak the accelerated traffic (Transport §2.1).
+/// Build [`WgParams`] from [`WgSettings`] (resolving the endpoint once, directly)
+/// and start the tunnel. The WG endpoint is public and reachable without the
+/// tunnel, so this direct DNS lookup does not leak accelerated traffic (§2.1).
+fn start_tunnel(wg: &WgSettings) -> Result<Arc<WgTunnel>, TransportError> {
+    let resolved = resolve_endpoint(&wg.endpoint).map_err(|msg| TransportError::WgConfig { msg })?;
+    let params = WgParams::parse(
+        &wg.private_key,
+        &wg.peer_public_key,
+        wg.preshared_key.as_deref(),
+        &resolved,
+        &wg.interface_addresses,
+        wg.keepalive_secs,
+    )
+    .map_err(|msg| TransportError::WgConfig { msg })?;
+    WgTunnel::start(params)
+        .map(Arc::new)
+        .map_err(|e| TransportError::WgStart { msg: e.to_string() })
+}
+
+/// Resolve a `host:port` endpoint to an `ip:port` literal.
 fn resolve_endpoint(endpoint: &str) -> Result<String, String> {
     let mut it = endpoint
         .to_socket_addrs()

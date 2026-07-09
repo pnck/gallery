@@ -4,11 +4,17 @@ import android.content.Intent
 import androidx.core.net.toUri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -23,7 +29,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -55,16 +63,34 @@ fun SettingsScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    state.pendingChallenge?.let { challenge ->
-        AlertDialog(
-            onDismissRequest = viewModel::cancelPending,
+    when (val phase = state.signIn) {
+        is SignInPhase.Idle -> Unit
+
+        is SignInPhase.Requesting -> AlertDialog(
+            onDismissRequest = viewModel::cancelSignIn,
+            title = { Text(stringResource(R.string.auth_requesting_title)) },
+            text = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(20.dp))
+                    Spacer(Modifier.width(16.dp))
+                    Text(stringResource(R.string.auth_requesting_body))
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = viewModel::cancelSignIn) { Text(stringResource(R.string.cancel)) }
+            },
+        )
+
+        is SignInPhase.AwaitingApproval -> AlertDialog(
+            onDismissRequest = viewModel::cancelSignIn,
             title = { Text(stringResource(R.string.auth_device_title)) },
             text = {
                 Text(
                     stringResource(
                         R.string.auth_device_body,
-                        challenge.userCode,
-                        challenge.verificationUrl,
+                        phase.challenge.userCode,
+                        phase.challenge.verificationUrl,
                     ),
                 )
             },
@@ -74,16 +100,34 @@ fun SettingsScreen(
                     // reach it; otherwise the user types the code on a second screen.
                     runCatching {
                         context.startActivity(
-                            Intent(Intent.ACTION_VIEW, challenge.verificationUrl.toUri())
+                            Intent(Intent.ACTION_VIEW, phase.challenge.verificationUrl.toUri())
                                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                         )
                     }
                 }) { Text(stringResource(R.string.auth_device_open)) }
             },
             dismissButton = {
-                TextButton(onClick = viewModel::cancelPending) {
-                    Text(stringResource(R.string.cancel))
+                TextButton(onClick = viewModel::cancelSignIn) { Text(stringResource(R.string.cancel)) }
+            },
+        )
+
+        is SignInPhase.Failed -> AlertDialog(
+            onDismissRequest = viewModel::cancelSignIn,
+            title = { Text(stringResource(R.string.auth_error_title)) },
+            text = {
+                Column {
+                    Text(phase.message, color = MaterialTheme.colorScheme.error)
+                    if (phase.network) {
+                        Spacer(Modifier.height(12.dp))
+                        Text(stringResource(R.string.auth_network_hint))
+                    }
                 }
+            },
+            confirmButton = {
+                TextButton(onClick = viewModel::signInGoogle) { Text(stringResource(R.string.auth_retry)) }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::cancelSignIn) { Text(stringResource(R.string.cancel)) }
             },
         )
     }
@@ -101,23 +145,20 @@ fun SettingsScreen(
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
+            val busy = state.signIn is SignInPhase.Requesting || state.signIn is SignInPhase.AwaitingApproval
             ListItem(
-                modifier = Modifier.clickable {
+                modifier = Modifier.clickable(enabled = !busy) {
                     if (state.googleAuthorized) viewModel.signOutGoogle() else viewModel.signInGoogle()
                 },
                 headlineContent = { Text(stringResource(R.string.settings_google_account)) },
                 supportingContent = {
                     Text(
                         when {
-                            state.authError != null -> stringResource(R.string.auth_failed, state.authError ?: "")
+                            busy -> stringResource(R.string.settings_google_connecting)
                             state.googleAuthorized -> stringResource(R.string.settings_google_connected)
                             else -> stringResource(R.string.settings_google_disconnected)
                         },
-                        color = if (state.authError != null) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 },
             )

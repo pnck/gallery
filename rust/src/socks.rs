@@ -59,6 +59,8 @@ pub enum Dialer {
         port: u16,
         auth: Option<(String, String)>,
     },
+    /// Dial the target directly through the WireGuard tunnel (WG only, no SOCKS).
+    WgDirect { tunnel: Arc<WgTunnel> },
     /// Reach the upstream SOCKS5 through the WireGuard tunnel (phase 2, T-502).
     WgThenSocks {
         tunnel: Arc<WgTunnel>,
@@ -82,15 +84,21 @@ impl Dialer {
                 port: *port,
                 auth: pair(username, password),
             },
-            // WgThenSocks is assembled in WgCore::start (it needs the live tunnel);
-            // it never arrives here as a bare config.
-            CoreConfig::WgThenSocks { .. } => Dialer::Direct,
+            // WG modes are assembled in WgCore::start (they need the live tunnel);
+            // they never arrive here as a bare config.
+            CoreConfig::WgOnly { .. } | CoreConfig::WgThenSocks { .. } => Dialer::Direct,
         }
     }
 
     fn dial(&self, target: &Target) -> io::Result<Box<dyn Conn>> {
         match self {
             Dialer::Direct => Ok(Box::new(dial_direct(target)?)),
+            Dialer::WgDirect { tunnel } => {
+                // No SOCKS layer to preserve the hostname, so resolve domains
+                // locally (DNS leak) and connect to the IP through the tunnel.
+                let (ip, port) = resolve_for_tunnel(target)?;
+                Ok(Box::new(tunnel.dial(&ip.to_string(), port)?))
+            }
             Dialer::Socks { host, port, auth } => {
                 let mut up = TcpStream::connect((host.as_str(), *port))?;
                 up.set_nodelay(true).ok();
@@ -112,6 +120,21 @@ impl Dialer {
                 socks5_client_handshake(&mut up, auth.as_ref(), target)?;
                 Ok(Box::new(up))
             }
+        }
+    }
+}
+
+/// Resolve a target to an IP:port for tunnel dialing. IP targets pass through;
+/// domains are resolved locally (WgDirect has no upstream to do remote DNS).
+fn resolve_for_tunnel(target: &Target) -> io::Result<(std::net::IpAddr, u16)> {
+    match target {
+        Target::Ip(ip, port) => Ok((*ip, *port)),
+        Target::Domain(host, port) => {
+            let addr = (host.as_str(), *port)
+                .to_socket_addrs()?
+                .next()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no address"))?;
+            Ok((addr.ip(), *port))
         }
     }
 }

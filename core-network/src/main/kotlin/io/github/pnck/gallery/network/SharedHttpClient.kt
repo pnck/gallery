@@ -36,6 +36,12 @@ object SharedHttpClient {
             .protocols(listOf(Protocol.HTTP_2, Protocol.HTTP_1_1))
             .connectionPool(ConnectionPool(15, 5, TimeUnit.MINUTES))
             .proxySelector(RouterProxySelector(router))
+            // Bounded timeouts so an unreachable host (e.g. first login before the
+            // tunnel is up) fails in predictable time instead of hanging the UI.
+            // Per-operation, not total — uploads aren't capped (no callTimeout).
+            .connectTimeout(20, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
             .apply(configure)
             .build()
 

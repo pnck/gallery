@@ -749,6 +749,8 @@ internal open class UniffiVTableCallbackInterfaceStateCallback(
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -787,6 +789,8 @@ internal interface UniffiLib : Library {
     ): Unit
     fun uniffi_gallery_transport_fn_init_callback_vtable_statecallback(`vtable`: UniffiVTableCallbackInterfaceStateCallback,
     ): Unit
+    fun uniffi_gallery_transport_fn_func_generate_wireguard_keypair(uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun ffi_gallery_transport_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun ffi_gallery_transport_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -899,6 +903,8 @@ internal interface UniffiLib : Library {
     ): Unit
     fun ffi_gallery_transport_rust_future_complete_void(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_gallery_transport_checksum_func_generate_wireguard_keypair(
+    ): Short
     fun uniffi_gallery_transport_checksum_method_wgcore_health(
     ): Short
     fun uniffi_gallery_transport_checksum_method_wgcore_local_socks_port(
@@ -930,6 +936,9 @@ private fun uniffiCheckContractApiVersion(lib: UniffiLib) {
 
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: UniffiLib) {
+    if (lib.uniffi_gallery_transport_checksum_func_generate_wireguard_keypair() != 16621.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_gallery_transport_checksum_method_wgcore_health() != 18016.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1548,7 +1557,98 @@ public object FfiConverterTypeTransportHealth: FfiConverterRustBuffer<TransportH
 
 
 /**
- * Outbound routing for the local SOCKS5 inbound.
+ * Standard WireGuard parameters. Keys are standard WireGuard base64;
+ * `interface_addresses` are the tunnel-interior CIDRs (e.g. "10.0.0.2/32").
+ * `endpoint` is host:port — a domain is resolved once, directly, at start (the
+ * WG endpoint is public and reachable without the tunnel; everything past it
+ * rides encrypted).
+ */
+data class WgSettings (
+    var `privateKey`: kotlin.String, 
+    var `peerPublicKey`: kotlin.String, 
+    var `presharedKey`: kotlin.String?, 
+    var `endpoint`: kotlin.String, 
+    var `interfaceAddresses`: List<kotlin.String>, 
+    var `keepaliveSecs`: kotlin.UShort
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeWgSettings: FfiConverterRustBuffer<WgSettings> {
+    override fun read(buf: ByteBuffer): WgSettings {
+        return WgSettings(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterSequenceString.read(buf),
+            FfiConverterUShort.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: WgSettings) = (
+            FfiConverterString.allocationSize(value.`privateKey`) +
+            FfiConverterString.allocationSize(value.`peerPublicKey`) +
+            FfiConverterOptionalString.allocationSize(value.`presharedKey`) +
+            FfiConverterString.allocationSize(value.`endpoint`) +
+            FfiConverterSequenceString.allocationSize(value.`interfaceAddresses`) +
+            FfiConverterUShort.allocationSize(value.`keepaliveSecs`)
+    )
+
+    override fun write(value: WgSettings, buf: ByteBuffer) {
+            FfiConverterString.write(value.`privateKey`, buf)
+            FfiConverterString.write(value.`peerPublicKey`, buf)
+            FfiConverterOptionalString.write(value.`presharedKey`, buf)
+            FfiConverterString.write(value.`endpoint`, buf)
+            FfiConverterSequenceString.write(value.`interfaceAddresses`, buf)
+            FfiConverterUShort.write(value.`keepaliveSecs`, buf)
+    }
+}
+
+
+
+/**
+ * A freshly generated WireGuard keypair (base64), for the config UI.
+ */
+data class WireguardKeypair (
+    var `privateKey`: kotlin.String, 
+    var `publicKey`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeWireguardKeypair: FfiConverterRustBuffer<WireguardKeypair> {
+    override fun read(buf: ByteBuffer): WireguardKeypair {
+        return WireguardKeypair(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: WireguardKeypair) = (
+            FfiConverterString.allocationSize(value.`privateKey`) +
+            FfiConverterString.allocationSize(value.`publicKey`)
+    )
+
+    override fun write(value: WireguardKeypair, buf: ByteBuffer) {
+            FfiConverterString.write(value.`privateKey`, buf)
+            FfiConverterString.write(value.`publicKey`, buf)
+    }
+}
+
+
+
+/**
+ * Outbound routing for the local SOCKS5 inbound. WireGuard and the upstream
+ * SOCKS5 chain are independent (Direct / SOCKS only / WG only / WG + SOCKS).
  */
 sealed class CoreConfig {
     
@@ -1559,8 +1659,8 @@ sealed class CoreConfig {
     
     
     /**
-     * Chain every CONNECT to an upstream SOCKS5, preserving the hostname so DNS
-     * resolves at the upstream (remote DNS, Transport Design §4.2).
+     * Chain every CONNECT to an upstream SOCKS5 over the OS network, preserving
+     * the hostname so DNS resolves at the upstream (remote DNS, Transport §4.2).
      */
     data class SocksUpstream(
         val `host`: kotlin.String, 
@@ -1571,20 +1671,21 @@ sealed class CoreConfig {
     }
     
     /**
-     * Primary accelerated path (Transport §2.1): build a userspace WireGuard
-     * tunnel to `endpoint`, then chain to the in-tunnel upstream SOCKS5. Keys are
-     * standard WireGuard base64; `interface_addresses` are the tunnel-interior
-     * CIDRs (e.g. "10.0.0.2/32"). `endpoint` is host:port — a domain is resolved
-     * once, directly, at start (the WG endpoint is public and reachable without
-     * the tunnel; everything past it rides encrypted).
+     * WireGuard tunnel only: dial the target through the tunnel and out the WG
+     * peer. Domains are resolved locally then connected by IP through the tunnel
+     * (no in-tunnel resolver yet — this leaks DNS but tunnels the connection).
+     */
+    data class WgOnly(
+        val `wg`: WgSettings) : CoreConfig() {
+        companion object
+    }
+    
+    /**
+     * Primary accelerated path (Transport §2.1): WireGuard tunnel to `endpoint`,
+     * then chain to the in-tunnel upstream SOCKS5 (remote DNS at the LAN exit).
      */
     data class WgThenSocks(
-        val `privateKey`: kotlin.String, 
-        val `peerPublicKey`: kotlin.String, 
-        val `presharedKey`: kotlin.String?, 
-        val `endpoint`: kotlin.String, 
-        val `interfaceAddresses`: List<kotlin.String>, 
-        val `keepaliveSecs`: kotlin.UShort, 
+        val `wg`: WgSettings, 
         val `upstreamHost`: kotlin.String, 
         val `upstreamPort`: kotlin.UShort, 
         val `upstreamUsername`: kotlin.String?, 
@@ -1610,13 +1711,11 @@ public object FfiConverterTypeCoreConfig : FfiConverterRustBuffer<CoreConfig>{
                 FfiConverterOptionalString.read(buf),
                 FfiConverterOptionalString.read(buf),
                 )
-            3 -> CoreConfig.WgThenSocks(
-                FfiConverterString.read(buf),
-                FfiConverterString.read(buf),
-                FfiConverterOptionalString.read(buf),
-                FfiConverterString.read(buf),
-                FfiConverterSequenceString.read(buf),
-                FfiConverterUShort.read(buf),
+            3 -> CoreConfig.WgOnly(
+                FfiConverterTypeWgSettings.read(buf),
+                )
+            4 -> CoreConfig.WgThenSocks(
+                FfiConverterTypeWgSettings.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterUShort.read(buf),
                 FfiConverterOptionalString.read(buf),
@@ -1643,16 +1742,18 @@ public object FfiConverterTypeCoreConfig : FfiConverterRustBuffer<CoreConfig>{
                 + FfiConverterOptionalString.allocationSize(value.`password`)
             )
         }
+        is CoreConfig.WgOnly -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeWgSettings.allocationSize(value.`wg`)
+            )
+        }
         is CoreConfig.WgThenSocks -> {
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
                 4UL
-                + FfiConverterString.allocationSize(value.`privateKey`)
-                + FfiConverterString.allocationSize(value.`peerPublicKey`)
-                + FfiConverterOptionalString.allocationSize(value.`presharedKey`)
-                + FfiConverterString.allocationSize(value.`endpoint`)
-                + FfiConverterSequenceString.allocationSize(value.`interfaceAddresses`)
-                + FfiConverterUShort.allocationSize(value.`keepaliveSecs`)
+                + FfiConverterTypeWgSettings.allocationSize(value.`wg`)
                 + FfiConverterString.allocationSize(value.`upstreamHost`)
                 + FfiConverterUShort.allocationSize(value.`upstreamPort`)
                 + FfiConverterOptionalString.allocationSize(value.`upstreamUsername`)
@@ -1675,14 +1776,14 @@ public object FfiConverterTypeCoreConfig : FfiConverterRustBuffer<CoreConfig>{
                 FfiConverterOptionalString.write(value.`password`, buf)
                 Unit
             }
-            is CoreConfig.WgThenSocks -> {
+            is CoreConfig.WgOnly -> {
                 buf.putInt(3)
-                FfiConverterString.write(value.`privateKey`, buf)
-                FfiConverterString.write(value.`peerPublicKey`, buf)
-                FfiConverterOptionalString.write(value.`presharedKey`, buf)
-                FfiConverterString.write(value.`endpoint`, buf)
-                FfiConverterSequenceString.write(value.`interfaceAddresses`, buf)
-                FfiConverterUShort.write(value.`keepaliveSecs`, buf)
+                FfiConverterTypeWgSettings.write(value.`wg`, buf)
+                Unit
+            }
+            is CoreConfig.WgThenSocks -> {
+                buf.putInt(4)
+                FfiConverterTypeWgSettings.write(value.`wg`, buf)
                 FfiConverterString.write(value.`upstreamHost`, buf)
                 FfiConverterUShort.write(value.`upstreamPort`, buf)
                 FfiConverterOptionalString.write(value.`upstreamUsername`, buf)
@@ -2075,4 +2176,17 @@ public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.Str
         }
     }
 }
+        /**
+         * Generate a WireGuard keypair (equivalent to `wg genkey` / `wg pubkey`). The
+         * private key is a random x25519 secret; the public key is derived from it.
+         */ fun `generateWireguardKeypair`(): WireguardKeypair {
+            return FfiConverterTypeWireguardKeypair.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_gallery_transport_fn_func_generate_wireguard_keypair(
+        _status)
+}
+    )
+    }
+    
+
 
