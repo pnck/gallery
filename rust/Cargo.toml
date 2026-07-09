@@ -31,6 +31,9 @@ smoltcp = { version = "0.13", default-features = false, features = [
     "proto-ipv4",
     "proto-ipv6",
     "socket-tcp",
+    # Route smoltcp's internal routing/dispatch traces through `log` → logcat,
+    # so "can't reach X" issues (rejected routes, unreachable) are observable.
+    "log",
 ] }
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 base64 = "0.22"

@@ -8,6 +8,7 @@ import io.github.pnck.gallery.network.transport.Endpoint
 import io.github.pnck.gallery.network.transport.TransportConfig
 import io.github.pnck.gallery.network.transport.TransportState
 import io.github.pnck.gallery.network.transport.WgConfig
+import io.github.pnck.gallery.discovery.NetworkDiagnostics
 import io.github.pnck.gallery.discovery.SrvEndpointResolver
 import io.github.pnck.gallery.transport.TransportController
 import io.github.pnck.gallery.network.transport.TransportHealth
@@ -58,6 +59,7 @@ class TransportViewModel @Inject constructor(
     private val okHttpClient: OkHttpClient,
     private val srvResolver: SrvEndpointResolver,
     private val configStore: TransportConfigStore,
+    private val diagnostics: NetworkDiagnostics,
 ) : ViewModel() {
 
     val transportState: StateFlow<TransportState> =
@@ -73,6 +75,13 @@ class TransportViewModel @Inject constructor(
     /** The persisted config to prefill the form with; null until loaded (off-main). */
     private val _savedForm = MutableStateFlow<SavedTransport?>(null)
     val savedForm: StateFlow<SavedTransport?> = _savedForm.asStateFlow()
+
+    /** Streaming diagnostics output (debug tool). */
+    private val _diagOutput = MutableStateFlow("")
+    val diagOutput: StateFlow<String> = _diagOutput.asStateFlow()
+    private val _diagRunning = MutableStateFlow(false)
+    val diagRunning: StateFlow<Boolean> = _diagRunning.asStateFlow()
+    private var diagJob: Job? = null
 
     private var pollJob: Job? = null
 
@@ -139,6 +148,22 @@ class TransportViewModel @Inject constructor(
             runCatching { controller.disconnect() }
             okHttpClient.connectionPool.evictAll()
             _error.value = null
+        }
+    }
+
+    /** Run the network diagnostic suite against [target], streaming to [diagOutput]. */
+    fun runDiagnostics(target: String) {
+        if (diagJob?.isActive == true) return
+        _diagOutput.value = ""
+        diagJob = viewModelScope.launch {
+            _diagRunning.value = true
+            try {
+                diagnostics.run(target) { line -> _diagOutput.value += line + "\n" }
+            } catch (e: Exception) {
+                _diagOutput.value += "✗ diagnostics error: ${e.message}\n"
+            } finally {
+                _diagRunning.value = false
+            }
         }
     }
 

@@ -37,6 +37,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
+import io.github.pnck.gallery.BuildConfig
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -213,6 +215,48 @@ fun TransportScreen(
                     modifier = Modifier.weight(1f),
                 ) { Text("Disconnect") }
             }
+
+            if (BuildConfig.DEBUG) {
+                DiagnosticsSection(viewModel)
+            }
+        }
+    }
+}
+
+/** Debug-only reachability probe: DNS → TCP → HTTP, direct vs via tunnel. */
+@Composable
+private fun DiagnosticsSection(viewModel: TransportViewModel) {
+    val output by viewModel.diagOutput.collectAsState()
+    val running by viewModel.diagRunning.collectAsState()
+    var target by rememberSaveable { mutableStateOf("https://www.google.com/generate_204") }
+
+    Text(
+        "Network diagnostics",
+        style = MaterialTheme.typography.titleMedium,
+        modifier = Modifier.padding(top = 16.dp),
+    )
+    Text(
+        "Staged reachability (DNS/TCP/HTTP), direct vs through the tunnel. " +
+            "ICMP ping/mtr aren't possible over a SOCKS/TCP tunnel; TCP-connect RTT is the equivalent.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    field(target, { target = it }, "Target (URL or host[:port])")
+    Button(
+        onClick = { viewModel.runDiagnostics(target) },
+        enabled = !running,
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+    ) {
+        if (running) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text("Run diagnostics")
+    }
+    if (output.isNotBlank()) {
+        Card(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+            Text(
+                output,
+                modifier = Modifier.padding(12.dp),
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+            )
         }
     }
 }

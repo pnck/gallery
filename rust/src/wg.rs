@@ -343,6 +343,21 @@ impl Drop for WgTunnel {
     }
 }
 
+/// Human-readable destination address of a raw IPv4/IPv6 packet, for tracing.
+fn ip_dst(pkt: &[u8]) -> String {
+    match pkt.first().map(|b| b >> 4) {
+        Some(4) if pkt.len() >= 20 => {
+            std::net::Ipv4Addr::new(pkt[16], pkt[17], pkt[18], pkt[19]).to_string()
+        }
+        Some(6) if pkt.len() >= 40 => {
+            let mut o = [0u8; 16];
+            o.copy_from_slice(&pkt[24..40]);
+            std::net::Ipv6Addr::from(o).to_string()
+        }
+        _ => "?".into(),
+    }
+}
+
 /// Ask boringtun to (re)start the WireGuard handshake and send the initiation.
 /// `force_resend=false` makes it a no-op while an attempt is already in flight,
 /// so this is safe to call on a timer.
@@ -595,6 +610,7 @@ impl Driver {
 
             // 5. Encapsulate everything smoltcp emitted and send over WG/UDP.
             while let Some(pkt) = device.outbound.pop_front() {
+                log::debug!("wg: egress IP packet -> {} ({} B)", ip_dst(&pkt), pkt.len());
                 match tunn.encapsulate(&pkt, &mut scratch) {
                     TunnResult::WriteToNetwork(out) => {
                         let _ = udp.send(out);
@@ -712,8 +728,14 @@ impl Driver {
                     }
                 }
             }
-            TunnResult::WriteToTunnelV4(pkt, _) => device.inbound.push_back(pkt.to_vec()),
-            TunnResult::WriteToTunnelV6(pkt, _) => device.inbound.push_back(pkt.to_vec()),
+            TunnResult::WriteToTunnelV4(pkt, src) => {
+                log::debug!("wg: ingress IP packet <- {} ({} B)", src, pkt.len());
+                device.inbound.push_back(pkt.to_vec());
+            }
+            TunnResult::WriteToTunnelV6(pkt, src) => {
+                log::debug!("wg: ingress IP packet <- {} ({} B)", src, pkt.len());
+                device.inbound.push_back(pkt.to_vec());
+            }
             TunnResult::Done => {}
             TunnResult::Err(e) => log::debug!("wg decapsulate error: {e:?}"),
         }
