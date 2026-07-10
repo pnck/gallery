@@ -11,42 +11,30 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Dns
 import okhttp3.HttpUrl
-import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
-import org.json.JSONObject
 
 /**
  * On-device network diagnostics for the debug build. Runs a staged reachability
  * probe against a target — DNS → TCP → HTTP(S).
  *
- * DNS policy (matches the app's): SRV/WG-endpoint discovery uses the system
- * resolver, but everything ELSE avoids the phone's local DNS — it resolves over
- * **DoH**, and when the tunnel is up the connection itself uses **remote DNS** at
- * the tunnel exit (SOCKS5, hostname passed unresolved). So the primary result is
- * the "via tunnel" one; a "phone network" line is shown only for comparison and
- * is expected to fail for tunnel-only targets.
+ * Reference DNS resolution uses [StableDns] (DoT/TCP to 1.1.1.1) so it works even
+ * where DoH (dns.google / cloudflare-dns.com over HTTPS) is blocked/SNI-filtered.
+ *
+ * The tunnel TCP probe is split into by-name (remote DNS at the exit) and by-IP
+ * (bypasses remote DNS), so a DNS failure is distinguishable from an unreachable
+ * target — the decisive test for "does the tunnel actually reach the internet".
  *
  * ICMP ping/mtr are intentionally absent (need root; can't cross a SOCKS/TCP
  * tunnel). TCP-connect RTT is the equivalent.
  */
 class NetworkDiagnostics @Inject constructor(
     private val controller: TransportController,
+    private val stableDns: StableDns,
 ) {
     private val timeoutMs = 8_000
-
-    // DoH must go DIRECT (phone's own network), never through the tunnel/router —
-    // it's the reference resolution, and routing it through a broken tunnel would
-    // make it fail too. A fresh NO_PROXY client with no OutboundRouter.
-    private val dohClient: OkHttpClient by lazy {
-        OkHttpClient.Builder()
-            .proxy(Proxy.NO_PROXY)
-            .connectTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
-            .readTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
-            .build()
-    }
 
     suspend fun run(rawTarget: String, emit: (String) -> Unit) = withContext(Dispatchers.IO) {
         val url = normalize(rawTarget)
@@ -63,73 +51,40 @@ class NetworkDiagnostics @Inject constructor(
         emit("host=$host port=$port  tunnel=${if (tunnelUp) "127.0.0.1:${socks!!.port}" else "OFF"}")
         emit("")
 
-        // 1) DNS over DoH (no local resolver). Reference only — the tunnel resolves
-        //    remotely at the exit, so these IPs aren't used for the tunnel path.
-        emit("[1] DNS via DoH (reference; tunnel uses remote DNS at exit)")
-        val ips = runCatching { timed { dohResolve(host) } }
-        val dohIps = ips.getOrNull()?.first.orEmpty()
-        ips.onSuccess { (addrs, ms) -> emit("    ✓ ${addrs.joinToString().ifEmpty { "(none)" }}  (${ms} ms)") }
+        // 1) Reference DNS via DoT/TCP-DNS to 1.1.1.1 (survives blocked DoH).
+        emit("[1] DNS via DoT/TCP 1.1.1.1 (reference; direct, not through tunnel)")
+        val ips = runCatching { timed { stableDns.resolve(host) } }
+        val refIps = ips.getOrNull()?.first.orEmpty()
+        ips.onSuccess { (addrs, ms) -> emit("    ${if (addrs.isEmpty()) "✗ no answer" else "✓ ${addrs.joinToString()}"}  (${ms} ms)") }
             .onFailure { emit("    ✗ ${it.message}") }
+        val refIp = refIps.firstOrNull()
         emit("")
 
-        // 2) TCP connect. Tunnel first (the path that matters); phone network second.
+        // 2) TCP connect. Tunnel is split into by-name (upstream/remote DNS) and
+        //    by-IP (bypasses remote DNS) so a DNS failure is distinguishable from
+        //    an unreachable target.
         emit("[2] TCP connect $host:$port")
         if (tunnelUp) {
-            emit("    tunnel (remote DNS): ${tcpViaTunnel(host, port, socks!!.port)}")
+            emit("    tunnel by-name (remote DNS): ${tcpViaTunnel(host, port, socks!!.port)}")
+            emit("    tunnel by-IP  (no DNS)     : ${if (refIp != null) tcpViaTunnel(refIp, port, socks.port) else "skipped (no reference IP)"}")
         } else {
             emit("    tunnel: OFF")
         }
-        emit("    phone network (bypasses tunnel, DoH DNS): ${tcpDirect(dohIps, port)}")
+        emit("    phone by-IP (bypasses tunnel): ${if (refIp != null) tcpDirect(refIp, port) else "skipped (no reference IP)"}")
         emit("")
 
-        // 3) HTTP(S). Same ordering.
+        // 3) HTTP(S).
         emit("[3] HTTP GET $url")
         if (tunnelUp) {
             emit("    -- tunnel (remote DNS) --")
-            httpProbe(url, tunnelPort = socks!!.port, dohIps = emptyList(), emit = emit)
+            httpProbe(url, tunnelPort = socks!!.port, pinIps = emptyList(), emit = emit)
         } else {
             emit("    -- tunnel: OFF --")
         }
-        emit("    -- phone network (bypasses tunnel, DoH DNS) --")
-        httpProbe(url, tunnelPort = null, dohIps = dohIps, emit = emit)
+        emit("    -- phone network (bypasses tunnel) --")
+        httpProbe(url, tunnelPort = null, pinIps = refIps, emit = emit)
         emit("")
         emit("=== done ===")
-    }
-
-    // ── DoH A/AAAA resolution (no local DNS) ─────────────────────────────────
-
-    private fun dohResolve(host: String): List<String> {
-        // An IP literal needs no resolution.
-        runCatching { InetAddress.getByName(host) }.getOrNull()?.let {
-            if (host.any { c -> c.isDigit() } && (host.contains(':') || host.count { c -> c == '.' } == 3)) {
-                return listOf(host)
-            }
-        }
-        for (provider in DOH_PROVIDERS) {
-            val ips = runCatching { dohQuery(provider, host) }.getOrDefault(emptyList())
-            if (ips.isNotEmpty()) return ips
-        }
-        return emptyList()
-    }
-
-    private fun dohQuery(dohUrl: String, host: String): List<String> {
-        fun q(type: String): List<String> {
-            val url = dohUrl.toHttpUrl().newBuilder()
-                .addQueryParameter("name", host).addQueryParameter("type", type).build()
-            val req = Request.Builder().url(url).header("accept", "application/dns-json").build()
-            val json = dohClient.newCall(req).execute().use { r ->
-                if (!r.isSuccessful) return emptyList(); r.body.string()
-            }
-            val answers = JSONObject(json).optJSONArray("Answer") ?: return emptyList()
-            val out = ArrayList<String>()
-            for (i in 0 until answers.length()) {
-                val a = answers.optJSONObject(i) ?: continue
-                val t = a.optInt("type")
-                if (t == 1 || t == 28) a.optString("data").takeIf { it.isNotBlank() }?.let(out::add)
-            }
-            return out
-        }
-        return (q("A") + q("AAAA")).distinct()
     }
 
     // ── Probes ───────────────────────────────────────────────────────────────
@@ -141,17 +96,14 @@ class NetworkDiagnostics @Inject constructor(
         }
     }.getOrElse { "✗ ${it.javaClass.simpleName}: ${it.message}" }
 
-    private fun tcpDirect(dohIps: List<String>, port: Int): String {
-        val ip = dohIps.firstOrNull() ?: return "skipped (no DoH address)"
-        return runCatching {
-            Socket().use {
-                val ms = timed { it.connect(InetSocketAddress(ip, port), timeoutMs) }.second
-                "✓ connected to $ip (${ms} ms)"
-            }
-        }.getOrElse { "✗ ${it.javaClass.simpleName}: ${it.message}" }
-    }
+    private fun tcpDirect(ip: String, port: Int): String = runCatching {
+        Socket().use {
+            val ms = timed { it.connect(InetSocketAddress(ip, port), timeoutMs) }.second
+            "✓ connected to $ip (${ms} ms)"
+        }
+    }.getOrElse { "✗ ${it.javaClass.simpleName}: ${it.message}" }
 
-    private fun httpProbe(url: HttpUrl, tunnelPort: Int?, dohIps: List<String>, emit: (String) -> Unit) {
+    private fun httpProbe(url: HttpUrl, tunnelPort: Int?, pinIps: List<String>, emit: (String) -> Unit) {
         val builder = OkHttpClient.Builder()
             .protocols(listOf(Protocol.HTTP_2, Protocol.HTTP_1_1))
             .connectTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
@@ -160,11 +112,11 @@ class NetworkDiagnostics @Inject constructor(
             builder.proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", tunnelPort)))
         } else {
             builder.proxy(Proxy.NO_PROXY)
-            // Resolve via DoH, not the phone's local resolver.
-            if (dohIps.isNotEmpty()) {
+            // Pin the stable-DNS IPs so we don't depend on the phone's local resolver.
+            if (pinIps.isNotEmpty()) {
                 builder.dns(object : Dns {
                     override fun lookup(hostname: String): List<InetAddress> =
-                        dohIps.map { InetAddress.getByName(it) }
+                        pinIps.map { InetAddress.getByName(it) }
                 })
             }
         }
@@ -193,9 +145,5 @@ class NetworkDiagnostics @Inject constructor(
         if (t.isEmpty()) return null
         t.toHttpUrlOrNull()?.let { return it }
         return "https://$t".toHttpUrlOrNull()
-    }
-
-    private companion object {
-        val DOH_PROVIDERS = listOf("https://dns.google/resolve", "https://cloudflare-dns.com/dns-query")
     }
 }
