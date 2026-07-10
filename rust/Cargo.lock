@@ -502,6 +502,7 @@ dependencies = [
  "android_logger",
  "base64",
  "boringtun",
+ "env_filter",
  "log",
  "rand",
  "smoltcp",

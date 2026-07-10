@@ -69,4 +69,7 @@ class TransportController(
 
     /** Poll a live health snapshot (transfer bytes, handshake) — null when off. */
     suspend fun health(): TransportHealth? = active?.probe()
+
+    /** Ground-truth dump of the running config, or null when off. */
+    suspend fun diagnosticInfo(): String? = active?.diagnosticInfo()
 }

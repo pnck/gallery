@@ -22,4 +22,7 @@ interface NetworkTransport : OutboundRouter {
 
     /** Handshake check + RTT probe against a representative target (PRD §8.4.7). */
     suspend fun probe(target: String = "www.googleapis.com"): TransportHealth
+
+    /** Ground-truth dump of the config the transport is actually running with. */
+    suspend fun diagnosticInfo(): String
 }

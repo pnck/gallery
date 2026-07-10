@@ -751,6 +751,8 @@ internal open class UniffiVTableCallbackInterfaceStateCallback(
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -787,6 +789,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_gallery_transport_fn_method_wgcore_stop(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_gallery_transport_fn_method_wgcore_transport_info(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_gallery_transport_fn_init_callback_vtable_statecallback(`vtable`: UniffiVTableCallbackInterfaceStateCallback,
     ): Unit
     fun uniffi_gallery_transport_fn_func_generate_wireguard_keypair(uniffi_out_err: UniffiRustCallStatus, 
@@ -915,6 +919,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_gallery_transport_checksum_method_wgcore_stop(
     ): Short
+    fun uniffi_gallery_transport_checksum_method_wgcore_transport_info(
+    ): Short
     fun uniffi_gallery_transport_checksum_constructor_wgcore_new(
     ): Short
     fun uniffi_gallery_transport_checksum_method_statecallback_on_state(
@@ -952,6 +958,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_gallery_transport_checksum_method_wgcore_stop() != 19572.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_gallery_transport_checksum_method_wgcore_transport_info() != 17924.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_gallery_transport_checksum_constructor_wgcore_new() != 63333.toShort()) {
@@ -1337,6 +1346,13 @@ public interface WgCoreInterface {
     
     fun `stop`()
     
+    /**
+     * Ground-truth summary of the config the core is running with + live health,
+     * for the config-dump UI. Shows the ACTUAL interface address / DNS / endpoint
+     * the core received — so a UI/plumbing mismatch is immediately visible.
+     */
+    fun `transportInfo`(): kotlin.String
+    
     companion object
 }
 
@@ -1492,6 +1508,23 @@ open class WgCore: Disposable, AutoCloseable, WgCoreInterface {
 }
     }
     
+    
+
+    
+    /**
+     * Ground-truth summary of the config the core is running with + live health,
+     * for the config-dump UI. Shows the ACTUAL interface address / DNS / endpoint
+     * the core received — so a UI/plumbing mismatch is immediately visible.
+     */override fun `transportInfo`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_gallery_transport_fn_method_wgcore_transport_info(
+        it, _status)
+}
+    }
+    )
+    }
     
 
     

@@ -47,6 +47,7 @@ rand = "0.8"
 # (`adb logcat -s gallery-wg`). Android-only; host/CI builds don't need it.
 [target.'cfg(target_os = "android")'.dependencies]
 android_logger = "0.14"
+env_filter = "0.1"
 
 [profile.release]
 opt-level = "z"

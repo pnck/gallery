@@ -86,9 +86,13 @@ fun TransportScreen(
     var socksUser by rememberSaveable { mutableStateOf("") }
     var socksPass by rememberSaveable { mutableStateOf("") }
 
-    // Prefill from the persisted config once it has loaded.
+    // Prefill from the persisted config exactly once, so a late load never
+    // overwrites what the user just typed.
+    var prefilled by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(saved) {
-        saved?.let { s ->
+        val s = saved
+        if (s != null && !prefilled) {
+            prefilled = true
             val f = s.form
             wgEnabled = f.wgEnabled; socksEnabled = f.socksEnabled
             privateKey = f.privateKey; publicKey = s.publicKey; peerPublicKey = f.peerPublicKey
@@ -252,12 +256,18 @@ private fun DiagnosticsSection(viewModel: TransportViewModel) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     field(target, { target = it }, "Target (URL or host[:port])")
-    Button(
-        onClick = { viewModel.runDiagnostics(target) },
-        enabled = !running,
-        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-    ) {
-        if (running) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text("Run diagnostics")
+    Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Button(
+            onClick = { viewModel.runDiagnostics(target) },
+            enabled = !running,
+            modifier = Modifier.weight(1f),
+        ) {
+            if (running) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text("Run diagnostics")
+        }
+        OutlinedButton(
+            onClick = viewModel::dumpConfig,
+            modifier = Modifier.weight(1f),
+        ) { Text("Dump config") }
     }
     if (output.isNotBlank()) {
         val clipboard = LocalClipboardManager.current

@@ -84,10 +84,16 @@ fn init_logging() {
         use std::sync::Once;
         static INIT: Once = Once::new();
         INIT.call_once(|| {
+            // Per-module filter so the UniFFI binding layer's per-call debug logs
+            // (target `gallery_transport`: "health", "start", …) and smoltcp's
+            // retransmit spam don't flood; only our wg/socks modules stay at debug.
+            let filter = env_filter::Builder::new()
+                .parse("warn,gallery_transport::wg=debug,gallery_transport::socks=debug")
+                .build();
             android_logger::init_once(
                 android_logger::Config::default()
                     .with_tag("gallery-wg")
-                    .with_max_level(log::LevelFilter::Debug),
+                    .with_filter(filter),
             );
         });
     }
@@ -151,6 +157,10 @@ struct CoreInner {
     /// Present only in WgThenSocks mode; kept alive for the session and consulted
     /// by `health()`. Dropping it stops the WG driver thread.
     tunnel: Option<Arc<WgTunnel>>,
+    /// Human-readable summary of the config the core is ACTUALLY running with,
+    /// for the config-dump UI — the ground truth for "which interface address /
+    /// DNS / endpoint did the core receive".
+    config_summary: Option<String>,
 }
 
 #[uniffi::export]
@@ -159,7 +169,12 @@ impl WgCore {
     pub fn new() -> Arc<Self> {
         init_logging();
         Arc::new(Self {
-            inner: Mutex::new(CoreInner { running: false, listener_thread: None, tunnel: None }),
+            inner: Mutex::new(CoreInner {
+                running: false,
+                listener_thread: None,
+                tunnel: None,
+                config_summary: None,
+            }),
             shutdown: Arc::new(AtomicBool::new(false)),
             port: Arc::new(AtomicU16::new(0)),
             callback: Mutex::new(None),
@@ -175,6 +190,7 @@ impl WgCore {
         }
         self.emit(CoreState::Starting);
         self.shutdown.store(false, Ordering::SeqCst);
+        inner.config_summary = Some(summarize_config(&config));
 
         // WG modes need the live tunnel woven into the dialer; the tunnel-less
         // modes map straight from the config.
@@ -226,6 +242,29 @@ impl WgCore {
     pub fn local_socks_port(&self) -> Option<u16> {
         let p = self.port.load(Ordering::SeqCst);
         if p == 0 { None } else { Some(p) }
+    }
+
+    /// Ground-truth summary of the config the core is running with + live health,
+    /// for the config-dump UI. Shows the ACTUAL interface address / DNS / endpoint
+    /// the core received — so a UI/plumbing mismatch is immediately visible.
+    pub fn transport_info(&self) -> String {
+        let inner = self.inner.lock().unwrap();
+        let mut s = inner
+            .config_summary
+            .clone()
+            .unwrap_or_else(|| "no config (not started)".into());
+        if let Some(t) = &inner.tunnel {
+            s.push_str(&format!(
+                "\nhandshake_ok={} tx_bytes={} rx_bytes={}",
+                t.handshake_ok(),
+                t.tx_bytes(),
+                t.rx_bytes(),
+            ));
+        }
+        if let Some(p) = self.local_socks_port() {
+            s.push_str(&format!("\nlocal_socks=127.0.0.1:{p}"));
+        }
+        s
     }
 
     pub fn health(&self) -> TransportHealth {
@@ -281,6 +320,29 @@ impl WgCore {
             cb.on_state(state);
         }
     }
+}
+
+/// One-line-per-field dump of the config the core received, for the dump UI.
+fn summarize_config(config: &CoreConfig) -> String {
+    match config {
+        CoreConfig::Direct => "mode=Direct".into(),
+        CoreConfig::SocksUpstream { host, port, username, .. } => format!(
+            "mode=SocksOnly\nupstream={host}:{port}\nauth={}",
+            if username.is_some() { "yes" } else { "no" },
+        ),
+        CoreConfig::WgOnly { wg } => format!("mode=WgOnly\n{}", summarize_wg(wg)),
+        CoreConfig::WgThenSocks { wg, upstream_host, upstream_port, .. } => format!(
+            "mode=WgThenSocks\n{}\nupstream_socks={upstream_host}:{upstream_port}",
+            summarize_wg(wg),
+        ),
+    }
+}
+
+fn summarize_wg(wg: &WgSettings) -> String {
+    format!(
+        "interface={:?}\ndns={:?}\nendpoint={}\nkeepalive={}",
+        wg.interface_addresses, wg.dns, wg.endpoint, wg.keepalive_secs,
+    )
 }
 
 /// Build [`WgParams`] from [`WgSettings`] (resolving the endpoint once, directly)

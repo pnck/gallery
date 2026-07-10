@@ -1020,6 +1020,20 @@ mod tests {
     }
 
     #[test]
+    fn parse_accepts_bare_interface_ip_as_slash32() {
+        let (sk, _) = keypair();
+        let (_, pk) = keypair();
+        let sk_b64 = base64::engine::general_purpose::STANDARD.encode(sk.to_bytes());
+        let pk_b64 = base64::engine::general_purpose::STANDARD.encode(pk.to_bytes());
+        // A user typing "10.94.1.200" (no /32) must become 10.94.1.200/32, not a default.
+        let p = WgParams::parse(&sk_b64, &pk_b64, None, "1.2.3.4:51820", &["10.94.1.200".into()], &[], 25)
+            .expect("bare interface IP should parse");
+        assert_eq!(p.interface_addrs.len(), 1);
+        assert_eq!(p.interface_addrs[0].address().to_string(), "10.94.1.200");
+        assert_eq!(p.interface_addrs[0].prefix_len(), 32);
+    }
+
+    #[test]
     fn parse_rejects_bad_key() {
         assert!(WgParams::parse("not-base64!!", "AAAA", None, "1.2.3.4:51820", &["10.0.0.2/32".into()], &[], 25).is_err());
     }

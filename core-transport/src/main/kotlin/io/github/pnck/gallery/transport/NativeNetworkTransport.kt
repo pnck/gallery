@@ -134,6 +134,10 @@ class NativeNetworkTransport(
         )
     }
 
+    override suspend fun diagnosticInfo(): String = withContext(Dispatchers.IO) {
+        runCatching { core.transportInfo() }.getOrElse { "transport_info error: ${it.message}" }
+    }
+
     private fun epochSeconds(): Long = System.currentTimeMillis() / 1000L
 
     private companion object {

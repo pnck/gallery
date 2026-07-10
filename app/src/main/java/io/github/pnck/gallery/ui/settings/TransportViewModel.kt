@@ -152,6 +152,14 @@ class TransportViewModel @Inject constructor(
         }
     }
 
+    /** Dump the config the core is ACTUALLY running with (ground truth vs the form). */
+    fun dumpConfig() {
+        viewModelScope.launch {
+            val info = controller.diagnosticInfo() ?: "(transport not connected — connect first)"
+            _diagOutput.value = "=== effective core config ===\n$info\n"
+        }
+    }
+
     /** Run the network diagnostic suite against [target], streaming to [diagOutput]. */
     fun runDiagnostics(target: String) {
         if (diagJob?.isActive == true) return
