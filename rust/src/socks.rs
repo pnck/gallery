@@ -261,7 +261,12 @@ fn read_target(client: &mut TcpStream, atyp: u8) -> io::Result<Target> {
             let host = String::from_utf8(name)
                 .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "bad domain"))?;
             let port = read_port(client)?;
-            Ok(Target::Domain(host, port))
+            // A client (e.g. our own by-IP diagnostic) may send an IP literal in
+            // the DOMAIN field; treat it as an IP so we don't try to DNS-resolve it.
+            match host.parse::<std::net::IpAddr>() {
+                Ok(ip) => Ok(Target::Ip(ip, port)),
+                Err(_) => Ok(Target::Domain(host, port)),
+            }
         }
         _ => Err(io::Error::new(io::ErrorKind::InvalidData, "bad atyp")),
     }

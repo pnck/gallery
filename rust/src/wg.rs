@@ -411,6 +411,21 @@ fn ip_dst(pkt: &[u8]) -> String {
     }
 }
 
+/// Human-readable source address of a raw IPv4/IPv6 packet, for tracing.
+fn ip_src(pkt: &[u8]) -> String {
+    match pkt.first().map(|b| b >> 4) {
+        Some(4) if pkt.len() >= 20 => {
+            std::net::Ipv4Addr::new(pkt[12], pkt[13], pkt[14], pkt[15]).to_string()
+        }
+        Some(6) if pkt.len() >= 40 => {
+            let mut o = [0u8; 16];
+            o.copy_from_slice(&pkt[8..24]);
+            std::net::Ipv6Addr::from(o).to_string()
+        }
+        _ => "?".into(),
+    }
+}
+
 /// Ask boringtun to (re)start the WireGuard handshake and send the initiation.
 /// `force_resend=false` makes it a no-op while an attempt is already in flight,
 /// so this is safe to call on a timer.
@@ -580,6 +595,11 @@ impl Driver {
         // WireGuard is lazy: without traffic it never initiates the first handshake,
         // so the peer would never see us. Proactively initiate now (and re-initiate
         // below until established), like a normal client with persistent keepalive.
+        // Log the exact source identity — a mismatch with the server's AllowedIPs
+        // for this peer is the #1 reason data is dropped after a good handshake.
+        let ifaddrs: Vec<String> = params.interface_addrs.iter().map(|c| c.to_string()).collect();
+        let dnss: Vec<String> = params.dns_servers.iter().map(|s| s.to_string()).collect();
+        log::info!("wg: interface={ifaddrs:?} dns={dnss:?} (egress source = interface address)");
         log::info!("wg: driver up, initiating handshake");
         initiate_handshake(&mut tunn, &udp, &mut scratch);
         let mut last_hs_attempt = StdInstant::now();
@@ -730,7 +750,7 @@ impl Driver {
 
             // 5. Encapsulate everything smoltcp emitted and send over WG/UDP.
             while let Some(pkt) = device.outbound.pop_front() {
-                log::debug!("wg: egress IP packet -> {} ({} B)", ip_dst(&pkt), pkt.len());
+                log::debug!("wg: egress {} -> {} ({} B)", ip_src(&pkt), ip_dst(&pkt), pkt.len());
                 match tunn.encapsulate(&pkt, &mut scratch) {
                     TunnResult::WriteToNetwork(out) => {
                         let _ = udp.send(out);
@@ -911,6 +931,18 @@ mod tests {
         assert!(
             dsts.iter().any(|d| d == "192.168.94.10"),
             "expected a SYN routed to the off-link target through the device; got {dsts:?}",
+        );
+        // The SYN's SOURCE must be the tunnel interface address (10.94.1.5), NOT
+        // the phone's real NIC — otherwise the WG peer drops it by cryptokey routing.
+        let syn = device
+            .outbound
+            .iter()
+            .find(|p| ip_dst(p) == "192.168.94.10")
+            .unwrap();
+        assert_eq!(
+            ip_src(syn),
+            "10.94.1.5",
+            "egress source must be the WG interface address",
         );
     }
 

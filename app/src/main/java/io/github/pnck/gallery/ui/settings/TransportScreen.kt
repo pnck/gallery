@@ -37,6 +37,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import io.github.pnck.gallery.BuildConfig
 import androidx.compose.ui.text.input.KeyboardType
@@ -258,6 +260,11 @@ private fun DiagnosticsSection(viewModel: TransportViewModel) {
         if (running) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text("Run diagnostics")
     }
     if (output.isNotBlank()) {
+        val clipboard = LocalClipboardManager.current
+        OutlinedButton(
+            onClick = { clipboard.setText(AnnotatedString(output)) },
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+        ) { Text("Copy output") }
         Card(Modifier.fillMaxWidth().padding(top = 8.dp)) {
             Text(
                 output,
