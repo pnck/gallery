@@ -123,6 +123,15 @@ pub fn generate_keypair() -> crate::WireguardKeypair {
     }
 }
 
+/// Derive the base64 public key for a base64 private key (= `wg pubkey`), so the
+/// user can verify the public key they gave the server matches this private key.
+pub fn derive_public_key(private_key_b64: &str) -> Result<String, String> {
+    let sk_bytes = decode_key(private_key_b64)?;
+    let sk = StaticSecret::from(sk_bytes);
+    let pk = PublicKey::from(&sk);
+    Ok(base64::engine::general_purpose::STANDARD.encode(pk.to_bytes()))
+}
+
 fn decode_key(b64: &str) -> Result<[u8; 32], String> {
     let raw = base64::engine::general_purpose::STANDARD
         .decode(b64.trim())
@@ -765,7 +774,10 @@ impl Driver {
             let mut recv_buf = [0u8; SCRATCH];
             loop {
                 match udp.recv(&mut recv_buf) {
-                    Ok(n) => self.handle_incoming(&mut tunn, &udp, &recv_buf[..n], &mut device, &mut scratch),
+                    Ok(n) => {
+                        log::debug!("wg: <- udp {n} B from peer");
+                        self.handle_incoming(&mut tunn, &udp, &recv_buf[..n], &mut device, &mut scratch);
+                    }
                     Err(ref e) if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut => break,
                     Err(e) => {
                         log::warn!("wg udp recv error: {e}");
@@ -876,8 +888,8 @@ impl Driver {
                 log::debug!("wg: ingress IP packet <- {} ({} B)", src, pkt.len());
                 device.inbound.push_back(pkt.to_vec());
             }
-            TunnResult::Done => {}
-            TunnResult::Err(e) => log::debug!("wg decapsulate error: {e:?}"),
+            TunnResult::Done => log::debug!("wg: decapsulate -> Done (keepalive/handshake, no payload)"),
+            TunnResult::Err(e) => log::warn!("wg: decapsulate ERROR: {e:?} (can't decrypt peer data — key/session issue?)"),
         }
     }
 }

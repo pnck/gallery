@@ -753,6 +753,8 @@ internal open class UniffiVTableCallbackInterfaceStateCallback(
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -793,6 +795,8 @@ internal interface UniffiLib : Library {
     ): RustBuffer.ByValue
     fun uniffi_gallery_transport_fn_init_callback_vtable_statecallback(`vtable`: UniffiVTableCallbackInterfaceStateCallback,
     ): Unit
+    fun uniffi_gallery_transport_fn_func_derive_wireguard_public_key(`privateKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_gallery_transport_fn_func_generate_wireguard_keypair(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun ffi_gallery_transport_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -907,6 +911,8 @@ internal interface UniffiLib : Library {
     ): Unit
     fun ffi_gallery_transport_rust_future_complete_void(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_gallery_transport_checksum_func_derive_wireguard_public_key(
+    ): Short
     fun uniffi_gallery_transport_checksum_func_generate_wireguard_keypair(
     ): Short
     fun uniffi_gallery_transport_checksum_method_wgcore_health(
@@ -942,6 +948,9 @@ private fun uniffiCheckContractApiVersion(lib: UniffiLib) {
 
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: UniffiLib) {
+    if (lib.uniffi_gallery_transport_checksum_func_derive_wireguard_public_key() != 30298.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_gallery_transport_checksum_func_generate_wireguard_keypair() != 16621.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -2283,6 +2292,19 @@ public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.Str
         }
     }
 }
+        /**
+         * Derive the base64 public key for a base64 private key (= `wg pubkey`). Returns
+         * an empty string if the private key is invalid, so the UI can update live.
+         */ fun `deriveWireguardPublicKey`(`privateKey`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_gallery_transport_fn_func_derive_wireguard_public_key(
+        FfiConverterString.lower(`privateKey`),_status)
+}
+    )
+    }
+    
+
         /**
          * Generate a WireGuard keypair (equivalent to `wg genkey` / `wg pubkey`). The
          * private key is a random x25519 secret; the public key is derived from it.

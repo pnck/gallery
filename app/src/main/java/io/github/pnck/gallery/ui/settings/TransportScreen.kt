@@ -41,6 +41,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import io.github.pnck.gallery.BuildConfig
+import io.github.pnck.gallery.transport.WireguardTools
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -72,7 +73,11 @@ fun TransportScreen(
     var wgEnabled by rememberSaveable { mutableStateOf(true) }
     var socksEnabled by rememberSaveable { mutableStateOf(true) }
     var privateKey by rememberSaveable { mutableStateOf("") }
-    var publicKey by rememberSaveable { mutableStateOf("") } // derived, shown to copy to the peer
+    // Always derived from the private key in use — so what you copy to the server
+    // is guaranteed to correspond to the configured private key.
+    val publicKey = remember(privateKey) {
+        if (privateKey.isBlank()) "" else WireguardTools.derivePublicKey(privateKey)
+    }
     var peerPublicKey by rememberSaveable { mutableStateOf("") }
     var presharedKey by rememberSaveable { mutableStateOf("") }
     var useSrv by rememberSaveable { mutableStateOf(false) }
@@ -95,7 +100,7 @@ fun TransportScreen(
             prefilled = true
             val f = s.form
             wgEnabled = f.wgEnabled; socksEnabled = f.socksEnabled
-            privateKey = f.privateKey; publicKey = s.publicKey; peerPublicKey = f.peerPublicKey
+            privateKey = f.privateKey; peerPublicKey = f.peerPublicKey
             presharedKey = f.presharedKey; useSrv = f.useSrv; endpoint = f.endpoint; srvName = f.srvName
             interfaceAddress = f.interfaceAddress; dns = f.dns; keepalive = f.keepaliveSecs
             socksHost = f.socksHost; socksPort = f.socksPort; socksUser = f.socksUser; socksPass = f.socksPass
@@ -140,12 +145,7 @@ fun TransportScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     OutlinedButton(
-                        onClick = {
-                            viewModel.generateKeypair { kp ->
-                                privateKey = kp.privateKey
-                                publicKey = kp.publicKey
-                            }
-                        },
+                        onClick = { viewModel.generateKeypair { kp -> privateKey = kp.privateKey } },
                     ) { Text("Generate keypair") }
                     Text(
                         "creates a new client key",
@@ -159,8 +159,14 @@ fun TransportScreen(
                         value = publicKey,
                         onValueChange = {},
                         readOnly = true,
-                        label = { Text("Your public key — add as a peer on the server") },
+                        label = { Text("Your public key (derived) — must match the server's peer PublicKey") },
                         modifier = Modifier.fillMaxWidth(),
+                    )
+                } else if (privateKey.isNotBlank()) {
+                    Text(
+                        "⚠ private key invalid (can't derive public key)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
                     )
                 }
                 field(peerPublicKey, { peerPublicKey = it }, "Peer (server) public key (base64)")

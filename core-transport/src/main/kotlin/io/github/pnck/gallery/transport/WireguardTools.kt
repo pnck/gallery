@@ -1,5 +1,6 @@
 package io.github.pnck.gallery.transport
 
+import uniffi.gallery_transport.deriveWireguardPublicKey
 import uniffi.gallery_transport.generateWireguardKeypair
 
 /** A freshly generated WireGuard keypair (base64), for the config UI. */
@@ -13,4 +14,7 @@ object WireguardTools {
     /** Generate a keypair (like `wg genkey` / `wg pubkey`). No native tunnel needed. */
     fun generateKeypair(): WgKeypair =
         generateWireguardKeypair().let { WgKeypair(it.privateKey, it.publicKey) }
+
+    /** Derive the public key for a private key (= `wg pubkey`), "" if invalid. */
+    fun derivePublicKey(privateKey: String): String = deriveWireguardPublicKey(privateKey.trim())
 }

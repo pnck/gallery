@@ -76,6 +76,13 @@ pub fn generate_wireguard_keypair() -> WireguardKeypair {
     wg::generate_keypair()
 }
 
+/// Derive the base64 public key for a base64 private key (= `wg pubkey`). Returns
+/// an empty string if the private key is invalid, so the UI can update live.
+#[uniffi::export]
+pub fn derive_wireguard_public_key(private_key: String) -> String {
+    wg::derive_public_key(&private_key).unwrap_or_default()
+}
+
 /// Route `log` records to Android logcat under the `gallery-wg` tag, once.
 /// `adb logcat -s gallery-wg` shows the transport core's handshake progress.
 fn init_logging() {
@@ -339,9 +346,12 @@ fn summarize_config(config: &CoreConfig) -> String {
 }
 
 fn summarize_wg(wg: &WgSettings) -> String {
+    // Derive OUR public key from the configured private key so it can be checked
+    // against the server's peer config; peer_public_key is the server's own key.
+    let my_pub = wg::derive_public_key(&wg.private_key).unwrap_or_else(|_| "<invalid private key>".into());
     format!(
-        "interface={:?}\ndns={:?}\nendpoint={}\nkeepalive={}",
-        wg.interface_addresses, wg.dns, wg.endpoint, wg.keepalive_secs,
+        "interface={:?}\ndns={:?}\nendpoint={}\nkeepalive={}\nmy_public_key(derived)={}\npeer_public_key={}",
+        wg.interface_addresses, wg.dns, wg.endpoint, wg.keepalive_secs, my_pub, wg.peer_public_key,
     )
 }
 
