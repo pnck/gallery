@@ -100,6 +100,11 @@ fn init_logging() {
             android_logger::init_once(
                 android_logger::Config::default()
                     .with_tag("gallery-wg")
+                    // BOTH are required: with_max_level sets the log crate's GLOBAL
+                    // max (without it android_logger never calls log::set_max_level,
+                    // so it stays Off and nothing prints); with_filter refines per
+                    // module on top of that.
+                    .with_max_level(log::LevelFilter::Debug)
                     .with_filter(filter),
             );
         });
