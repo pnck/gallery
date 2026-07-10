@@ -3,37 +3,42 @@ package io.github.pnck.gallery.discovery
 import java.io.ByteArrayOutputStream
 import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.net.Proxy
 import java.net.Socket
 import javax.inject.Inject
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 
 /**
- * A DNS resolver that works in restricted networks where DoH endpoints
- * (dns.google, cloudflare-dns.com over HTTPS) are blocked or SNI-filtered.
+ * A DNS resolver that resolves A records against 1.1.1.1.
  *
- * Resolves A records against 1.1.1.1 by **IP** (no bootstrap chicken-and-egg),
- * over DoT (DNS-over-TLS, :853) first, then plain DNS-over-TCP (:53) — the two
- * stable paths. All direct (phone network); this is reference resolution.
+ * DNS follows the tunnel (the app's model): when a SOCKS [Proxy] is given (tunnel
+ * up), the query goes **through the tunnel** as plain DNS-over-TCP to 1.1.1.1:53
+ * — the tunnel already provides encryption, and this is what actual app traffic
+ * does. Only the tunnel-off path resolves directly, and then over DoT (:853) then
+ * plain TCP (:53), by IP, to survive blocked DoH.
  */
 class StableDns @Inject constructor() {
 
-    /** Resolve [host] to IP strings, or empty if all paths fail. */
-    fun resolve(host: String, timeoutMs: Int = 6_000): List<String> {
-        // IP literal → no resolution.
+    /** Resolve [host] to IP strings. Through [viaSocks] when set (tunnel), else direct. */
+    fun resolve(host: String, viaSocks: Proxy? = null, timeoutMs: Int = 6_000): List<String> {
         if (isIpLiteral(host)) return listOf(host)
-        return runCatching { resolveDot(host, timeoutMs) }.getOrNull()?.takeIf { it.isNotEmpty() }
-            ?: runCatching { resolveTcp(host, timeoutMs) }.getOrDefault(emptyList())
+        return if (viaSocks != null) {
+            // Through the tunnel: plain DNS-over-TCP (the tunnel encrypts).
+            runCatching { resolveTcp(host, timeoutMs, viaSocks) }.getOrDefault(emptyList())
+        } else {
+            runCatching { resolveDot(host, timeoutMs) }.getOrNull()?.takeIf { it.isNotEmpty() }
+                ?: runCatching { resolveTcp(host, timeoutMs, null) }.getOrDefault(emptyList())
+        }
     }
 
-    /** DNS-over-TLS to 1.1.1.1:853 (cert has an IP SAN for 1.1.1.1). */
+    /** DNS-over-TLS to 1.1.1.1:853 (direct only; cert has an IP SAN for 1.1.1.1). */
     private fun resolveDot(host: String, timeoutMs: Int): List<String> {
         val plain = Socket()
         plain.connect(InetSocketAddress(RESOLVER_IP, 853), timeoutMs)
         plain.soTimeout = timeoutMs
         val ssl = (SSLSocketFactory.getDefault() as SSLSocketFactory)
             .createSocket(plain, RESOLVER_IP, 853, true) as SSLSocket
-        // SNI + verify the cert against 1.1.1.1 (Cloudflare's cert lists it).
         ssl.sslParameters = ssl.sslParameters.apply {
             endpointIdentificationAlgorithm = "HTTPS"
             serverNames = listOf(javax.net.ssl.SNIHostName(RESOLVER_SNI))
@@ -41,10 +46,15 @@ class StableDns @Inject constructor() {
         return ssl.use { it.startHandshake(); queryOverStream(it, host) }
     }
 
-    /** Plain DNS-over-TCP to 1.1.1.1:53. */
-    private fun resolveTcp(host: String, timeoutMs: Int): List<String> {
-        val socket = Socket()
-        socket.connect(InetSocketAddress(RESOLVER_IP, 53), timeoutMs)
+    /** Plain DNS-over-TCP to 1.1.1.1:53, direct or through a SOCKS [proxy] (the tunnel). */
+    private fun resolveTcp(host: String, timeoutMs: Int, proxy: Proxy?): List<String> {
+        val socket = if (proxy != null) Socket(proxy) else Socket()
+        val addr = if (proxy != null) {
+            InetSocketAddress.createUnresolved(RESOLVER_IP, 53) // let the tunnel dial it
+        } else {
+            InetSocketAddress(RESOLVER_IP, 53)
+        }
+        socket.connect(addr, timeoutMs)
         socket.soTimeout = timeoutMs
         return socket.use { queryOverStream(it, host) }
     }
@@ -78,14 +88,14 @@ class StableDns @Inject constructor() {
         out.write(id ushr 8); out.write(id and 0xFF)
         out.write(0x01); out.write(0x00) // flags: recursion desired
         out.write(0x00); out.write(0x01) // QDCOUNT = 1
-        out.write(0x00); out.write(0x00) // ANCOUNT
-        out.write(0x00); out.write(0x00) // NSCOUNT
-        out.write(0x00); out.write(0x00) // ARCOUNT
+        out.write(0x00); out.write(0x00)
+        out.write(0x00); out.write(0x00)
+        out.write(0x00); out.write(0x00)
         for (label in host.trim('.').split('.')) {
             out.write(label.length)
             out.write(label.toByteArray(Charsets.US_ASCII))
         }
-        out.write(0)                       // end of name
+        out.write(0)
         out.write(0x00); out.write(0x01)   // QTYPE = A
         out.write(0x00); out.write(0x01)   // QCLASS = IN
         return out.toByteArray()

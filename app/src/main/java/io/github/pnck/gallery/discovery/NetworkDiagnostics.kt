@@ -46,43 +46,43 @@ class NetworkDiagnostics @Inject constructor(
         val port = url.port
         val socks = controller.proxyFor(host) // non-null 127.0.0.1:P when tunnel is up
         val tunnelUp = socks != null
+        val socksProxy = socks?.let { Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", it.port)) }
 
         emit("=== Diagnostics for $url ===")
         emit("host=$host port=$port  tunnel=${if (tunnelUp) "127.0.0.1:${socks!!.port}" else "OFF"}")
         emit("")
 
-        // 1) Reference DNS via DoT/TCP-DNS to 1.1.1.1 (survives blocked DoH).
-        emit("[1] DNS via DoT/TCP 1.1.1.1 (reference; direct, not through tunnel)")
-        val ips = runCatching { timed { stableDns.resolve(host) } }
+        // 1) DNS — through the tunnel when it's up (that's how app traffic resolves),
+        //    direct only when off. Uses 1.1.1.1 as a known resolver via the tunnel;
+        //    the by-name probe below separately exercises YOUR configured DNS.
+        emit(if (tunnelUp) "[1] DNS via 1.1.1.1 THROUGH the tunnel" else "[1] DNS direct (DoT/TCP 1.1.1.1)")
+        val ips = runCatching { timed { stableDns.resolve(host, viaSocks = socksProxy) } }
         val refIps = ips.getOrNull()?.first.orEmpty()
         ips.onSuccess { (addrs, ms) -> emit("    ${if (addrs.isEmpty()) "✗ no answer" else "✓ ${addrs.joinToString()}"}  (${ms} ms)") }
             .onFailure { emit("    ✗ ${it.message}") }
         val refIp = refIps.firstOrNull()
         emit("")
 
-        // 2) TCP connect. Tunnel is split into by-name (upstream/remote DNS) and
-        //    by-IP (bypasses remote DNS) so a DNS failure is distinguishable from
-        //    an unreachable target.
+        // 2) TCP connect — everything through the tunnel when up. by-name uses YOUR
+        //    configured DNS (WgOnly → WG DNS; Wg+SOCKS → upstream remote DNS); by-IP
+        //    uses the [1] IP so a DNS failure is distinguishable from unreachability.
         emit("[2] TCP connect $host:$port")
         if (tunnelUp) {
-            emit("    tunnel by-name (remote DNS): ${tcpViaTunnel(host, port, socks!!.port)}")
-            emit("    tunnel by-IP  (no DNS)     : ${if (refIp != null) tcpViaTunnel(refIp, port, socks.port) else "skipped (no reference IP)"}")
+            emit("    tunnel by-name (your configured DNS): ${tcpViaTunnel(host, port, socks!!.port)}")
+            emit("    tunnel by-IP  (no DNS)              : ${if (refIp != null) tcpViaTunnel(refIp, port, socks.port) else "skipped (no IP from [1])"}")
         } else {
             emit("    tunnel: OFF")
+            emit("    phone by-IP: ${if (refIp != null) tcpDirect(refIp, port) else "skipped (no IP from [1])"}")
         }
-        emit("    phone by-IP (bypasses tunnel): ${if (refIp != null) tcpDirect(refIp, port) else "skipped (no reference IP)"}")
         emit("")
 
-        // 3) HTTP(S).
+        // 3) HTTP(S) through the tunnel (by-name) when up.
         emit("[3] HTTP GET $url")
         if (tunnelUp) {
-            emit("    -- tunnel (remote DNS) --")
             httpProbe(url, tunnelPort = socks!!.port, pinIps = emptyList(), emit = emit)
         } else {
-            emit("    -- tunnel: OFF --")
+            httpProbe(url, tunnelPort = null, pinIps = refIps, emit = emit)
         }
-        emit("    -- phone network (bypasses tunnel) --")
-        httpProbe(url, tunnelPort = null, pinIps = refIps, emit = emit)
         emit("")
         emit("=== done ===")
     }
