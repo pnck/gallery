@@ -100,10 +100,20 @@ impl Dialer {
                 let (ip, port) = match target {
                     Target::Ip(ip, port) => (*ip, *port),
                     Target::Domain(host, port) => {
-                        let ip = if tunnel.has_dns() {
-                            tunnel.resolve(host)?
-                        } else {
-                            resolve_for_tunnel(target)?.0
+                        // Prefer in-tunnel DNS (no leak). If it fails (server has no
+                        // resolver at the configured DNS, or won't route the reply),
+                        // fall back to a local lookup so the connection still works —
+                        // this decouples "can the tunnel reach the internet" from
+                        // "does the WG DNS work", which is what you want when debugging.
+                        let ip = match (tunnel.has_dns(), tunnel.resolve_or(host)) {
+                            (_, Some(ip)) => ip,
+                            (true, None) => {
+                                log::warn!(
+                                    "wg: in-tunnel DNS for {host} failed; falling back to local resolve (DNS leak)"
+                                );
+                                resolve_for_tunnel(target)?.0
+                            }
+                            (false, None) => resolve_for_tunnel(target)?.0,
                         };
                         (ip, *port)
                     }

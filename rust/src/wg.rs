@@ -347,8 +347,18 @@ impl WgTunnel {
         self.cmd
             .send(Command::Resolve { host: host.to_string(), reply: tx })
             .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "tunnel driver stopped"))?;
-        rx.recv_timeout(Duration::from_secs(10))
+        rx.recv_timeout(Duration::from_secs(6))
             .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "in-tunnel DNS timed out"))?
+    }
+
+    /// In-tunnel resolve, returning None if DNS isn't configured or the query
+    /// failed — so the caller can fall back to a local lookup.
+    pub fn resolve_or(&self, host: &str) -> Option<IpAddr> {
+        if self.has_dns {
+            self.resolve(host).ok()
+        } else {
+            None
+        }
     }
 
     pub fn handshake_ok(&self) -> bool {
@@ -665,7 +675,7 @@ impl Driver {
                         false
                     }
                     Err(dns::GetQueryResultError::Pending) => {
-                        if started.elapsed() >= Duration::from_secs(8) {
+                        if started.elapsed() >= Duration::from_secs(5) {
                             let _ = reply.send(Err(io::Error::new(
                                 io::ErrorKind::TimedOut,
                                 "in-tunnel DNS timed out",

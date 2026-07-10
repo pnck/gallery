@@ -1,6 +1,5 @@
 package io.github.pnck.gallery.discovery
 
-import io.github.pnck.gallery.di.AuthClient
 import io.github.pnck.gallery.transport.TransportController
 import java.net.InetAddress
 import java.net.InetSocketAddress
@@ -35,9 +34,19 @@ import org.json.JSONObject
  */
 class NetworkDiagnostics @Inject constructor(
     private val controller: TransportController,
-    @AuthClient private val dohClient: OkHttpClient,
 ) {
     private val timeoutMs = 8_000
+
+    // DoH must go DIRECT (phone's own network), never through the tunnel/router —
+    // it's the reference resolution, and routing it through a broken tunnel would
+    // make it fail too. A fresh NO_PROXY client with no OutboundRouter.
+    private val dohClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .proxy(Proxy.NO_PROXY)
+            .connectTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
+            .readTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
+            .build()
+    }
 
     suspend fun run(rawTarget: String, emit: (String) -> Unit) = withContext(Dispatchers.IO) {
         val url = normalize(rawTarget)
