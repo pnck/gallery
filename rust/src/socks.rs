@@ -14,7 +14,7 @@ use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::wg::WgTunnel;
 
@@ -94,27 +94,15 @@ impl Dialer {
         match self {
             Dialer::Direct => Ok(Box::new(dial_direct(target)?)),
             Dialer::WgDirect { tunnel } => {
-                // Resolve the target through the tunnel using the WG-configured DNS
-                // (no DNS leak). Fall back to a local lookup only if no DNS servers
-                // were configured. IP-literal targets need no resolution.
+                // Resolve the target via DNS-over-TCP THROUGH the tunnel (UDP DNS
+                // can't survive a transparent-SOCKS exit). IP literals need none.
                 let (ip, port) = match target {
                     Target::Ip(ip, port) => (*ip, *port),
                     Target::Domain(host, port) => {
-                        // Prefer in-tunnel DNS (no leak). If it fails (server has no
-                        // resolver at the configured DNS, or won't route the reply),
-                        // fall back to a local lookup so the connection still works —
-                        // this decouples "can the tunnel reach the internet" from
-                        // "does the WG DNS work", which is what you want when debugging.
-                        let ip = match (tunnel.has_dns(), tunnel.resolve_or(host)) {
-                            (_, Some(ip)) => ip,
-                            (true, None) => {
-                                log::warn!(
-                                    "wg: in-tunnel DNS for {host} failed; falling back to local resolve (DNS leak)"
-                                );
-                                resolve_for_tunnel(target)?.0
-                            }
-                            (false, None) => resolve_for_tunnel(target)?.0,
-                        };
+                        let ip = dual_resolve_via_tunnel(tunnel, host).or_else(|e| {
+                            log::warn!("wg: in-tunnel DNS for {host} failed ({e}); local fallback (DNS leak)");
+                            resolve_for_tunnel(target).map(|(ip, _)| ip)
+                        })?;
                         (ip, *port)
                     }
                 };
@@ -141,6 +129,49 @@ impl Dialer {
                 socks5_client_handshake(&mut up, auth.as_ref(), target)?;
                 Ok(Box::new(up))
             }
+        }
+    }
+}
+
+/// Resolve `host` through the tunnel with **redundant DNS-over-TCP + DNS-over-UDP**
+/// queries fired concurrently — the first success wins. TCP (public resolvers)
+/// survives a transparent-SOCKS exit; UDP (the WG-configured server via smoltcp)
+/// works where UDP DNS is reachable. Bounded by an 8s timeout on scratch threads
+/// so the caller never hangs.
+fn dual_resolve_via_tunnel(tunnel: &Arc<WgTunnel>, host: &str) -> io::Result<std::net::IpAddr> {
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    // DNS-over-TCP to public resolvers, through the tunnel.
+    {
+        let (t, h, tx) = (Arc::clone(tunnel), host.to_string(), tx.clone());
+        std::thread::spawn(move || {
+            let _ = tx.send(crate::wg::tcp_dns_resolve(&t, &h));
+        });
+    }
+    // DNS-over-UDP to the WG-configured server (smoltcp DNS socket).
+    {
+        let (t, h, tx) = (Arc::clone(tunnel), host.to_string(), tx);
+        std::thread::spawn(move || {
+            let r = t
+                .resolve_or(&h)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "udp dns: no answer/not configured"));
+            let _ = tx.send(r);
+        });
+    }
+
+    // First Ok wins; tolerate one path failing while the other is still running.
+    let start = Instant::now();
+    let budget = Duration::from_secs(8);
+    let mut last = io::Error::new(io::ErrorKind::TimedOut, "in-tunnel DNS timed out");
+    loop {
+        let elapsed = start.elapsed();
+        if elapsed >= budget {
+            return Err(last);
+        }
+        match rx.recv_timeout(budget - elapsed) {
+            Ok(Ok(ip)) => return Ok(ip),
+            Ok(Err(e)) => last = e, // one path failed; keep waiting for the other
+            Err(_) => return Err(last), // timeout or both disconnected
         }
     }
 }

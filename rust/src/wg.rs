@@ -47,6 +47,8 @@ const CONN_BUF_CAP: usize = 256 * 1024;
 /// Driver tick: bounds how quickly app writes/timers are serviced. WireGuard
 /// timers need servicing a few times per second; this also caps write latency.
 const TICK: Duration = Duration::from_millis(5);
+/// Fallback DNS resolvers when the WG config specifies none (design semantic).
+const DEFAULT_DNS: [&str; 2] = ["1.1.1.1", "8.8.8.8"];
 
 /// Parsed, validated WireGuard parameters (from CoreConfig::WgThenSocks).
 #[derive(Clone)]
@@ -282,7 +284,9 @@ enum Command {
 /// Handle to the running tunnel. Cloneable; the last drop stops the driver.
 pub struct WgTunnel {
     cmd: Sender<Command>,
-    has_dns: bool,
+    /// Effective DNS servers: the WG-configured ones, or our defaults if none were
+    /// given (design semantic). Used by both the UDP and TCP in-tunnel resolvers.
+    dns_servers: Vec<IpAddr>,
     handshake_ok: Arc<AtomicBool>,
     last_handshake_epoch: Arc<AtomicI64>,
     tx_bytes: Arc<AtomicU64>,
@@ -293,13 +297,22 @@ pub struct WgTunnel {
 impl WgTunnel {
     /// Build the tunnel and spawn its driver thread. Returns once the netstack is
     /// up; the WireGuard handshake completes asynchronously on first traffic.
-    pub fn start(params: WgParams) -> io::Result<WgTunnel> {
+    pub fn start(mut params: WgParams) -> io::Result<WgTunnel> {
         let udp = UdpSocket::bind(("0.0.0.0", 0))?;
         udp.connect(params.endpoint)?;
         udp.set_read_timeout(Some(TICK))?;
 
+        // Design semantic: use the configured [Interface] DNS if given, else our
+        // defaults. Both the UDP (smoltcp) and TCP resolvers query these.
+        if params.dns_servers.is_empty() {
+            params.dns_servers = DEFAULT_DNS
+                .iter()
+                .map(|s| IpAddress::from(s.parse::<std::net::Ipv4Addr>().unwrap()))
+                .collect();
+        }
+        let dns_servers: Vec<IpAddr> = params.dns_servers.iter().map(|a| IpAddr::from(*a)).collect();
+
         let (cmd_tx, cmd_rx) = mpsc::channel::<Command>();
-        let has_dns = !params.dns_servers.is_empty();
         let handshake_ok = Arc::new(AtomicBool::new(false));
         let last_handshake_epoch = Arc::new(AtomicI64::new(0));
         let tx_bytes = Arc::new(AtomicU64::new(0));
@@ -321,7 +334,7 @@ impl WgTunnel {
 
         Ok(WgTunnel {
             cmd: cmd_tx,
-            has_dns,
+            dns_servers,
             handshake_ok,
             last_handshake_epoch,
             tx_bytes,
@@ -356,25 +369,25 @@ impl WgTunnel {
         Ok(stream)
     }
 
-    /// Whether WG-configured DNS servers are available for in-tunnel resolution.
-    pub fn has_dns(&self) -> bool {
-        self.has_dns
+    /// The effective DNS servers (configured, or defaults) used for resolution.
+    pub fn dns_servers(&self) -> &[IpAddr] {
+        &self.dns_servers
     }
 
-    /// Resolve `host` to an IP using the WG-configured DNS servers, over the tunnel.
+    /// Resolve `host` to an IP using the effective DNS servers, over UDP (smoltcp).
     pub fn resolve(&self, host: &str) -> io::Result<IpAddr> {
         let (tx, rx) = mpsc::channel();
         self.cmd
             .send(Command::Resolve { host: host.to_string(), reply: tx })
             .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "tunnel driver stopped"))?;
         rx.recv_timeout(Duration::from_secs(6))
-            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "in-tunnel DNS timed out"))?
+            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "in-tunnel UDP DNS timed out"))?
     }
 
-    /// In-tunnel resolve, returning None if DNS isn't configured or the query
-    /// failed — so the caller can fall back to a local lookup.
+    /// UDP in-tunnel resolve, returning None on failure — so the caller can race it
+    /// against the TCP path and fall back to a local lookup.
     pub fn resolve_or(&self, host: &str) -> Option<IpAddr> {
-        if self.has_dns {
+        if !self.dns_servers.is_empty() {
             self.resolve(host).ok()
         } else {
             None
@@ -443,6 +456,99 @@ fn ip_src(pkt: &[u8]) -> String {
             std::net::Ipv6Addr::from(o).to_string()
         }
         _ => "?".into(),
+    }
+}
+
+/// Resolve `host` to an IP via DNS-over-TCP THROUGH the tunnel (public resolvers).
+/// UDP DNS can't survive a transparent-SOCKS exit, so WgOnly resolves over TCP —
+/// the query connection itself is tproxied to the upstream SOCKS and resolved
+/// remotely. Blocking; the caller wraps it in a timeout.
+pub fn tcp_dns_resolve(tunnel: &WgTunnel, host: &str) -> io::Result<IpAddr> {
+    let mut last = io::Error::new(io::ErrorKind::NotFound, "no resolver reachable");
+    for resolver in tunnel.dns_servers() {
+        match tunnel.dial(&resolver.to_string(), 53) {
+            Ok(mut stream) => match tcp_dns_query(&mut stream, host) {
+                Ok(ip) => {
+                    log::debug!("wg: tcp-dns {host} -> {ip} via {resolver}");
+                    return Ok(ip);
+                }
+                Err(e) => last = e,
+            },
+            Err(e) => last = e,
+        }
+    }
+    Err(last)
+}
+
+/// One DNS A query/response exchange over a connected TCP stream (RFC 1035 §4.2.2).
+fn tcp_dns_query<S: Read + Write>(stream: &mut S, host: &str) -> io::Result<IpAddr> {
+    let query = build_a_query(host);
+    stream.write_all(&(query.len() as u16).to_be_bytes())?;
+    stream.write_all(&query)?;
+    stream.flush()?;
+
+    let mut len = [0u8; 2];
+    stream.read_exact(&mut len)?;
+    let rlen = u16::from_be_bytes(len) as usize;
+    if rlen == 0 || rlen > 8192 {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "bad DNS length"));
+    }
+    let mut resp = vec![0u8; rlen];
+    stream.read_exact(&mut resp)?;
+    parse_a_record(&resp).ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no A record"))
+}
+
+fn build_a_query(host: &str) -> Vec<u8> {
+    let mut q = Vec::with_capacity(host.len() + 18);
+    q.extend_from_slice(&[0x12, 0x34]); // id
+    q.extend_from_slice(&[0x01, 0x00]); // flags: recursion desired
+    q.extend_from_slice(&[0x00, 0x01]); // QDCOUNT
+    q.extend_from_slice(&[0, 0, 0, 0, 0, 0]); // AN/NS/AR
+    for label in host.trim_matches('.').split('.') {
+        q.push(label.len() as u8);
+        q.extend_from_slice(label.as_bytes());
+    }
+    q.push(0);
+    q.extend_from_slice(&[0x00, 0x01]); // QTYPE A
+    q.extend_from_slice(&[0x00, 0x01]); // QCLASS IN
+    q
+}
+
+fn parse_a_record(msg: &[u8]) -> Option<IpAddr> {
+    if msg.len() < 12 || msg[3] & 0x0F != 0 {
+        return None; // too short, or RCODE != 0
+    }
+    let qd = u16::from_be_bytes([msg[4], msg[5]]) as usize;
+    let an = u16::from_be_bytes([msg[6], msg[7]]) as usize;
+    let mut off = 12;
+    for _ in 0..qd {
+        off = dns_skip_name(msg, off)? + 4;
+    }
+    for _ in 0..an {
+        off = dns_skip_name(msg, off)?;
+        if off + 10 > msg.len() {
+            return None;
+        }
+        let typ = u16::from_be_bytes([msg[off], msg[off + 1]]);
+        let rdlen = u16::from_be_bytes([msg[off + 8], msg[off + 9]]) as usize;
+        let rd = off + 10;
+        if typ == 1 && rdlen == 4 && rd + 4 <= msg.len() {
+            return Some(IpAddr::V4(std::net::Ipv4Addr::new(msg[rd], msg[rd + 1], msg[rd + 2], msg[rd + 3])));
+        }
+        off = rd + rdlen;
+    }
+    None
+}
+
+fn dns_skip_name(msg: &[u8], start: usize) -> Option<usize> {
+    let mut off = start;
+    loop {
+        let len = *msg.get(off)? as usize;
+        match len {
+            0 => return Some(off + 1),
+            _ if len & 0xC0 == 0xC0 => return Some(off + 2), // compression pointer
+            _ => off += 1 + len,
+        }
     }
 }
 
@@ -1062,6 +1168,29 @@ mod tests {
         assert_eq!(decode_key(&kp.public_key).unwrap().len(), 32);
         WgParams::parse(&kp.private_key, &kp.public_key, None, "1.2.3.4:51820", &["10.0.0.2/32".into()], &[], 25)
             .expect("generated keys should parse");
+    }
+
+    #[test]
+    fn dns_a_query_roundtrips_through_the_wire_parser() {
+        // Build an A query, craft a matching response, and parse the A record.
+        let q = build_a_query("www.google.com");
+        // A well-formed response: echo the question, add one A answer 142.250.1.2.
+        let mut resp = Vec::new();
+        resp.extend_from_slice(&[0x12, 0x34]); // id
+        resp.extend_from_slice(&[0x81, 0x80]); // QR=1, RCODE=0
+        resp.extend_from_slice(&[0x00, 0x01]); // QD
+        resp.extend_from_slice(&[0x00, 0x01]); // AN
+        resp.extend_from_slice(&[0, 0, 0, 0]); // NS/AR
+        resp.extend_from_slice(&q[12..q.len()]); // question (name+type+class)
+        resp.extend_from_slice(&[0xC0, 0x0C]); // answer name: pointer to question
+        resp.extend_from_slice(&[0x00, 0x01, 0x00, 0x01]); // type A, class IN
+        resp.extend_from_slice(&[0, 0, 1, 0x2C]); // TTL
+        resp.extend_from_slice(&[0x00, 0x04]); // RDLENGTH
+        resp.extend_from_slice(&[142, 250, 1, 2]); // A record
+        assert_eq!(
+            parse_a_record(&resp),
+            Some(IpAddr::V4(std::net::Ipv4Addr::new(142, 250, 1, 2))),
+        );
     }
 
     #[test]
