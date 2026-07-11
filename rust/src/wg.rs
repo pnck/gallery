@@ -112,13 +112,24 @@ impl WgParams {
     }
 }
 
+/// Standard x25519 clamping (RFC 7748), the same bit-fixing `wg genkey` applies.
+fn clamp(mut k: [u8; 32]) -> [u8; 32] {
+    k[0] &= 248;
+    k[31] &= 127;
+    k[31] |= 64;
+    k
+}
+
 /// Generate a WireGuard keypair (base64), equivalent to `wg genkey`/`wg pubkey`.
+/// The private key is CLAMPED to match `wg genkey` output exactly — x25519-dalek's
+/// `to_bytes()` returns the raw random bytes (clamping is applied only at DH time),
+/// which would otherwise export a non-standard, unclamped private key.
 pub fn generate_keypair() -> crate::WireguardKeypair {
     let sk = StaticSecret::random_from_rng(rand::rngs::OsRng);
     let pk = PublicKey::from(&sk);
     let enc = base64::engine::general_purpose::STANDARD;
     crate::WireguardKeypair {
-        private_key: enc.encode(sk.to_bytes()),
+        private_key: enc.encode(clamp(sk.to_bytes())),
         public_key: enc.encode(pk.to_bytes()),
     }
 }
@@ -1029,6 +1040,18 @@ mod tests {
             }
             other => panic!("expected tunnelled packet, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn generated_private_key_is_clamped_like_wg_genkey() {
+        let kp = generate_keypair();
+        let sk = decode_key(&kp.private_key).unwrap();
+        // RFC 7748 clamping bits, exactly what `wg genkey` sets.
+        assert_eq!(sk[0] & 0b0000_0111, 0, "low 3 bits must be clear");
+        assert_eq!(sk[31] & 0b1000_0000, 0, "high bit must be clear");
+        assert_eq!(sk[31] & 0b0100_0000, 0b0100_0000, "bit 254 must be set");
+        // Clamping the stored private key must NOT change the derived public key.
+        assert_eq!(derive_public_key(&kp.private_key).unwrap(), kp.public_key);
     }
 
     #[test]
