@@ -612,6 +612,7 @@ impl Driver {
         log::info!("wg: driver up, initiating handshake");
         initiate_handshake(&mut tunn, &udp, &mut scratch);
         let mut last_hs_attempt = StdInstant::now();
+        let mut last_timers = StdInstant::now();
         let mut established = false;
 
         loop {
@@ -759,13 +760,17 @@ impl Driver {
 
             // 5. Encapsulate everything smoltcp emitted and send over WG/UDP.
             while let Some(pkt) = device.outbound.pop_front() {
-                log::debug!("wg: egress {} -> {} ({} B)", ip_src(&pkt), ip_dst(&pkt), pkt.len());
+                let (src, dst, len) = (ip_src(&pkt), ip_dst(&pkt), pkt.len());
                 match tunn.encapsulate(&pkt, &mut scratch) {
                     TunnResult::WriteToNetwork(out) => {
+                        let n = out.len();
                         let _ = udp.send(out);
+                        log::debug!("wg: egress {src} -> {dst} ({len} B) -> SENT {n} B on wire");
                     }
-                    TunnResult::Done => {} // queued pending handshake
-                    TunnResult::Err(e) => log::debug!("wg encapsulate error: {e:?}"),
+                    // Queued: no ready session, so this data is NOT on the wire. If
+                    // this persists the peer never confirms the session (→ re-handshake loop).
+                    TunnResult::Done => log::debug!("wg: egress {src} -> {dst} ({len} B) -> QUEUED (no ready session)"),
+                    TunnResult::Err(e) => log::warn!("wg: egress {src} -> {dst} encapsulate error: {e:?}"),
                     _ => {}
                 }
             }
@@ -786,13 +791,18 @@ impl Driver {
                 }
             }
 
-            // 7. WireGuard timers (handshake init, keepalive, rekey).
-            match tunn.update_timers(&mut scratch) {
-                TunnResult::WriteToNetwork(out) => {
-                    let _ = udp.send(out);
+            // 7. WireGuard timers (handshake init, keepalive, rekey). boringtun's
+            //    timers are second-granular; throttle to ~250 ms instead of every
+            //    ~5 ms tick (it also resets the rate limiter on every call).
+            if last_timers.elapsed() >= Duration::from_millis(250) {
+                last_timers = StdInstant::now();
+                match tunn.update_timers(&mut scratch) {
+                    TunnResult::WriteToNetwork(out) => {
+                        let _ = udp.send(out);
+                    }
+                    TunnResult::Err(e) => log::debug!("wg timer error: {e:?}"),
+                    _ => {}
                 }
-                TunnResult::Err(e) => log::debug!("wg timer error: {e:?}"),
-                _ => {}
             }
 
             // 8. Refresh handshake health + transfer counters from boringtun stats.

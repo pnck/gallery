@@ -354,9 +354,13 @@ fn summarize_wg(wg: &WgSettings) -> String {
     // Derive OUR public key from the configured private key so it can be checked
     // against the server's peer config; peer_public_key is the server's own key.
     let my_pub = wg::derive_public_key(&wg.private_key).unwrap_or_else(|_| "<invalid private key>".into());
+    let addrs = wg.interface_addresses.join(",");
     format!(
-        "interface={:?}\ndns={:?}\nendpoint={}\nkeepalive={}\nmy_public_key(derived)={}\npeer_public_key={}",
-        wg.interface_addresses, wg.dns, wg.endpoint, wg.keepalive_secs, my_pub, wg.peer_public_key,
+        "interface={:?}\ndns={:?}\nendpoint={}\nkeepalive={}\nmy_public_key(derived)={}\npeer_public_key={}\n\
+         --- the server MUST have a [Peer] entry for THIS app:\n\
+         [Peer] PublicKey={} AllowedIPs must contain {}\n\
+         (if you reused the official client's key, they conflict — use a distinct key + tunnel IP)",
+        wg.interface_addresses, wg.dns, wg.endpoint, wg.keepalive_secs, my_pub, wg.peer_public_key, my_pub, addrs,
     )
 }
 
