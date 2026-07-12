@@ -192,6 +192,7 @@ fun PhotoDetailScreen(
             containerColor = Color.Transparent,
             snackbarHost = { SnackbarHost(snackbarHost) },
         ) { _ ->
+          Box(Modifier.fillMaxSize()) {
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize(),
@@ -257,12 +258,13 @@ fun PhotoDetailScreen(
                 }
             }
 
-            // Chrome overlaid on top (immersive): tapping the photo toggles it; it
-            // hides while dragging to dismiss. Overlaying keeps the photo full-bleed.
+            // Chrome overlaid at the TOP (immersive): tapping the photo toggles it;
+            // it hides while dragging to dismiss. Overlaying keeps the photo full-bleed.
             AnimatedVisibility(
                 visible = chromeVisible && dismissProgress < 0.02f,
                 enter = fadeIn(),
                 exit = fadeOut(),
+                modifier = Modifier.align(Alignment.TopCenter),
             ) {
                 TopAppBar(
                     colors = TopAppBarDefaults.topAppBarColors(
@@ -319,6 +321,7 @@ fun PhotoDetailScreen(
                     },
                 )
             }
+          }
         }
     }
 

@@ -57,6 +57,13 @@ class TransportConfigStore @Inject constructor(
         return SavedTransport(form, prefs.getString(PUBLIC_KEY, "").orEmpty())
     }
 
+    /** Whether the user last left the tunnel ON — drives auto-reconnect at launch. */
+    fun isActive(): Boolean = prefs.getBoolean(AUTO_CONNECT, false)
+
+    fun setActive(active: Boolean) {
+        prefs.edit().putBoolean(AUTO_CONNECT, active).apply()
+    }
+
     fun save(form: TransportForm, publicKey: String) {
         prefs.edit()
             .putBoolean(WG_ENABLED, form.wgEnabled)
@@ -79,6 +86,7 @@ class TransportConfigStore @Inject constructor(
     }
 
     private companion object {
+        const val AUTO_CONNECT = "auto_connect"
         const val WG_ENABLED = "wg_enabled"
         const val SOCKS_ENABLED = "socks_enabled"
         const val PRIVATE_KEY = "private_key"

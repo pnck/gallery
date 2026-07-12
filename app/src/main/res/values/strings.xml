@@ -33,6 +33,14 @@
     <string name="settings_folder">Cloud backup folder</string>
     <string name="folder_dialog_title">Backup folder name</string>
     <string name="save">Save</string>
+
+    <!-- Account panel -->
+    <string name="account_connected">Connected to Google Drive</string>
+    <string name="account_disconnected">Not connected</string>
+    <string name="account_sign_in">Sign in</string>
+    <string name="account_sign_out">Sign out</string>
+    <string name="account_sign_out_title">Sign out of Google Drive?</string>
+    <string name="account_sign_out_message">Your photos stay in the cloud. You can sign in again anytime.</string>
     <string name="settings_transport">Network acceleration</string>
     <string name="settings_transport_hint">Direct / SOCKS / WireGuard + LAN SOCKS chain</string>
     <string name="settings_transport_connected">Connected — acceleration active</string>

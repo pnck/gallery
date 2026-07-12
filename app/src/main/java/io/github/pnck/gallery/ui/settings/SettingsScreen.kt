@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -14,6 +15,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -21,6 +24,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -179,12 +183,14 @@ fun SettingsScreen(
             )
         },
     ) { padding ->
+        val busy = state.signIn is SignInPhase.Requesting || state.signIn is SignInPhase.AwaitingApproval
+        val folderName by viewModel.remoteFolderName.collectAsState()
+        var showAccount by remember { mutableStateOf(false) }
         Column(Modifier.fillMaxSize().padding(padding)) {
-            val busy = state.signIn is SignInPhase.Requesting || state.signIn is SignInPhase.AwaitingApproval
             ListItem(
-                modifier = Modifier.clickable(enabled = !busy) {
-                    if (state.googleAuthorized) viewModel.signOutGoogle() else viewModel.signInGoogle()
-                },
+                // Tap opens the account panel — sign-out is a deliberate action there,
+                // not a one-tap on the row.
+                modifier = Modifier.clickable { showAccount = true },
                 headlineContent = { Text(stringResource(R.string.settings_google_account)) },
                 supportingContent = {
                     Text(
@@ -197,23 +203,6 @@ fun SettingsScreen(
                     )
                 },
             )
-            HorizontalDivider()
-            val folderName by viewModel.remoteFolderName.collectAsState()
-            var editingFolder by remember { mutableStateOf(false) }
-            ListItem(
-                modifier = Modifier.clickable { editingFolder = true },
-                headlineContent = { Text(stringResource(R.string.settings_folder)) },
-                supportingContent = {
-                    Text(folderName, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                },
-            )
-            if (editingFolder) {
-                FolderNameDialog(
-                    initial = folderName,
-                    onConfirm = { viewModel.updateRemoteFolderName(it); editingFolder = false },
-                    onDismiss = { editingFolder = false },
-                )
-            }
             HorizontalDivider()
             ListItem(
                 modifier = Modifier.clickable(onClick = viewModel::requestFreeSpace),
@@ -242,6 +231,104 @@ fun SettingsScreen(
                 },
             )
         }
+
+        if (showAccount) {
+            AccountSheet(
+                authorized = state.googleAuthorized,
+                busy = busy,
+                folderName = folderName,
+                onSignIn = { showAccount = false; viewModel.signInGoogle() },
+                onSignOut = { showAccount = false; viewModel.signOutGoogle() },
+                onUpdateFolder = viewModel::updateRemoteFolderName,
+                onDismiss = { showAccount = false },
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AccountSheet(
+    authorized: Boolean,
+    busy: Boolean,
+    folderName: String,
+    onSignIn: () -> Unit,
+    onSignOut: () -> Unit,
+    onUpdateFolder: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var editingFolder by remember { mutableStateOf(false) }
+    var confirmSignOut by remember { mutableStateOf(false) }
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {
+            Text(stringResource(R.string.settings_google_account), style = MaterialTheme.typography.titleLarge)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = when {
+                    busy -> stringResource(R.string.settings_google_connecting)
+                    authorized -> stringResource(R.string.account_connected)
+                    else -> stringResource(R.string.account_disconnected)
+                },
+                color = if (authorized) {
+                    androidx.compose.ui.graphics.Color(0xFF2E7D32)
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+
+            if (authorized) {
+                Spacer(Modifier.height(16.dp))
+                HorizontalDivider()
+                ListItem(
+                    modifier = Modifier.clickable { editingFolder = true },
+                    headlineContent = { Text(stringResource(R.string.settings_folder)) },
+                    supportingContent = { Text(folderName, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                )
+                HorizontalDivider()
+                Spacer(Modifier.height(20.dp))
+                Button(
+                    onClick = { confirmSignOut = true },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(stringResource(R.string.account_sign_out)) }
+            } else {
+                Spacer(Modifier.height(20.dp))
+                Button(
+                    onClick = onSignIn,
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(stringResource(R.string.account_sign_in)) }
+            }
+            Spacer(Modifier.height(24.dp))
+        }
+    }
+
+    if (editingFolder) {
+        FolderNameDialog(
+            initial = folderName,
+            onConfirm = { onUpdateFolder(it); editingFolder = false },
+            onDismiss = { editingFolder = false },
+        )
+    }
+
+    if (confirmSignOut) {
+        AlertDialog(
+            onDismissRequest = { confirmSignOut = false },
+            title = { Text(stringResource(R.string.account_sign_out_title)) },
+            text = { Text(stringResource(R.string.account_sign_out_message)) },
+            confirmButton = {
+                TextButton(onClick = { confirmSignOut = false; onSignOut() }) {
+                    Text(stringResource(R.string.account_sign_out), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmSignOut = false }) { Text(stringResource(R.string.cancel)) }
+            },
+        )
     }
 }
 
