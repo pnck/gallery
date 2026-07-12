@@ -35,6 +35,18 @@
         <!-- Auth is device flow (ADR-0001): no redirect activity, no browser on
              device. Sign-in shows a code; the user approves on a second screen. -->
 
+        <!-- Shares cacheDir originals (CLOUD_ONLY view cache, PRD §9.1) to
+             ACTION_EDIT / ACTION_SEND targets via grant-URI permissions. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <!-- On-demand WorkManager init: HiltWorkerFactory comes from GalleryApp
              (Configuration.Provider), so the default initializer must go. -->
         <provider

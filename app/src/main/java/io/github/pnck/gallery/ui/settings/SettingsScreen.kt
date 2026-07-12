@@ -22,13 +22,19 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -39,6 +45,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.pnck.gallery.R
+import io.github.pnck.gallery.ui.util.rememberSystemDelete
 
 /**
  * Settings (PRD §9.1): device-flow account connection (ADR-0001), plus
@@ -52,7 +59,33 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
+    val freeUris by viewModel.freeUris.collectAsState()
     val context = LocalContext.current
+    val snackbarHost = remember { SnackbarHostState() }
+    val systemDelete = rememberSystemDelete()
+
+    // "Free up space": run the gathered synced-local uris through the system
+    // delete dialog, then flip those rows to CLOUD_ONLY (T-302).
+    LaunchedEffect(freeUris) {
+        freeUris?.let { uris ->
+            systemDelete(uris.map { it.toUri() }) { viewModel.confirmFreed(uris) }
+            viewModel.onFreeHandled()
+        }
+    }
+
+    var pendingEvent by remember { mutableStateOf<SettingsEvent?>(null) }
+    LaunchedEffect(Unit) { viewModel.eventFlow.collect { pendingEvent = it } }
+    val freeMessage = when (val event = pendingEvent) {
+        SettingsEvent.NothingToFree -> stringResource(R.string.free_space_none)
+        is SettingsEvent.Freed -> stringResource(R.string.space_freed, event.count)
+        null -> null
+    }
+    LaunchedEffect(freeMessage) {
+        freeMessage?.let {
+            snackbarHost.showSnackbar(it)
+            pendingEvent = null
+        }
+    }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -133,6 +166,7 @@ fun SettingsScreen(
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHost) },
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.settings)) },
@@ -164,6 +198,7 @@ fun SettingsScreen(
             )
             HorizontalDivider()
             ListItem(
+                modifier = Modifier.clickable(onClick = viewModel::requestFreeSpace),
                 headlineContent = { Text(stringResource(R.string.settings_free_space)) },
                 supportingContent = { Text(stringResource(R.string.settings_free_space_hint)) },
             )

@@ -37,6 +37,8 @@ dependencies {
     implementation(project(":core-provider"))
 
     implementation(libs.kotlinx.coroutines.android)
+    // FileProvider for exposing cacheDir originals to share/edit intents (PRD §9.1).
+    implementation(libs.androidx.core.ktx)
     // api: GalleryDatabase (a RoomDatabase subtype) is provided to :app's DI graph,
     // so the supertype must be visible to consumers.
     api(libs.androidx.room.runtime)

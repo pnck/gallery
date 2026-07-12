@@ -32,4 +32,35 @@
     <string name="settings_transport">Network acceleration</string>
     <string name="settings_transport_hint">Direct / SOCKS / WireGuard + LAN SOCKS chain</string>
     <string name="settings_transport_connected">Connected — acceleration active</string>
+
+    <!-- Sync-state badges (PRD §3.7 / §9.1) -->
+    <string name="badge_pending_upload">Not backed up</string>
+    <string name="badge_synced">Backed up</string>
+    <string name="badge_cloud_only">Cloud only</string>
+
+    <!-- Multi-select (PRD §9.1) -->
+    <string name="selection_count">%1$d selected</string>
+    <string name="selection_clear">Clear selection</string>
+    <string name="action_sync_selected">Sync</string>
+    <string name="action_save_selected">Save to device</string>
+    <string name="action_delete_selected">Delete</string>
+    <string name="sync_queued">Sync queued for %1$d photo(s)</string>
+    <string name="save_started">Saving %1$d photo(s)…</string>
+    <string name="photos_deleted">Deleted %1$d photo(s)</string>
+    <string name="space_freed">Freed %1$d photo(s)</string>
+    <string name="free_space_none">Nothing to free up</string>
+
+    <!-- Detail viewer actions (PRD §9.1, T-403) -->
+    <string name="detail_rotate">Rotate</string>
+    <string name="detail_edit">Edit</string>
+    <string name="detail_share">Share</string>
+    <string name="detail_save">Save to device</string>
+    <string name="detail_downloading">Downloading original…</string>
+    <string name="detail_download_failed">Couldn\'t download the original.</string>
+    <string name="detail_saved">Saved to your gallery</string>
+    <string name="detail_save_failed">Couldn\'t save the photo.</string>
+    <string name="detail_share_title">Share photo</string>
+    <string name="detail_no_editor">No app can edit this photo.</string>
+    <string name="detail_delete">Delete</string>
+    <string name="detail_deleted">Deleted</string>
 </resources>

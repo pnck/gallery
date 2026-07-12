@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider roots. Only the app cacheDir "originals/" folder is shared —
+     the CLOUD_ONLY view cache (PRD §9.1). Nothing under DCIM is ever exposed. -->
+<paths>
+    <cache-path
+        name="originals"
+        path="originals/" />
+</paths>

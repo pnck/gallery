@@ -2,6 +2,7 @@ package io.github.pnck.gallery.work
 
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
+import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
@@ -14,10 +15,11 @@ import java.util.concurrent.TimeUnit
  */
 object SyncPipeline {
     const val UNIQUE_NAME = "sync_pipeline"
+    const val TARGETED_NAME = "sync_targeted"
 
     fun enqueue(workManager: WorkManager) {
         val scan = OneTimeWorkRequestBuilder<ScanWorker>().build()
-        val upload = OneTimeWorkRequestBuilder<UploadWorker>()
+        val downstream = OneTimeWorkRequestBuilder<DownstreamSyncWorker>()
             .setConstraints(
                 Constraints.Builder()
                     .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -26,9 +28,39 @@ object SyncPipeline {
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .build()
 
+        // scan (local) → downstream (pull cloud) → upload (push local).
         workManager
             .beginUniqueWork(UNIQUE_NAME, ExistingWorkPolicy.KEEP, scan)
-            .then(upload)
+            .then(downstream)
+            .then(uploadRequest())
             .enqueue()
     }
+
+    /**
+     * Multi-select "sync now" for specific already-scanned local photos (PRD §9.1).
+     * Upload-only (no scan) and REPLACE so it isn't swallowed by an in-flight full
+     * sweep; the worker filters to rows still PENDING_UPLOAD.
+     */
+    fun enqueueTargeted(workManager: WorkManager, photoIds: List<String>) {
+        if (photoIds.isEmpty()) return
+        val input = Data.Builder()
+            .putStringArray(UploadWorker.KEY_TARGET_IDS, photoIds.toTypedArray())
+            .build()
+        workManager.enqueueUniqueWork(
+            TARGETED_NAME,
+            ExistingWorkPolicy.REPLACE,
+            uploadRequest(input),
+        )
+    }
+
+    private fun uploadRequest(input: Data = Data.EMPTY) =
+        OneTimeWorkRequestBuilder<UploadWorker>()
+            .setInputData(input)
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build(),
+            )
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+            .build()
 }

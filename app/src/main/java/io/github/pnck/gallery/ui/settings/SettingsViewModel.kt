@@ -3,6 +3,7 @@ package io.github.pnck.gallery.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import io.github.pnck.gallery.domain.PhotoRepository
 import io.github.pnck.gallery.network.ApiResult
 import io.github.pnck.gallery.network.transport.TransportState
 import io.github.pnck.gallery.provider.AuthManager
@@ -11,10 +12,12 @@ import io.github.pnck.gallery.transport.TransportController
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -38,14 +41,48 @@ data class SettingsState(
     val signIn: SignInPhase = SignInPhase.Idle,
 )
 
+/** One-shot feedback for the "free up space" action. */
+sealed interface SettingsEvent {
+    data object NothingToFree : SettingsEvent
+    data class Freed(val count: Int) : SettingsEvent
+}
+
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val googleAuthManager: AuthManager,
+    private val repo: PhotoRepository,
     transportController: TransportController,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SettingsState())
     val state = _state.asStateFlow()
+
+    // ── Free up space (T-302, PRD §7.3) ────────────────────────────────────
+    private val _freeUris = MutableStateFlow<List<String>?>(null)
+    val freeUris: StateFlow<List<String>?> = _freeUris.asStateFlow()
+
+    private val events = Channel<SettingsEvent>(Channel.BUFFERED)
+    val eventFlow = events.receiveAsFlow()
+
+    /** Gather already-synced local copies; hand them to the UI for the delete dialog. */
+    fun requestFreeSpace() {
+        viewModelScope.launch {
+            val uris = repo.freeableLocalUris()
+            if (uris.isEmpty()) events.send(SettingsEvent.NothingToFree) else _freeUris.value = uris
+        }
+    }
+
+    fun onFreeHandled() {
+        _freeUris.value = null
+    }
+
+    /** After the system delete removed the local files, flip those rows to CLOUD_ONLY. */
+    fun confirmFreed(uris: List<String>) {
+        viewModelScope.launch {
+            repo.releaseLocalCopies(uris)
+            events.send(SettingsEvent.Freed(uris.size))
+        }
+    }
 
     /** Transport connection state, so Settings can show whether acceleration is up. */
     val transportState: StateFlow<TransportState> =

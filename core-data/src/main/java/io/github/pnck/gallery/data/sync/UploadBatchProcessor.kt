@@ -25,8 +25,19 @@ class UploadBatchProcessor(
         data class Retry(val uploadedSoFar: Int) : Outcome
     }
 
-    suspend fun processPending(onItemProgress: (done: Int, total: Int) -> Unit = { _, _ -> }): Outcome {
-        val pending = photoDao.getPendingUploads()
+    /**
+     * @param targetIds when non-null, only these photo ids are uploaded (multi-select
+     *   sync); null uploads every PENDING_UPLOAD row (the full background sweep).
+     */
+    suspend fun processPending(
+        targetIds: List<String>? = null,
+        onItemProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+    ): Outcome {
+        val pending = if (targetIds.isNullOrEmpty()) {
+            photoDao.getPendingUploads()
+        } else {
+            photoDao.getPendingByIds(targetIds)
+        }
         if (pending.isEmpty()) return Outcome.Done(0, 0)
 
         var uploaded = 0

@@ -28,9 +28,14 @@ class UploadWorker @AssistedInject constructor(
     override suspend fun doWork(): Result {
         if (!authManager.isAuthorized()) return Result.success()
 
-        return when (val outcome = processor.processPending { done, total ->
-            setProgressAsync(progressData(done, total))
-        }) {
+        // Non-empty → multi-select targeted sync; absent → full background sweep.
+        val targetIds = inputData.getStringArray(KEY_TARGET_IDS)?.toList()
+
+        return when (
+            val outcome = processor.processPending(targetIds) { done, total ->
+                setProgressAsync(progressData(done, total))
+            }
+        ) {
             is UploadBatchProcessor.Outcome.Done -> Result.success(
                 Data.Builder()
                     .putInt(KEY_UPLOADED, outcome.uploaded)
@@ -49,5 +54,8 @@ class UploadWorker @AssistedInject constructor(
         const val KEY_FAILED = "failed"
         const val KEY_PROGRESS_DONE = "progress_done"
         const val KEY_PROGRESS_TOTAL = "progress_total"
+
+        /** String[] of photo ids for a targeted (multi-select) upload. */
+        const val KEY_TARGET_IDS = "target_ids"
     }
 }

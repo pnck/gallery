@@ -3,14 +3,21 @@ package io.github.pnck.gallery
 import android.app.Application
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
+import coil3.ImageLoader
+import coil3.PlatformContext
+import coil3.SingletonImageLoader
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
 
 @HiltAndroidApp
-class GalleryApp : Application(), Configuration.Provider {
+class GalleryApp : Application(), Configuration.Provider, SingletonImageLoader.Factory {
 
     @Inject
     lateinit var workerFactory: HiltWorkerFactory
+
+    // The Hilt-built loader (shared OkHttpClient + provider:// fetcher, T-401).
+    @Inject
+    lateinit var imageLoader: ImageLoader
 
     // @HiltWorker factories require on-demand WorkManager init
     // (the default androidx.startup initializer is removed in the manifest).
@@ -18,4 +25,7 @@ class GalleryApp : Application(), Configuration.Provider {
         get() = Configuration.Builder()
             .setWorkerFactory(workerFactory)
             .build()
+
+    /** Make Coil's singleton (used by AsyncImage / ZoomableAsyncImage) our tunnel-aware loader. */
+    override fun newImageLoader(context: PlatformContext): ImageLoader = imageLoader
 }

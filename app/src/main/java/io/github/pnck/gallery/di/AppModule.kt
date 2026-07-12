@@ -3,7 +3,10 @@ package io.github.pnck.gallery.di
 import android.content.ContentResolver
 import android.content.Context
 import androidx.work.WorkManager
+import coil3.ImageLoader
+import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import com.squareup.moshi.Moshi
+import io.github.pnck.gallery.ui.coil.ProviderUriFetcher
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -15,6 +18,7 @@ import io.github.pnck.gallery.data.db.PhotoDao
 import io.github.pnck.gallery.data.db.SyncKeyDao
 import io.github.pnck.gallery.data.repo.PhotoRepositoryImpl
 import io.github.pnck.gallery.data.scanner.LocalMediaScanner
+import io.github.pnck.gallery.data.sync.DownstreamSyncProcessor
 import io.github.pnck.gallery.data.sync.MediaReconciler
 import io.github.pnck.gallery.data.sync.UploadBatchProcessor
 import io.github.pnck.gallery.domain.PhotoRepository
@@ -60,8 +64,12 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun providePhotoRepository(photoDao: PhotoDao): PhotoRepository =
-        PhotoRepositoryImpl(photoDao)
+    fun providePhotoRepository(
+        @ApplicationContext context: Context,
+        photoDao: PhotoDao,
+        provider: ICloudStorageProvider,
+        resolver: ContentResolver,
+    ): PhotoRepository = PhotoRepositoryImpl(context, photoDao, provider, resolver)
 
     // ── Network (insertion layer + shared client, PRD §8) ─────────────────
 
@@ -106,6 +114,26 @@ object AppModule {
         SharedHttpClient.build(router) {
             addInterceptor(GoogleAuthInterceptor(authManager))
         }
+
+    /**
+     * The app-wide Coil loader (PRD §8.1, T-401). Rides the ONE shared client so
+     * thumbnails honour the tunnel and Bearer injection; the ProviderUriFetcher
+     * resolves `{provider}://{cloudId}` CLOUD_ONLY thumbnails. Installed as the
+     * singleton loader by GalleryApp.
+     */
+    @Provides
+    @Singleton
+    fun provideImageLoader(
+        @ApplicationContext context: Context,
+        client: OkHttpClient,
+        provider: ICloudStorageProvider,
+    ): ImageLoader =
+        ImageLoader.Builder(context)
+            .components {
+                add(OkHttpNetworkFetcherFactory(callFactory = { client }))
+                add(ProviderUriFetcher.Factory(provider, client))
+            }
+            .build()
 
     @Provides
     @Singleton
@@ -172,6 +200,14 @@ object AppModule {
         scanner: LocalMediaScanner,
         photoDao: PhotoDao,
     ): MediaReconciler = MediaReconciler(context, scanner, photoDao)
+
+    @Provides
+    @Singleton
+    fun provideDownstreamSyncProcessor(
+        provider: ICloudStorageProvider,
+        photoDao: PhotoDao,
+        syncKeyDao: SyncKeyDao,
+    ): DownstreamSyncProcessor = DownstreamSyncProcessor(provider, photoDao, syncKeyDao)
 
     @Provides
     @Singleton
