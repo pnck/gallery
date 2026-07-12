@@ -53,8 +53,8 @@ object SharedHttpClient {
         }
 
         override fun connectFailed(uri: URI?, sa: SocketAddress?, ioe: IOException?) {
-            // Failure policy (BLOCK vs DIRECT fallback) is handled at the transport
-            // layer via probe()/state, not by silently retrying direct here.
+            // Tunnel failures surface via the transport layer's state, not by
+            // silently retrying direct here (which would leak intent).
         }
     }
 }

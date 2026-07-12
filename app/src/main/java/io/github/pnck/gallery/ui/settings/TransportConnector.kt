@@ -91,7 +91,6 @@ class TransportConnector @Inject constructor(
             presharedKey = presharedKey.trim().ifBlank { null },
             endpoint = resolved,
             interfaceAddresses = listOf(interfaceAddress.trim()),
-            allowedIps = listOf("0.0.0.0/0"),
             dns = dns.split(Regex("[,\\s]+")).map { it.trim() }.filter { it.isNotBlank() },
             persistentKeepaliveSeconds = keepaliveSecs.trim().toIntOrNull() ?: 25,
         )

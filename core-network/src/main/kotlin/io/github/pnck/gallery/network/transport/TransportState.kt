@@ -9,13 +9,7 @@ sealed interface TransportState {
     /** Handshake stale / RTT abnormal, still usable. */
     data class Degraded(val reason: String) : TransportState
     data class Failed(val reason: String, val retryable: Boolean) : TransportState
-
-    /** Fallback to direct connection per [FallbackPolicy]. */
-    data object BypassedDirect : TransportState
 }
-
-/** What to do when the tunnel fails: block (default, avoids leaking intent) or go direct. */
-enum class FallbackPolicy { BLOCK, DIRECT }
 
 /**
  * A point-in-time health snapshot, polled by the UI for live monitoring.

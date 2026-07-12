@@ -47,7 +47,6 @@ class TransportConfigMappingTest {
         presharedKey = "psk",
         endpoint = Endpoint("vpn.example.com", 51820),
         interfaceAddresses = listOf("10.0.0.2/32"),
-        allowedIps = listOf("0.0.0.0/0"),
         dns = emptyList(),
         persistentKeepaliveSeconds = 25,
     )

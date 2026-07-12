@@ -322,7 +322,6 @@ private fun MonitorCard(state: TransportState, health: TransportHealth?, error: 
         is TransportState.Connected -> "Connected" to Color(0xFF2E7D32)
         is TransportState.Degraded -> "Degraded" to MaterialTheme.colorScheme.tertiary
         is TransportState.Failed -> "Failed" to MaterialTheme.colorScheme.error
-        is TransportState.BypassedDirect -> "Bypassed (direct)" to MaterialTheme.colorScheme.onSurfaceVariant
     }
 
     Card(Modifier.fillMaxWidth().padding(top = 8.dp)) {
