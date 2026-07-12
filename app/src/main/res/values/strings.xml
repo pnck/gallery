@@ -63,4 +63,21 @@
     <string name="detail_no_editor">No app can edit this photo.</string>
     <string name="detail_delete">Delete</string>
     <string name="detail_deleted">Deleted</string>
+
+    <!-- Photo details panel (T-403) -->
+    <string name="detail_info">Details</string>
+    <string name="info_title">Photo details</string>
+    <string name="info_dimensions">Dimensions</string>
+    <string name="info_date">Date taken</string>
+    <string name="info_size">File size</string>
+    <string name="info_state">Backup state</string>
+    <string name="info_storage">Cloud</string>
+    <string name="info_camera">Camera</string>
+    <string name="info_aperture">Aperture</string>
+    <string name="info_shutter">Shutter</string>
+    <string name="info_iso">ISO</string>
+    <string name="info_focal">Focal length</string>
+    <string name="info_location">Location</string>
+    <string name="info_hash">Content hash</string>
+    <string name="info_unknown">—</string>
 </resources>

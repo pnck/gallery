@@ -6,10 +6,14 @@ import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
@@ -17,12 +21,15 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -51,6 +58,8 @@ import io.github.pnck.gallery.R
 import io.github.pnck.gallery.domain.SyncState
 import io.github.pnck.gallery.domain.TimelinePhoto
 import io.github.pnck.gallery.ui.util.rememberSystemDelete
+import io.github.pnck.gallery.ui.util.snapTo90
+import io.github.pnck.gallery.ui.util.twoFingerRotation
 import androidx.core.net.toUri
 import kotlinx.coroutines.launch
 import me.saket.telephoto.zoomable.coil3.ZoomableAsyncImage
@@ -71,6 +80,7 @@ fun PhotoDetailScreen(
     val photos by viewModel.photos.collectAsState()
     val originals by viewModel.originals.collectAsState()
     val deleteRequest by viewModel.deleteRequest.collectAsState()
+    val info by viewModel.info.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbarHost = remember { SnackbarHostState() }
@@ -168,6 +178,13 @@ fun PhotoDetailScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                     }
                 },
+                actions = {
+                    if (current != null) {
+                        IconButton(onClick = { viewModel.showInfo(current) }) {
+                            Icon(Icons.Default.Info, contentDescription = stringResource(R.string.detail_info))
+                        }
+                    }
+                },
             )
         },
         bottomBar = {
@@ -176,7 +193,7 @@ fun PhotoDetailScreen(
                     photo = current,
                     onRotate = {
                         val p = pagerState.currentPage
-                        rotations[p] = ((rotations[p] ?: 0f) + 90f) % 360f
+                        rotations[p] = snapTo90((rotations[p] ?: 0f) + 90f)
                     },
                     onEdit = { edit(current) },
                     onShare = { share(current) },
@@ -196,7 +213,16 @@ fun PhotoDetailScreen(
 
             val model: String? = photo.localUri ?: (originals[photo.id] as? OriginalState.Ready)?.uri
 
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .twoFingerRotation(
+                        enabled = model != null,
+                        onRotate = { d -> rotations[page] = (rotations[page] ?: 0f) + d },
+                        onSettle = { rotations[page] = snapTo90(rotations[page] ?: 0f) },
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
                 when {
                     model != null -> ZoomableAsyncImage(
                         model = model,
@@ -208,6 +234,12 @@ fun PhotoDetailScreen(
                     else -> CircularProgressIndicator(color = Color.White)
                 }
             }
+        }
+    }
+
+    info?.let { data ->
+        ModalBottomSheet(onDismissRequest = viewModel::dismissInfo) {
+            PhotoInfoSheet(data)
         }
     }
 }
@@ -247,4 +279,54 @@ private fun DetailActionBar(
             Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.detail_delete), tint = Color.White)
         }
     }
+}
+
+@Composable
+private fun PhotoInfoSheet(info: PhotoInfo) {
+    val rows = buildList {
+        add(stringResource(R.string.info_dimensions) to "${info.width} × ${info.height}")
+        if (info.dateTakenMs > 0) add(stringResource(R.string.info_date) to formatDate(info.dateTakenMs))
+        info.sizeBytes?.let { add(stringResource(R.string.info_size) to formatSize(it)) }
+        add(stringResource(R.string.info_state) to syncStateLabel(info.syncState))
+        info.provider?.let { add(stringResource(R.string.info_storage) to it) }
+        val camera = listOfNotNull(info.cameraMake, info.cameraModel).joinToString(" ").ifBlank { null }
+        camera?.let { add(stringResource(R.string.info_camera) to it) }
+        info.aperture?.let { add(stringResource(R.string.info_aperture) to it) }
+        info.exposure?.let { add(stringResource(R.string.info_shutter) to it) }
+        info.iso?.let { add(stringResource(R.string.info_iso) to it) }
+        info.focalLength?.let { add(stringResource(R.string.info_focal) to it) }
+        info.latLon?.let { add(stringResource(R.string.info_location) to "%.5f, %.5f".format(it.first, it.second)) }
+        info.contentHash?.let { add(stringResource(R.string.info_hash) to it) }
+    }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {
+        Text(stringResource(R.string.info_title), style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(12.dp))
+        rows.forEach { (label, value) ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                Text(
+                    label,
+                    modifier = Modifier.width(120.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(value, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun syncStateLabel(state: SyncState): String = when (state) {
+    SyncState.PENDING_UPLOAD -> stringResource(R.string.badge_pending_upload)
+    SyncState.SYNCED -> stringResource(R.string.badge_synced)
+    SyncState.CLOUD_ONLY -> stringResource(R.string.badge_cloud_only)
+    SyncState.PENDING_DELETE -> stringResource(R.string.detail_delete)
+}
+
+private fun formatDate(ms: Long): String =
+    java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(ms))
+
+private fun formatSize(bytes: Long): String {
+    val kb = bytes / 1024.0
+    return if (kb < 1024) "%.0f KB".format(kb) else "%.1f MB".format(kb / 1024)
 }

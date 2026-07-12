@@ -95,6 +95,9 @@ class GoogleDriveProvider(
     override suspend fun downloadOriginal(cloudId: String): ApiResult<InputStream> =
         safeApiCall({ api.downloadFile(cloudId) }) { it.byteStream() }
 
+    override suspend fun getFileMetadata(cloudId: String): ApiResult<CloudFile> =
+        safeApiCall({ api.getFile(cloudId) }) { DriveMappers.toCloudFile(it) }
+
     override suspend fun getThumbnailUrl(cloudId: String): ApiResult<String> =
         when (val res = safeApiCall({ api.getFile(cloudId) }) { it.thumbnailLink }) {
             is ApiResult.Success ->

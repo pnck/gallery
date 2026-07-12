@@ -14,13 +14,16 @@ import androidx.paging.PagingData
 import androidx.paging.map
 import io.github.pnck.gallery.data.db.PhotoDao
 import io.github.pnck.gallery.data.db.PhotoEntity
+import io.github.pnck.gallery.domain.PhotoDetails
 import io.github.pnck.gallery.domain.PhotoRepository
 import io.github.pnck.gallery.domain.SyncState
 import io.github.pnck.gallery.domain.TimelinePhoto
 import io.github.pnck.gallery.network.ApiResult
+import io.github.pnck.gallery.provider.ContentHash
 import io.github.pnck.gallery.provider.ICloudStorageProvider
 import java.io.File
 import java.io.InputStream
+import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -49,6 +52,23 @@ class PhotoRepositoryImpl(
 
     override fun observePhoto(id: String): Flow<TimelinePhoto?> =
         photoDao.observeById(id).map { it?.toTimelinePhoto() }
+
+    override suspend fun photoDetails(id: String): PhotoDetails? = withContext(Dispatchers.IO) {
+        photoDao.getById(id)?.let { row ->
+            PhotoDetails(
+                id = row.id,
+                width = row.width,
+                height = row.height,
+                dateTakenMs = row.dateTaken,
+                syncState = row.syncState,
+                localUri = row.localUri,
+                cloudId = row.cloudId,
+                provider = row.provider,
+                contentHashType = row.contentHashType,
+                contentHashValue = row.contentHashValue,
+            )
+        }
+    }
 
     /**
      * Fetch the cloud original into cacheDir and expose it as a FileProvider
@@ -135,13 +155,49 @@ class PhotoRepositoryImpl(
         photoDao.deleteByIds(ids)
     }
 
-    override suspend fun freeableLocalUris(): List<String> =
-        withContext(Dispatchers.IO) { photoDao.getSyncedLocalUris() }
+    /**
+     * Only offer photos whose cloud copy is *verified* to exist with matching
+     * content (MD5) — the anti-data-loss guard (PRD §7.3). Verification happens
+     * BEFORE the local file is deleted; a photo whose cloud copy is missing or
+     * whose bytes differ is never offered for freeing. The confirmed hash is
+     * persisted so the local/cloud identity survives a broken state machine.
+     */
+    override suspend fun freeableLocalUris(): List<String> = withContext(Dispatchers.IO) {
+        photoDao.getSyncedWithLocal().mapNotNull { row ->
+            val cloudId = row.cloudId ?: return@mapNotNull null
+            val localUri = row.localUri ?: return@mapNotNull null
+            val cloudMd5 = when (val res = provider.getFileMetadata(cloudId)) {
+                is ApiResult.Success -> (res.data.contentHash as? ContentHash.Md5)?.value
+                is ApiResult.Error -> null // cloud gone/unreachable → not safe to free
+            } ?: return@mapNotNull null
+            val localMd5 = computeMd5(localUri) ?: return@mapNotNull null
+            if (localMd5.equals(cloudMd5, ignoreCase = true)) {
+                photoDao.setContentHash(row.id, "MD5", cloudMd5)
+                localUri
+            } else {
+                null
+            }
+        }
+    }
 
     override suspend fun releaseLocalCopies(uris: List<String>) = withContext(Dispatchers.IO) {
         val ids = uris.mapNotNull { photoDao.findByLocalUri(it)?.id }
         if (ids.isNotEmpty()) photoDao.markAsCloudOnly(ids)
     }
+
+    private fun computeMd5(uriStr: String): String? = runCatching {
+        val digest = MessageDigest.getInstance("MD5")
+        val ok = resolver.openInputStream(Uri.parse(uriStr))?.use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                digest.update(buffer, 0, read)
+            }
+            true
+        } ?: false
+        if (ok) digest.digest().joinToString("") { "%02x".format(it) } else null
+    }.getOrNull()
 
     private fun writeStreamToFile(stream: InputStream, file: File): Boolean = runCatching {
         stream.use { input -> file.outputStream().use { input.copyTo(it) } }

@@ -3,9 +3,11 @@ package io.github.pnck.gallery.work
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.Data
+import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import java.util.concurrent.TimeUnit
 
@@ -16,6 +18,23 @@ import java.util.concurrent.TimeUnit
 object SyncPipeline {
     const val UNIQUE_NAME = "sync_pipeline"
     const val TARGETED_NAME = "sync_targeted"
+    const val PERIODIC_NAME = "periodic_sync"
+
+    /**
+     * Background incremental keep-up while the app is closed (T-304). Idempotent —
+     * KEEP means an already-scheduled job survives restarts. Register once at start.
+     */
+    fun schedulePeriodic(workManager: WorkManager) {
+        val request = PeriodicWorkRequestBuilder<PeriodicSyncWorker>(30, TimeUnit.MINUTES)
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build(),
+            )
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+            .build()
+        workManager.enqueueUniquePeriodicWork(PERIODIC_NAME, ExistingPeriodicWorkPolicy.KEEP, request)
+    }
 
     fun enqueue(workManager: WorkManager) {
         val scan = OneTimeWorkRequestBuilder<ScanWorker>().build()

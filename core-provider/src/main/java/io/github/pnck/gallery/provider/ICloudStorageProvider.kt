@@ -42,6 +42,14 @@ interface ICloudStorageProvider {
     /** Original bytes for the detail view — cache to cacheDir, never DCIM (PRD §9.1). */
     suspend fun downloadOriginal(cloudId: String): ApiResult<InputStream>
 
+    /**
+     * Current cloud metadata (id, content hash, size, dims). Used to *verify* a
+     * photo really exists in the cloud with matching content before releasing its
+     * local copy (PRD §7.3) — the anti-data-loss guard for "free up space".
+     * A non-retryable Error means the file is gone; treat that as "not safe".
+     */
+    suspend fun getFileMetadata(cloudId: String): ApiResult<CloudFile>
+
     /** Fresh short-lived thumbnail URL for immediate rendering. */
     suspend fun getThumbnailUrl(cloudId: String): ApiResult<String>
 }

@@ -21,6 +21,9 @@ interface PhotoRepository {
     /** Observe a single photo (for the detail view's live state/actions). */
     fun observePhoto(id: String): Flow<TimelinePhoto?>
 
+    /** DB-known metadata for the photo-details panel (dims, date, hash, state). */
+    suspend fun photoDetails(id: String): PhotoDetails?
+
     /**
      * Download the cloud original into app cache for viewing only, and return a
      * shareable content:// uri (FileProvider). Never writes DCIM/MediaStore, so

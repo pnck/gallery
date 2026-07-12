@@ -49,12 +49,7 @@ class DownstreamSyncProcessor(
                 is ApiResult.Success -> res.data
                 is ApiResult.Error -> return if (res.retryable) Outcome.Retry else break
             }
-            val fresh = page.files.filter { it.id !in known }.map { it.toCloudOnlyEntity() }
-            if (fresh.isNotEmpty()) {
-                photoDao.upsertAll(fresh)
-                fresh.forEach { it.cloudId?.let(known::add) }
-                inserted += fresh.size
-            }
+            inserted += ingest(page.files, known)
             pageToken = page.nextPageToken
         } while (pageToken != null)
 
@@ -72,13 +67,43 @@ class DownstreamSyncProcessor(
             is ApiResult.Success -> res.data
             is ApiResult.Error -> return Outcome.Retry
         }
-        val known = photoDao.getKnownCloudIds(provider.providerType.name).toSet()
-        val fresh = changes.upserted.filter { it.id !in known }.map { it.toCloudOnlyEntity() }
-        if (fresh.isNotEmpty()) photoDao.upsertAll(fresh)
+        val known = photoDao.getKnownCloudIds(provider.providerType.name).toMutableSet()
+        val inserted = ingest(changes.upserted, known)
         // MVP delete policy (PRD §4.3): drop the row for a server-side deletion.
         if (changes.deletedCloudIds.isNotEmpty()) photoDao.deleteByCloudIds(changes.deletedCloudIds)
         syncKeyDao.upsert(SyncKeyEntity(target, nextPageToken = null, deltaToken = changes.newDeltaToken))
-        return Outcome.Done(fresh.size, changes.deletedCloudIds.size)
+        return Outcome.Done(inserted, changes.deletedCloudIds.size)
+    }
+
+    /**
+     * Insert new cloud files as CLOUD_ONLY, but first try to recognise an existing
+     * row by content hash (PRD §3.5). If a row already holds this photo's bytes but
+     * lost its cloud link (a broken state machine), re-link it instead of creating a
+     * duplicate. [known] is the running set of already-tracked cloud ids.
+     * @return number of genuinely new rows inserted.
+     */
+    private suspend fun ingest(files: List<CloudFile>, known: MutableSet<String>): Int {
+        val providerName = provider.providerType.name
+        var inserted = 0
+        for (file in files) {
+            if (file.id in known) continue
+            val md5 = (file.contentHash as? ContentHash.Md5)?.value
+            if (md5 != null) {
+                val existing = photoDao.findByContentHash(providerName, "MD5", md5)
+                if (existing != null) {
+                    if (existing.cloudId == null) {
+                        val state = if (existing.localUri != null) SyncState.SYNCED else SyncState.CLOUD_ONLY
+                        photoDao.linkCloud(existing.id, file.id, providerName, state.code)
+                    }
+                    known += file.id
+                    continue
+                }
+            }
+            photoDao.upsertAll(listOf(file.toCloudOnlyEntity()))
+            known += file.id
+            inserted++
+        }
+        return inserted
     }
 
     private fun CloudFile.toCloudOnlyEntity(): PhotoEntity {

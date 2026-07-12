@@ -1,12 +1,15 @@
 package io.github.pnck.gallery.ui.detail
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.pnck.gallery.domain.PhotoRepository
 import io.github.pnck.gallery.domain.TimelinePhoto
 import io.github.pnck.gallery.ui.util.DeleteRequest
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -15,6 +18,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** Materialisation state of a CLOUD_ONLY original (PRD §9.1, cacheDir only). */
 sealed interface OriginalState {
@@ -40,10 +44,26 @@ sealed interface DetailEvent {
 @HiltViewModel
 class PhotoDetailViewModel @Inject constructor(
     private val repo: PhotoRepository,
+    @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
     val photos: StateFlow<List<TimelinePhoto>> = repo.getTimeline()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    // ── Photo details / EXIF panel (T-403) ─────────────────────────────────
+    private val _info = MutableStateFlow<PhotoInfo?>(null)
+    val info: StateFlow<PhotoInfo?> = _info.asStateFlow()
+
+    fun showInfo(photo: TimelinePhoto) {
+        viewModelScope.launch {
+            val details = repo.photoDetails(photo.id) ?: return@launch
+            _info.value = withContext(Dispatchers.IO) { ExifReader.build(context, details) }
+        }
+    }
+
+    fun dismissInfo() {
+        _info.value = null
+    }
 
     private val _originals = MutableStateFlow<Map<String, OriginalState>>(emptyMap())
     val originals: StateFlow<Map<String, OriginalState>> = _originals.asStateFlow()

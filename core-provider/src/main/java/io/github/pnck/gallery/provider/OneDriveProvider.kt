@@ -45,4 +45,8 @@ class OneDriveProvider(
     override suspend fun getThumbnailUrl(cloudId: String): ApiResult<String> {
         TODO("T-103: GET /items/{id}/thumbnails — pre-authorized URL, direct fetch")
     }
+
+    override suspend fun getFileMetadata(cloudId: String): ApiResult<CloudFile> {
+        TODO("T-103: GET /me/drive/items/{id} → quickXorHash → ContentHash.QuickXor")
+    }
 }

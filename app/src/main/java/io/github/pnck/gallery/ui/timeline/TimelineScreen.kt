@@ -2,7 +2,11 @@ package io.github.pnck.gallery.ui.timeline
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.database.ContentObserver
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -36,6 +40,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -90,6 +95,22 @@ fun TimelineScreen(
     val systemDelete = rememberSystemDelete()
 
     val selectionMode = selection.isNotEmpty()
+
+    // Aggressive in-app scan: react to any media change while the timeline is shown
+    // (T-304). SyncPipeline's unique KEEP coalesces bursts, so no extra debounce.
+    DisposableEffect(Unit) {
+        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) {
+                viewModel.processIntent(TimelineIntent.ForceSync)
+            }
+        }
+        context.contentResolver.registerContentObserver(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            true,
+            observer,
+        )
+        onDispose { context.contentResolver.unregisterContentObserver(observer) }
+    }
 
     // Route a pending delete through the system dialog, then purge cloud + rows.
     LaunchedEffect(deleteRequest) {

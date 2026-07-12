@@ -37,6 +37,14 @@ interface PhotoDao {
     @Query("SELECT localUri FROM photos WHERE syncState = 1 AND localUri IS NOT NULL")
     suspend fun getSyncedLocalUris(): List<String>
 
+    /** Synced rows that still hold a local copy — verified individually before freeing. */
+    @Query("SELECT * FROM photos WHERE syncState = 1 AND localUri IS NOT NULL")
+    suspend fun getSyncedWithLocal(): List<PhotoEntity>
+
+    /** Content-hash lookup — the anti-state-machine-failure identity of a photo (PRD §3.5). */
+    @Query("SELECT * FROM photos WHERE provider = :provider AND contentHashType = :type AND contentHashValue = :value LIMIT 1")
+    suspend fun findByContentHash(provider: String, type: String, value: String): PhotoEntity?
+
     @Query("SELECT * FROM photos WHERE syncState = 0")
     suspend fun getPendingUploads(): List<PhotoEntity>
 
@@ -56,6 +64,14 @@ interface PhotoDao {
     /** "Save to device" re-materialised a local copy: CLOUD_ONLY → SYNCED (PRD §3.7). */
     @Query("UPDATE photos SET localUri = :localUri, syncState = 1 WHERE id = :id")
     suspend fun markAsSyncedWithLocal(id: String, localUri: String)
+
+    /** Persist a verified/known content hash (identity for cross-check, PRD §3.5). */
+    @Query("UPDATE photos SET contentHashType = :type, contentHashValue = :value WHERE id = :id")
+    suspend fun setContentHash(id: String, type: String, value: String)
+
+    /** Re-link a row to its cloud object when identity matched by hash (state repair). */
+    @Query("UPDATE photos SET cloudId = :cloudId, provider = :provider, syncState = :state WHERE id = :id")
+    suspend fun linkCloud(id: String, cloudId: String, provider: String, state: Int)
 
     @Upsert
     suspend fun upsertAll(items: List<PhotoEntity>)

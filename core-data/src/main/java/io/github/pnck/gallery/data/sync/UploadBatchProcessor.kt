@@ -4,6 +4,7 @@ import android.content.ContentResolver
 import android.net.Uri
 import io.github.pnck.gallery.data.db.PhotoDao
 import io.github.pnck.gallery.network.ApiResult
+import io.github.pnck.gallery.provider.ContentHash
 import io.github.pnck.gallery.provider.ICloudStorageProvider
 
 /**
@@ -50,6 +51,11 @@ class UploadBatchProcessor(
             when (val result = provider.uploadFile(uri, mime) { /* per-file % unused for now */ }) {
                 is ApiResult.Success -> {
                     photoDao.markAsSynced(photo.id, result.data.id, result.data.provider.name)
+                    // Persist the content hash so local/cloud identity is recoverable
+                    // even if the state machine later breaks (PRD §3.5).
+                    (result.data.contentHash as? ContentHash.Md5)?.let {
+                        photoDao.setContentHash(photo.id, "MD5", it.value)
+                    }
                     uploaded++
                     onItemProgress(index + 1, pending.size)
                 }

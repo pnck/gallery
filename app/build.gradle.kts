@@ -99,6 +99,8 @@ dependencies {
     implementation(project(":core-transport"))
 
     implementation(libs.androidx.core.ktx)
+    // EXIF reading for the photo-details panel (T-403).
+    implementation(libs.androidx.exifinterface)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
