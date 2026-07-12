@@ -3,6 +3,12 @@ package io.github.pnck.gallery.ui.detail
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -53,9 +59,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import kotlin.math.abs
+import me.saket.telephoto.zoomable.rememberZoomableImageState
 import androidx.hilt.navigation.compose.hiltViewModel
 import io.github.pnck.gallery.R
 import io.github.pnck.gallery.domain.SyncState
@@ -73,6 +84,9 @@ import me.saket.telephoto.zoomable.coil3.ZoomableAsyncImage
  * and edit / share / save-to-device actions. CLOUD_ONLY originals download to
  * cacheDir only, never DCIM (invariant #9).
  */
+// Full-bleed immersive viewer: chrome is overlaid, so the Scaffold's content
+// padding is intentionally ignored (the photo goes edge-to-edge).
+@Suppress("UnusedMaterial3ScaffoldPaddingParameter")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PhotoDetailScreen(
@@ -90,6 +104,12 @@ fun PhotoDetailScreen(
     val snackbarHost = remember { SnackbarHostState() }
     val systemDelete = rememberSystemDelete()
     var menuExpanded by remember { mutableStateOf(false) }
+
+    // Immersive chrome + swipe-down-to-dismiss (Google-Photos style).
+    var chromeVisible by remember { mutableStateOf(true) }
+    val dismissOffset = remember { Animatable(0f) }
+    val dismissThresholdPx = with(LocalDensity.current) { 140.dp.toPx() }
+    val dismissProgress = (abs(dismissOffset.value) / dismissThresholdPx).coerceIn(0f, 1f)
 
     val pagerState = rememberPagerState(pageCount = { photos.size })
 
@@ -167,98 +187,137 @@ fun PhotoDetailScreen(
         }
     }
 
-    Scaffold(
-        containerColor = Color.Black,
-        snackbarHost = { SnackbarHost(snackbarHost) },
-        topBar = {
-            TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Black.copy(alpha = 0.4f),
-                    titleContentColor = Color.White,
-                    navigationIconContentColor = Color.White,
-                    actionIconContentColor = Color.White,
-                ),
-                title = {},
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
-                    }
-                },
-                actions = {
-                    if (current != null) {
-                        // Actions live in the title bar so they don't hug the bottom
-                        // edge on gesture-nav / full-screen phones.
-                        IconButton(onClick = {
-                            val p = pagerState.currentPage
-                            rotations[p] = snapTo90((rotations[p] ?: 0f) + 90f)
-                        }) {
-                            Icon(Icons.Default.RotateRight, contentDescription = stringResource(R.string.detail_rotate))
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 1f - 0.6f * dismissProgress))) {
+        Scaffold(
+            containerColor = Color.Transparent,
+            snackbarHost = { SnackbarHost(snackbarHost) },
+        ) { _ ->
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize(),
+            ) { page ->
+                val photo = photos.getOrNull(page) ?: return@HorizontalPager
+                // Kick off the cloud download for pages the user actually reaches.
+                LaunchedEffect(photo.id) { viewModel.ensureOriginal(photo) }
+
+                val model: String? = photo.localUri ?: (originals[photo.id] as? OriginalState.Ready)?.uri
+                val zoomState = rememberZoomableImageState()
+                val notZoomed = (zoomState.zoomableState.zoomFraction ?: 0f) < 0.01f
+
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            translationY = dismissOffset.value
+                            val p = dismissProgress
+                            scaleX = 1f - 0.1f * p
+                            scaleY = 1f - 0.1f * p
+                            alpha = 1f - 0.3f * p
                         }
-                        IconButton(onClick = { share(current) }) {
-                            Icon(Icons.Default.Share, contentDescription = stringResource(R.string.detail_share))
-                        }
-                        IconButton(onClick = { viewModel.requestDelete(current) }) {
-                            Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.detail_delete))
-                        }
-                        Box {
-                            IconButton(onClick = { menuExpanded = true }) {
-                                Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more))
-                            }
-                            DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.detail_edit)) },
-                                    leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                                    onClick = { menuExpanded = false; edit(current) },
-                                )
-                                if (current.syncState == SyncState.CLOUD_ONLY) {
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(R.string.detail_save)) },
-                                        leadingIcon = { Icon(Icons.Default.Download, contentDescription = null) },
-                                        onClick = { menuExpanded = false; viewModel.save(current) },
+                        // Swipe down to dismiss — only when the image isn't zoomed,
+                        // so Telephoto still owns pan/zoom otherwise.
+                        .then(
+                            if (notZoomed) {
+                                Modifier.pointerInput(Unit) {
+                                    detectVerticalDragGestures(
+                                        onVerticalDrag = { change, dy ->
+                                            change.consume()
+                                            scope.launch { dismissOffset.snapTo(dismissOffset.value + dy) }
+                                        },
+                                        onDragEnd = {
+                                            if (abs(dismissOffset.value) > dismissThresholdPx) onBack()
+                                            else scope.launch { dismissOffset.animateTo(0f) }
+                                        },
+                                        onDragCancel = { scope.launch { dismissOffset.animateTo(0f) } },
                                     )
                                 }
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.detail_info)) },
-                                    leadingIcon = { Icon(Icons.Default.Info, contentDescription = null) },
-                                    onClick = { menuExpanded = false; viewModel.showInfo(current) },
-                                )
+                            } else {
+                                Modifier
+                            },
+                        )
+                        .twoFingerRotation(
+                            enabled = model != null,
+                            onRotate = { d -> rotations[page] = (rotations[page] ?: 0f) + d },
+                            onSettle = { rotations[page] = snapTo90(rotations[page] ?: 0f) },
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    when {
+                        model != null -> ZoomableAsyncImage(
+                            model = model,
+                            contentDescription = null,
+                            state = zoomState,
+                            onClick = { chromeVisible = !chromeVisible },
+                            modifier = Modifier.fillMaxSize().rotate(rotations[page] ?: 0f),
+                        )
+                        originals[photo.id] is OriginalState.Failed ->
+                            Text(stringResource(R.string.detail_download_failed), color = Color.White)
+                        else -> CircularProgressIndicator(color = Color.White)
+                    }
+                }
+            }
+
+            // Chrome overlaid on top (immersive): tapping the photo toggles it; it
+            // hides while dragging to dismiss. Overlaying keeps the photo full-bleed.
+            AnimatedVisibility(
+                visible = chromeVisible && dismissProgress < 0.02f,
+                enter = fadeIn(),
+                exit = fadeOut(),
+            ) {
+                TopAppBar(
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Black.copy(alpha = 0.4f),
+                        titleContentColor = Color.White,
+                        navigationIconContentColor = Color.White,
+                        actionIconContentColor = Color.White,
+                    ),
+                    title = {},
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
+                        }
+                    },
+                    actions = {
+                        if (current != null) {
+                            IconButton(onClick = {
+                                val p = pagerState.currentPage
+                                rotations[p] = snapTo90((rotations[p] ?: 0f) + 90f)
+                            }) {
+                                Icon(Icons.Default.RotateRight, contentDescription = stringResource(R.string.detail_rotate))
+                            }
+                            IconButton(onClick = { share(current) }) {
+                                Icon(Icons.Default.Share, contentDescription = stringResource(R.string.detail_share))
+                            }
+                            IconButton(onClick = { viewModel.requestDelete(current) }) {
+                                Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.detail_delete))
+                            }
+                            Box {
+                                IconButton(onClick = { menuExpanded = true }) {
+                                    Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more))
+                                }
+                                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.detail_edit)) },
+                                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                                        onClick = { menuExpanded = false; edit(current) },
+                                    )
+                                    if (current.syncState == SyncState.CLOUD_ONLY) {
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.detail_save)) },
+                                            leadingIcon = { Icon(Icons.Default.Download, contentDescription = null) },
+                                            onClick = { menuExpanded = false; viewModel.save(current) },
+                                        )
+                                    }
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.detail_info)) },
+                                        leadingIcon = { Icon(Icons.Default.Info, contentDescription = null) },
+                                        onClick = { menuExpanded = false; viewModel.showInfo(current) },
+                                    )
+                                }
                             }
                         }
-                    }
-                },
-            )
-        },
-    ) { padding ->
-        HorizontalPager(
-            state = pagerState,
-            modifier = Modifier.fillMaxSize().padding(padding),
-        ) { page ->
-            val photo = photos.getOrNull(page) ?: return@HorizontalPager
-            // Kick off the cloud download for pages the user actually reaches.
-            LaunchedEffect(photo.id) { viewModel.ensureOriginal(photo) }
-
-            val model: String? = photo.localUri ?: (originals[photo.id] as? OriginalState.Ready)?.uri
-
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .twoFingerRotation(
-                        enabled = model != null,
-                        onRotate = { d -> rotations[page] = (rotations[page] ?: 0f) + d },
-                        onSettle = { rotations[page] = snapTo90(rotations[page] ?: 0f) },
-                    ),
-                contentAlignment = Alignment.Center,
-            ) {
-                when {
-                    model != null -> ZoomableAsyncImage(
-                        model = model,
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxSize().rotate(rotations[page] ?: 0f),
-                    )
-                    originals[photo.id] is OriginalState.Failed ->
-                        Text(stringResource(R.string.detail_download_failed), color = Color.White)
-                    else -> CircularProgressIndicator(color = Color.White)
-                }
+                    },
+                )
             }
         }
     }

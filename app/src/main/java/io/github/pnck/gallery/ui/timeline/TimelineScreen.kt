@@ -70,8 +70,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -84,7 +86,9 @@ import coil3.compose.AsyncImage
 import io.github.pnck.gallery.R
 import io.github.pnck.gallery.domain.SyncCounts
 import io.github.pnck.gallery.domain.SyncState
+import io.github.pnck.gallery.ui.util.pinchToStep
 import io.github.pnck.gallery.ui.util.rememberSystemDelete
+import androidx.compose.ui.unit.Dp
 
 /** Clean selection accent (Google-blue), instead of the dynamic-theme purple. */
 private val SelectionAccent = Color(0xFF1A73E8)
@@ -120,10 +124,15 @@ fun TimelineScreen(
     val queue by viewModel.queue.collectAsState()
     val backupState by viewModel.backupState.collectAsState()
     val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
     val snackbarHost = remember { SnackbarHostState() }
     val systemDelete = rememberSystemDelete()
 
     var showStatus by remember { mutableStateOf(false) }
+
+    // Pinch to change thumbnail density (Google-Photos grid zoom).
+    val cellSizes: List<Dp> = remember { listOf(72.dp, 100.dp, 148.dp) }
+    var cellIndex by remember { mutableStateOf(1) }
 
     // Aggressive in-app scan: react to any media change while the timeline is shown
     // (T-304). SyncPipeline's unique KEEP coalesces bursts, so no extra debounce.
@@ -231,8 +240,11 @@ fun TimelineScreen(
                 }
             } else {
                 LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 100.dp),
-                    modifier = Modifier.fillMaxSize(),
+                    columns = GridCells.Adaptive(minSize = cellSizes[cellIndex]),
+                    modifier = Modifier.fillMaxSize().pinchToStep(
+                        onZoomIn = { cellIndex = (cellIndex + 1).coerceAtMost(cellSizes.lastIndex) },
+                        onZoomOut = { cellIndex = (cellIndex - 1).coerceAtLeast(0) },
+                    ),
                 ) {
                 items(
                     count = photos.itemCount,
@@ -248,7 +260,10 @@ fun TimelineScreen(
                                     if (selectionMode) viewModel.toggleSelection(photo.id)
                                     else onPhotoClick(photo.id)
                                 },
-                                onLongClick = { viewModel.toggleSelection(photo.id) },
+                                onLongClick = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    viewModel.toggleSelection(photo.id)
+                                },
                             ),
                     ) {
                         AsyncImage(
