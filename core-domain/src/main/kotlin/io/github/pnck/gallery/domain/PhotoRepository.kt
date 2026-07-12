@@ -24,6 +24,12 @@ interface PhotoRepository {
     /** DB-known metadata for the photo-details panel (dims, date, hash, state). */
     suspend fun photoDetails(id: String): PhotoDetails?
 
+    /** Live per-state totals for the sync-status panel (PRD §9.1). */
+    fun observeSyncCounts(): Flow<SyncCounts>
+
+    /** How many of [ids] have no cloud copy — deleting them is unrecoverable. */
+    suspend fun countWithoutCloud(ids: List<String>): Int
+
     /**
      * Download the cloud original into app cache for viewing only, and return a
      * shareable content:// uri (FileProvider). Never writes DCIM/MediaStore, so

@@ -18,6 +18,12 @@ import androidx.compose.ui.platform.LocalContext
 data class DeleteRequest(val localUris: List<String>, val ids: List<String>)
 
 /**
+ * A delete awaiting the user's confirmation. [notBackedUp] counts photos with no
+ * cloud copy — those are lost forever, so the dialog warns harder.
+ */
+data class DeleteConfirm(val ids: List<String>, val notBackedUp: Int)
+
+/**
  * Scoped-storage local media deletion (PRD §7.3, invariant #7). On Android 11+
  * this shows the system delete dialog via MediaStore.createDeleteRequest; the
  * [onConfirmed] callback runs only after the user approves. Older devices fall

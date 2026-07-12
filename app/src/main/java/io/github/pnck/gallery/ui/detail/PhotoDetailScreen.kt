@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -34,6 +35,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -80,6 +82,7 @@ fun PhotoDetailScreen(
     val photos by viewModel.photos.collectAsState()
     val originals by viewModel.originals.collectAsState()
     val deleteRequest by viewModel.deleteRequest.collectAsState()
+    val deleteConfirm by viewModel.deleteConfirm.collectAsState()
     val info by viewModel.info.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -241,6 +244,33 @@ fun PhotoDetailScreen(
         ModalBottomSheet(onDismissRequest = viewModel::dismissInfo) {
             PhotoInfoSheet(data)
         }
+    }
+
+    deleteConfirm?.let { confirm ->
+        AlertDialog(
+            onDismissRequest = viewModel::cancelDelete,
+            title = { Text(stringResource(R.string.delete_confirm_title, confirm.ids.size)) },
+            text = {
+                Column {
+                    Text(stringResource(R.string.delete_confirm_message))
+                    if (confirm.notBackedUp > 0) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            stringResource(R.string.delete_confirm_unsynced, confirm.notBackedUp),
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = viewModel::confirmDelete) {
+                    Text(stringResource(R.string.delete_confirm_button), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::cancelDelete) { Text(stringResource(R.string.cancel)) }
+            },
+        )
     }
 }
 

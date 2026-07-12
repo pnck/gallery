@@ -7,6 +7,8 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.pnck.gallery.domain.PhotoRepository
+import io.github.pnck.gallery.domain.SyncCounts
+import io.github.pnck.gallery.ui.util.DeleteConfirm
 import io.github.pnck.gallery.ui.util.DeleteRequest
 import io.github.pnck.gallery.work.SyncPipeline
 import io.github.pnck.gallery.work.UploadWorker
@@ -16,6 +18,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
@@ -41,6 +44,9 @@ sealed interface TimelineEvent {
     data class Deleted(val count: Int) : TimelineEvent
 }
 
+/** A named entry in the sync-queue view (PRD §9.1). */
+data class SyncJob(val name: String, val state: WorkInfo.State)
+
 @HiltViewModel
 class TimelineViewModel @Inject constructor(
     private val repo: PhotoRepository,
@@ -56,21 +62,48 @@ class TimelineViewModel @Inject constructor(
         .map { infos -> infos.toSyncStatus() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SyncStatus.Idle)
 
+    /** Live per-state totals for the sync-status panel (PRD §9.1). */
+    val syncCounts: StateFlow<SyncCounts> = repo.observeSyncCounts()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SyncCounts(0, 0, 0, 0))
+
+    /** The sync queue: the state of each unique WorkManager chain. */
+    val queue: StateFlow<List<SyncJob>> = combine(
+        workManager.getWorkInfosForUniqueWorkFlow(SyncPipeline.UNIQUE_NAME),
+        workManager.getWorkInfosForUniqueWorkFlow(SyncPipeline.TARGETED_NAME),
+        workManager.getWorkInfosForUniqueWorkFlow(SyncPipeline.PERIODIC_NAME),
+    ) { pipeline, targeted, periodic ->
+        listOfNotNull(
+            pipeline.activeState()?.let { SyncJob("Full sync", it) },
+            targeted.activeState()?.let { SyncJob("Selected upload", it) },
+            periodic.activeState()?.let { SyncJob("Background sync", it) },
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     // ── Multi-select (PRD §9.1) ────────────────────────────────────────────
     private val _selection = MutableStateFlow<Set<String>>(emptySet())
     val selection: StateFlow<Set<String>> = _selection.asStateFlow()
 
+    /** Explicit selection mode so the toolbar can enter it with nothing selected. */
+    private val _selectionActive = MutableStateFlow(false)
+    val selectionActive: StateFlow<Boolean> = _selectionActive.asStateFlow()
+
     private val events = Channel<TimelineEvent>(Channel.BUFFERED)
     val eventFlow = events.receiveAsFlow()
 
+    fun enterSelectionMode() {
+        _selectionActive.value = true
+    }
+
+    fun exitSelectionMode() {
+        _selectionActive.value = false
+        _selection.value = emptySet()
+    }
+
     fun toggleSelection(photoId: String) {
+        _selectionActive.value = true
         _selection.value = _selection.value.toMutableSet().apply {
             if (!add(photoId)) remove(photoId)
         }
-    }
-
-    fun clearSelection() {
-        _selection.value = emptySet()
     }
 
     /** Enqueue a targeted upload for the selected (PENDING_UPLOAD) photos. */
@@ -78,7 +111,7 @@ class TimelineViewModel @Inject constructor(
         val ids = _selection.value.toList()
         if (ids.isEmpty()) return
         SyncPipeline.enqueueTargeted(workManager, ids)
-        clearSelection()
+        exitSelectionMode()
         viewModelScope.launch { events.send(TimelineEvent.SyncQueued(ids.size)) }
     }
 
@@ -86,21 +119,38 @@ class TimelineViewModel @Inject constructor(
     fun saveSelected() {
         val ids = _selection.value.toList()
         if (ids.isEmpty()) return
-        clearSelection()
+        exitSelectionMode()
         viewModelScope.launch {
             events.send(TimelineEvent.SaveStarted(ids.size))
             ids.forEach { repo.saveToDevice(it) }
         }
     }
 
-    // ── Delete (PENDING_DELETE, PRD §3.7) ──────────────────────────────────
+    // ── Delete (PENDING_DELETE, PRD §3.7) — confirm, then system dialog ─────
+    private val _deleteConfirm = MutableStateFlow<DeleteConfirm?>(null)
+    val deleteConfirm: StateFlow<DeleteConfirm?> = _deleteConfirm.asStateFlow()
+
     private val _deleteRequest = MutableStateFlow<DeleteRequest?>(null)
     val deleteRequest: StateFlow<DeleteRequest?> = _deleteRequest.asStateFlow()
 
+    /** Step 1: ask for confirmation, surfacing how many photos aren't backed up. */
     fun deleteSelected() {
         val ids = _selection.value.toList()
         if (ids.isEmpty()) return
-        clearSelection()
+        viewModelScope.launch {
+            _deleteConfirm.value = DeleteConfirm(ids, repo.countWithoutCloud(ids))
+        }
+    }
+
+    fun cancelDelete() {
+        _deleteConfirm.value = null
+    }
+
+    /** Step 2: the user confirmed — route local files through the system dialog. */
+    fun confirmDelete() {
+        val ids = _deleteConfirm.value?.ids ?: return
+        _deleteConfirm.value = null
+        exitSelectionMode()
         viewModelScope.launch {
             _deleteRequest.value = DeleteRequest(repo.localUrisToDelete(ids), ids)
         }
@@ -110,7 +160,7 @@ class TimelineViewModel @Inject constructor(
         _deleteRequest.value = null
     }
 
-    /** Called once the system dialog confirmed (or immediately for cloud-only). */
+    /** Step 3: the system dialog confirmed (or nothing local) — purge cloud + rows. */
     fun purge(ids: List<String>) {
         viewModelScope.launch {
             repo.purge(ids)
@@ -141,5 +191,16 @@ class TimelineViewModel @Inject constructor(
             }
         }
         return SyncStatus.Scanning
+    }
+
+    /** The single most-relevant *active* state of a unique chain, or null if idle. */
+    private fun List<WorkInfo>.activeState(): WorkInfo.State? {
+        val states = map { it.state }
+        return when {
+            WorkInfo.State.RUNNING in states -> WorkInfo.State.RUNNING
+            WorkInfo.State.ENQUEUED in states -> WorkInfo.State.ENQUEUED
+            WorkInfo.State.BLOCKED in states -> WorkInfo.State.BLOCKED
+            else -> null
+        }
     }
 }

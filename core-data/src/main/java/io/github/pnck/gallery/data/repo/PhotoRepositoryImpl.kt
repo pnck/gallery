@@ -16,6 +16,7 @@ import io.github.pnck.gallery.data.db.PhotoDao
 import io.github.pnck.gallery.data.db.PhotoEntity
 import io.github.pnck.gallery.domain.PhotoDetails
 import io.github.pnck.gallery.domain.PhotoRepository
+import io.github.pnck.gallery.domain.SyncCounts
 import io.github.pnck.gallery.domain.SyncState
 import io.github.pnck.gallery.domain.TimelinePhoto
 import io.github.pnck.gallery.network.ApiResult
@@ -52,6 +53,14 @@ class PhotoRepositoryImpl(
 
     override fun observePhoto(id: String): Flow<TimelinePhoto?> =
         photoDao.observeById(id).map { it?.toTimelinePhoto() }
+
+    override fun observeSyncCounts(): Flow<SyncCounts> =
+        photoDao.observeCounts().map {
+            SyncCounts(it.pendingUpload, it.synced, it.cloudOnly, it.pendingDelete)
+        }
+
+    override suspend fun countWithoutCloud(ids: List<String>): Int =
+        withContext(Dispatchers.IO) { photoDao.countWithoutCloud(ids) }
 
     override suspend fun photoDetails(id: String): PhotoDetails? = withContext(Dispatchers.IO) {
         photoDao.getById(id)?.let { row ->

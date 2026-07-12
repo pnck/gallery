@@ -7,6 +7,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.pnck.gallery.domain.PhotoRepository
 import io.github.pnck.gallery.domain.TimelinePhoto
+import io.github.pnck.gallery.ui.util.DeleteConfirm
 import io.github.pnck.gallery.ui.util.DeleteRequest
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
@@ -108,13 +109,29 @@ class PhotoDetailViewModel @Inject constructor(
         viewModelScope.launch { events.send(DetailEvent.NoEditor) }
     }
 
-    // ── Delete (PENDING_DELETE, PRD §3.7) ──────────────────────────────────
+    // ── Delete (PENDING_DELETE, PRD §3.7) — confirm, then system dialog ─────
+    private val _deleteConfirm = MutableStateFlow<DeleteConfirm?>(null)
+    val deleteConfirm: StateFlow<DeleteConfirm?> = _deleteConfirm.asStateFlow()
+
     private val _deleteRequest = MutableStateFlow<DeleteRequest?>(null)
     val deleteRequest: StateFlow<DeleteRequest?> = _deleteRequest.asStateFlow()
 
     fun requestDelete(photo: TimelinePhoto) {
         viewModelScope.launch {
-            _deleteRequest.value = DeleteRequest(repo.localUrisToDelete(listOf(photo.id)), listOf(photo.id))
+            val ids = listOf(photo.id)
+            _deleteConfirm.value = DeleteConfirm(ids, repo.countWithoutCloud(ids))
+        }
+    }
+
+    fun cancelDelete() {
+        _deleteConfirm.value = null
+    }
+
+    fun confirmDelete() {
+        val ids = _deleteConfirm.value?.ids ?: return
+        _deleteConfirm.value = null
+        viewModelScope.launch {
+            _deleteRequest.value = DeleteRequest(repo.localUrisToDelete(ids), ids)
         }
     }
 

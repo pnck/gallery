@@ -84,7 +84,30 @@ interface PhotoDao {
 
     @Query("SELECT * FROM photos WHERE localUri = :localUri LIMIT 1")
     suspend fun findByLocalUri(localUri: String): PhotoEntity?
+
+    /** Live per-state totals for the sync-status panel (PRD §9.1). */
+    @Query(
+        "SELECT " +
+            "IFNULL(SUM(CASE WHEN syncState = 0 THEN 1 ELSE 0 END), 0) AS pendingUpload, " +
+            "IFNULL(SUM(CASE WHEN syncState = 1 THEN 1 ELSE 0 END), 0) AS synced, " +
+            "IFNULL(SUM(CASE WHEN syncState = 2 THEN 1 ELSE 0 END), 0) AS cloudOnly, " +
+            "IFNULL(SUM(CASE WHEN syncState = 3 THEN 1 ELSE 0 END), 0) AS pendingDelete " +
+            "FROM photos",
+    )
+    fun observeCounts(): Flow<SyncCountsEntity>
+
+    /** How many of these photos have NO cloud copy — deleting them is unrecoverable. */
+    @Query("SELECT COUNT(*) FROM photos WHERE id IN (:ids) AND cloudId IS NULL")
+    suspend fun countWithoutCloud(ids: List<String>): Int
 }
+
+/** Projection for [PhotoDao.observeCounts]. */
+data class SyncCountsEntity(
+    val pendingUpload: Int,
+    val synced: Int,
+    val cloudOnly: Int,
+    val pendingDelete: Int,
+)
 
 @Dao
 interface SyncKeyDao {

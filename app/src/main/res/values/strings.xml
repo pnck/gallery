@@ -49,6 +49,25 @@
     <string name="photos_deleted">Deleted %1$d photo(s)</string>
     <string name="space_freed">Freed %1$d photo(s)</string>
     <string name="free_space_none">Nothing to free up</string>
+    <string name="action_select">Select</string>
+
+    <!-- Delete confirmation (PRD §3.7) -->
+    <string name="delete_confirm_title">Delete %1$d photo(s)?</string>
+    <string name="delete_confirm_message">The cloud copy is removed too. This can\'t be undone.</string>
+    <string name="delete_confirm_unsynced">%1$d of them are not backed up — those will be lost permanently.</string>
+    <string name="delete_confirm_button">Delete</string>
+
+    <!-- Sync status panel (PRD §9.1) -->
+    <string name="sync_status_title">Sync status</string>
+    <string name="sync_status_idle">Up to date</string>
+    <string name="sync_count_pending">Not backed up</string>
+    <string name="sync_count_synced">Backed up</string>
+    <string name="sync_count_cloud">Cloud only</string>
+    <string name="sync_queue_title">Queue</string>
+    <string name="sync_queue_empty">Nothing running</string>
+    <string name="work_running">Running</string>
+    <string name="work_enqueued">Queued</string>
+    <string name="work_blocked">Waiting</string>
 
     <!-- Detail viewer actions (PRD §9.1, T-403) -->
     <string name="detail_rotate">Rotate</string>

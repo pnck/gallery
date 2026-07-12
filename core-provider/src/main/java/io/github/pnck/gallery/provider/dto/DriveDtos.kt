@@ -49,9 +49,11 @@ data class DriveChangeDTO(
     val file: DriveFileDTO? = null,
 )
 
-/** Request body for the resumable-upload initiation call. */
+/** Request body for the resumable-upload initiation call (and folder creation). */
 @JsonClass(generateAdapter = true)
 data class DriveUploadMetadata(
     val name: String,
     val mimeType: String? = null,
+    /** Parent folder ids — pins uploads to the app's own "BYOS Gallery" folder. */
+    val parents: List<String>? = null,
 )

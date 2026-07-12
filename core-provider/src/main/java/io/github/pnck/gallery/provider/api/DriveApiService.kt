@@ -45,6 +45,13 @@ interface DriveApiService {
             "nextPageToken, newStartPageToken, changes(fileId, removed, file(id, name, size, md5Checksum, thumbnailLink, imageMediaMetadata))",
     ): Response<DriveChangeListResponse>
 
+    /** Create a file/folder from metadata only (used to make the app's own folder). */
+    @POST("drive/v3/files")
+    suspend fun createFile(
+        @Body metadata: DriveUploadMetadata,
+        @Query("fields") fields: String = "id",
+    ): Response<DriveFileDTO>
+
     @GET("drive/v3/files/{fileId}")
     suspend fun getFile(
         @Path("fileId") fileId: String,

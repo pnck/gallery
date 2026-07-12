@@ -10,6 +10,8 @@ import io.github.pnck.gallery.provider.mapper.DriveMappers
 import io.github.pnck.gallery.provider.upload.ContentUriRequestBody
 import java.io.IOException
 import java.io.InputStream
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Google Drive driver (T-102, PRD §4.2).
@@ -27,6 +29,10 @@ class GoogleDriveProvider(
 ) : ICloudStorageProvider {
 
     override val providerType: ProviderType = ProviderType.G_DRIVE
+
+    private val folderMutex = Mutex()
+    @Volatile
+    private var cachedFolderId: String? = null
 
     override suspend fun listPhotos(pageToken: String?): ApiResult<CloudPage> =
         safeApiCall({ api.listFiles(pageToken = pageToken) }) { body ->
@@ -68,8 +74,11 @@ class GoogleDriveProvider(
         mimeType: String,
         onProgress: (Int) -> Unit,
     ): ApiResult<CloudFile> {
+        val parents = ensureFolderId()?.let { listOf(it) }
         val sessionUri = try {
-            val init = api.initResumableUpload(DriveUploadMetadata(name = displayNameOf(uri), mimeType = mimeType))
+            val init = api.initResumableUpload(
+                DriveUploadMetadata(name = displayNameOf(uri), mimeType = mimeType, parents = parents),
+            )
             if (!init.isSuccessful) {
                 return ApiResult.Error(
                     code = init.code(),
@@ -106,8 +115,40 @@ class GoogleDriveProvider(
             is ApiResult.Error -> res
         }
 
+    /**
+     * Find-or-create the app's own "BYOS Gallery" folder so uploads land in one
+     * visible place in the user's Drive instead of scattered in My Drive root.
+     * With the drive.file scope the app only ever sees this folder and its files.
+     * The id is cached; the Mutex avoids racing two first-time uploads into
+     * creating duplicate folders. A failure returns null → upload falls back to root.
+     */
+    private suspend fun ensureFolderId(): String? {
+        cachedFolderId?.let { return it }
+        return folderMutex.withLock {
+            cachedFolderId?.let { return it }
+            val query = "name = '$FOLDER_NAME' and mimeType = '$FOLDER_MIME' and trashed = false"
+            val existing = safeApiCall({ api.listFiles(query = query, pageToken = null) }) {
+                it.files.firstOrNull()?.id
+            }
+            val found = (existing as? ApiResult.Success)?.data
+            val resolved = found ?: run {
+                val created = safeApiCall({
+                    api.createFile(DriveUploadMetadata(name = FOLDER_NAME, mimeType = FOLDER_MIME))
+                }) { it.id }
+                (created as? ApiResult.Success)?.data
+            }
+            cachedFolderId = resolved
+            resolved
+        }
+    }
+
     private fun displayNameOf(uri: Uri): String =
         resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
             if (c.moveToFirst()) c.getString(0) else null
         } ?: uri.lastPathSegment ?: "photo-${System.currentTimeMillis()}.jpg"
+
+    private companion object {
+        const val FOLDER_NAME = "BYOS Gallery"
+        const val FOLDER_MIME = "application/vnd.google-apps.folder"
+    }
 }
