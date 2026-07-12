@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.StateFlow
  * it returns `null` and the shared client falls back to NO_PROXY.
  *
  * Implementations planned (EPIC-5):
- *  - T-501 SocksOnlyTransport / HttpOnlyTransport (plain upstream proxy)
+ *  - T-501 SocksOnlyTransport (plain upstream SOCKS5 proxy)
  *  - T-502 WgThenSocksTransport (Rust boringtun+smoltcp core via UniFFI/Gobley)
  */
 interface NetworkTransport : OutboundRouter {

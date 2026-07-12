@@ -27,8 +27,6 @@ sealed interface TransportConfig {
 
     data class SocksOnly(val endpoint: Endpoint, val auth: Cred?) : TransportConfig
 
-    data class HttpOnly(val endpoint: Endpoint, val auth: Cred?) : TransportConfig
-
     /** WireGuard tunnel only — dial out the WG peer, no upstream SOCKS chain. */
     data class WgOnly(val wg: WgConfig) : TransportConfig
 

@@ -4,7 +4,6 @@ import io.github.pnck.gallery.network.transport.Cred
 import io.github.pnck.gallery.network.transport.Endpoint
 import io.github.pnck.gallery.network.transport.TransportConfig
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import uniffi.gallery_transport.CoreConfig
@@ -73,12 +72,5 @@ class TransportConfigMappingTest {
         assertEquals("vpn.example.com:51820", core.wg.endpoint)
         assertEquals("10.0.0.5", core.upstreamHost)
         assertEquals(1080.toUShort(), core.upstreamPort)
-    }
-
-    @Test
-    fun `httpOnly is not supported`() {
-        assertThrows(UnsupportedOperationException::class.java) {
-            TransportConfig.HttpOnly(Endpoint("h", 8080), auth = null).toCoreConfig()
-        }
     }
 }
