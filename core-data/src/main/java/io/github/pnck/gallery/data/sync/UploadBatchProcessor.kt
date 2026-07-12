@@ -26,13 +26,16 @@ class UploadBatchProcessor(
         data class Retry(val uploadedSoFar: Int) : Outcome
     }
 
+    /** Live per-item progress for the backup banner (Google-Photos style). */
+    data class Progress(val done: Int, val total: Int, val currentUri: String?, val pct: Int)
+
     /**
      * @param targetIds when non-null, only these photo ids are uploaded (multi-select
      *   sync); null uploads every PENDING_UPLOAD row (the full background sweep).
      */
     suspend fun processPending(
         targetIds: List<String>? = null,
-        onItemProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+        onProgress: (Progress) -> Unit = {},
     ): Outcome {
         val pending = if (targetIds.isNullOrEmpty()) {
             photoDao.getPendingUploads()
@@ -47,8 +50,13 @@ class UploadBatchProcessor(
             val localUri = photo.localUri ?: run { failed++; return@forEachIndexed }
             val uri = Uri.parse(localUri)
             val mime = resolver.getType(uri) ?: "image/jpeg"
+            onProgress(Progress(done = index, total = pending.size, currentUri = localUri, pct = 0))
 
-            when (val result = provider.uploadFile(uri, mime) { /* per-file % unused for now */ }) {
+            when (
+                val result = provider.uploadFile(uri, mime) { pct ->
+                    onProgress(Progress(index, pending.size, localUri, pct))
+                }
+            ) {
                 is ApiResult.Success -> {
                     photoDao.markAsSynced(photo.id, result.data.id, result.data.provider.name)
                     // Persist the content hash so local/cloud identity is recoverable
@@ -57,7 +65,7 @@ class UploadBatchProcessor(
                         photoDao.setContentHash(photo.id, "MD5", it.value)
                     }
                     uploaded++
-                    onItemProgress(index + 1, pending.size)
+                    onProgress(Progress(index + 1, pending.size, localUri, 100))
                 }
                 is ApiResult.Error ->
                     if (result.retryable) return Outcome.Retry(uploaded)

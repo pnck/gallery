@@ -73,6 +73,13 @@
     <string name="work_enqueued">Queued</string>
     <string name="work_blocked">Waiting</string>
 
+    <!-- Backup banner (Google-Photos style) -->
+    <string name="backup_running">Backing up %1$d / %2$d</string>
+    <string name="backup_pending">%1$d waiting to back up</string>
+    <string name="backup_pending_failed">%1$d waiting · %2$d failed</string>
+    <string name="backup_now">Back up now</string>
+    <string name="backup_retry">Retry</string>
+
     <!-- Detail viewer actions (PRD §9.1, T-403) -->
     <string name="detail_rotate">Rotate</string>
     <string name="detail_edit">Edit</string>

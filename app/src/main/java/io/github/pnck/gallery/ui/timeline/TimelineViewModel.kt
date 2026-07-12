@@ -47,6 +47,18 @@ sealed interface TimelineEvent {
 /** A named entry in the sync-queue view (PRD §9.1). */
 data class SyncJob(val name: String, val state: WorkInfo.State)
 
+/** Drives the Google-Photos-style backup banner at the top of the timeline. */
+sealed interface BackupState {
+    /** Nothing pending, nothing running — hide the banner. */
+    data object Idle : BackupState
+
+    /** Photos waiting to back up (not currently running); [failed] > 0 offers Retry. */
+    data class Pending(val count: Int, val failed: Int) : BackupState
+
+    /** A backup is in flight — show the current item + progress. */
+    data class Running(val done: Int, val total: Int, val currentUri: String?, val pct: Int) : BackupState
+}
+
 @HiltViewModel
 class TimelineViewModel @Inject constructor(
     private val repo: PhotoRepository,
@@ -65,6 +77,32 @@ class TimelineViewModel @Inject constructor(
     /** Live per-state totals for the sync-status panel (PRD §9.1). */
     val syncCounts: StateFlow<SyncCounts> = repo.observeSyncCounts()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SyncCounts(0, 0, 0, 0))
+
+    /** Google-Photos-style backup state: running progress, waiting count, or idle. */
+    val backupState: StateFlow<BackupState> = combine(
+        workManager.getWorkInfosForUniqueWorkFlow(SyncPipeline.UNIQUE_NAME),
+        workManager.getWorkInfosForUniqueWorkFlow(SyncPipeline.TARGETED_NAME),
+        repo.observeSyncCounts(),
+    ) { pipeline, targeted, counts ->
+        val all = pipeline + targeted
+        val running = all.firstOrNull {
+            it.state == WorkInfo.State.RUNNING && it.progress.getInt(UploadWorker.KEY_PROGRESS_TOTAL, 0) > 0
+        }
+        when {
+            running != null -> BackupState.Running(
+                done = running.progress.getInt(UploadWorker.KEY_PROGRESS_DONE, 0),
+                total = running.progress.getInt(UploadWorker.KEY_PROGRESS_TOTAL, 0),
+                currentUri = running.progress.getString(UploadWorker.KEY_CURRENT_URI),
+                pct = running.progress.getInt(UploadWorker.KEY_CURRENT_PCT, 0),
+            )
+            counts.pendingUpload > 0 -> {
+                val failed = all.filter { it.state == WorkInfo.State.SUCCEEDED }
+                    .maxOfOrNull { it.outputData.getInt(UploadWorker.KEY_FAILED, 0) } ?: 0
+                BackupState.Pending(counts.pendingUpload, failed)
+            }
+            else -> BackupState.Idle
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BackupState.Idle)
 
     /** The sync queue: the state of each unique WorkManager chain. */
     val queue: StateFlow<List<SyncJob>> = combine(

@@ -24,9 +24,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Checklist
@@ -45,11 +47,13 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -114,6 +118,7 @@ fun TimelineScreen(
     val deleteConfirm by viewModel.deleteConfirm.collectAsState()
     val syncCounts by viewModel.syncCounts.collectAsState()
     val queue by viewModel.queue.collectAsState()
+    val backupState by viewModel.backupState.collectAsState()
     val context = LocalContext.current
     val snackbarHost = remember { SnackbarHostState() }
     val systemDelete = rememberSystemDelete()
@@ -212,18 +217,23 @@ fun TimelineScreen(
             }
         },
     ) { padding ->
-        if (photos.itemCount == 0) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Text(
-                    text = stringResource(R.string.timeline_empty),
-                    style = MaterialTheme.typography.bodyLarge,
-                )
-            }
-        } else {
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 100.dp),
-                modifier = Modifier.fillMaxSize().padding(padding),
-            ) {
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            BackupBanner(
+                state = backupState,
+                onRetry = { viewModel.processIntent(TimelineIntent.ForceSync) },
+            )
+            if (photos.itemCount == 0) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = stringResource(R.string.timeline_empty),
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(minSize = 100.dp),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
                 items(
                     count = photos.itemCount,
                     key = { index -> photos.peek(index)?.id ?: index },
@@ -264,6 +274,7 @@ fun TimelineScreen(
                         }
                     }
                 }
+            }
             }
         }
     }
@@ -411,6 +422,72 @@ private fun CountPill(value: Int, label: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text("$value", style = MaterialTheme.typography.headlineSmall)
         Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/**
+ * Google-Photos-style backup banner pinned above the grid: live per-item progress
+ * while running, a waiting count with Retry otherwise, and nothing when idle.
+ */
+@Composable
+private fun BackupBanner(state: BackupState, onRetry: () -> Unit) {
+    when (state) {
+        is BackupState.Idle -> Unit
+
+        is BackupState.Running -> Surface(color = MaterialTheme.colorScheme.primaryContainer) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (state.currentUri != null) {
+                    AsyncImage(
+                        model = state.currentUri,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.size(36.dp).clip(RoundedCornerShape(6.dp)),
+                    )
+                    Spacer(Modifier.width(12.dp))
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        stringResource(R.string.backup_running, state.done, state.total),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    val fraction = if (state.total > 0) {
+                        (state.done + state.pct / 100f) / state.total
+                    } else {
+                        0f
+                    }
+                    LinearProgressIndicator(
+                        progress = { fraction.coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+        }
+
+        is BackupState.Pending -> Surface(color = MaterialTheme.colorScheme.primaryContainer) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Default.CloudUpload, contentDescription = null)
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    text = if (state.failed > 0) {
+                        stringResource(R.string.backup_pending_failed, state.count, state.failed)
+                    } else {
+                        stringResource(R.string.backup_pending, state.count)
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onRetry) {
+                    Text(stringResource(if (state.failed > 0) R.string.backup_retry else R.string.backup_now))
+                }
+            }
+        }
     }
 }
 
