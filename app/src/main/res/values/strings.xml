@@ -41,6 +41,9 @@
     <string name="account_sign_out">Sign out</string>
     <string name="account_sign_out_title">Sign out of Google Drive?</string>
     <string name="account_sign_out_message">Your photos stay in the cloud. You can sign in again anytime.</string>
+    <string name="account_open_folder">Open backup folder in Drive</string>
+    <string name="account_open_folder_hint">Browse your uploaded photos in Google Drive</string>
+    <string name="account_folder_unavailable">Couldn\'t open the folder — try again after a sync.</string>
     <string name="settings_transport">Network acceleration</string>
     <string name="settings_transport_hint">Direct / SOCKS / WireGuard + LAN SOCKS chain</string>
     <string name="settings_transport_connected">Connected — acceleration active</string>
@@ -87,6 +90,9 @@
     <string name="backup_pending_failed">%1$d waiting · %2$d failed</string>
     <string name="backup_now">Back up now</string>
     <string name="backup_retry">Retry</string>
+    <string name="backup_pause">Pause</string>
+    <string name="backup_paused">Backup paused · %1$d waiting</string>
+    <string name="backup_resume">Resume</string>
 
     <!-- Detail viewer actions (PRD §9.1, T-403) -->
     <string name="detail_rotate">Rotate</string>

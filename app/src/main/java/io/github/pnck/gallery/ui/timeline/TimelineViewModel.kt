@@ -6,6 +6,7 @@ import androidx.paging.cachedIn
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import io.github.pnck.gallery.data.settings.AppSettingsStore
 import io.github.pnck.gallery.domain.PhotoRepository
 import io.github.pnck.gallery.domain.SyncCounts
 import io.github.pnck.gallery.ui.util.DeleteConfirm
@@ -57,11 +58,15 @@ sealed interface BackupState {
 
     /** A backup is in flight — show the current item + progress. */
     data class Running(val done: Int, val total: Int, val currentUri: String?, val pct: Int) : BackupState
+
+    /** The bulk backup is paused by the user; [count] still waiting. */
+    data class Paused(val count: Int) : BackupState
 }
 
 @HiltViewModel
 class TimelineViewModel @Inject constructor(
     private val repo: PhotoRepository,
+    private val settings: AppSettingsStore,
     private val workManager: WorkManager,
 ) : ViewModel() {
 
@@ -78,12 +83,13 @@ class TimelineViewModel @Inject constructor(
     val syncCounts: StateFlow<SyncCounts> = repo.observeSyncCounts()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SyncCounts(0, 0, 0, 0))
 
-    /** Google-Photos-style backup state: running progress, waiting count, or idle. */
+    /** Google-Photos-style backup state: running progress, paused, waiting count, or idle. */
     val backupState: StateFlow<BackupState> = combine(
         workManager.getWorkInfosForUniqueWorkFlow(SyncPipeline.UNIQUE_NAME),
         workManager.getWorkInfosForUniqueWorkFlow(SyncPipeline.TARGETED_NAME),
         repo.observeSyncCounts(),
-    ) { pipeline, targeted, counts ->
+        settings.backupPaused,
+    ) { pipeline, targeted, counts, paused ->
         val all = pipeline + targeted
         val running = all.firstOrNull {
             it.state == WorkInfo.State.RUNNING && it.progress.getInt(UploadWorker.KEY_PROGRESS_TOTAL, 0) > 0
@@ -95,6 +101,7 @@ class TimelineViewModel @Inject constructor(
                 currentUri = running.progress.getString(UploadWorker.KEY_CURRENT_URI),
                 pct = running.progress.getInt(UploadWorker.KEY_CURRENT_PCT, 0),
             )
+            paused && counts.pendingUpload > 0 -> BackupState.Paused(counts.pendingUpload)
             counts.pendingUpload > 0 -> {
                 val failed = all.filter { it.state == WorkInfo.State.SUCCEEDED }
                     .maxOfOrNull { it.outputData.getInt(UploadWorker.KEY_FAILED, 0) } ?: 0
@@ -103,6 +110,21 @@ class TimelineViewModel @Inject constructor(
             else -> BackupState.Idle
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BackupState.Idle)
+
+    /** Pause the bulk backup and stop any run in progress (explicit syncs still work). */
+    fun pauseBackup() {
+        viewModelScope.launch {
+            settings.setBackupPaused(true)
+            workManager.cancelUniqueWork(SyncPipeline.UNIQUE_NAME)
+        }
+    }
+
+    fun resumeBackup() {
+        viewModelScope.launch {
+            settings.setBackupPaused(false)
+            SyncPipeline.enqueue(workManager)
+        }
+    }
 
     /** The sync queue: the state of each unique WorkManager chain. */
     val queue: StateFlow<List<SyncJob>> = combine(

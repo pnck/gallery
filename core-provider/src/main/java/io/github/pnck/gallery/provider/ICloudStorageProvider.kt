@@ -52,4 +52,11 @@ interface ICloudStorageProvider {
 
     /** Fresh short-lived thumbnail URL for immediate rendering. */
     suspend fun getThumbnailUrl(cloudId: String): ApiResult<String>
+
+    /**
+     * A user-openable web link to the app's backup folder (so the user can browse
+     * their uploaded photos directly), or null if it can't be resolved. This is a
+     * normal, visible Drive folder — not hidden app-data (we never use appDataFolder).
+     */
+    suspend fun backupFolderLink(): ApiResult<String?>
 }

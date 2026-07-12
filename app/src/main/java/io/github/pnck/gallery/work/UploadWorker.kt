@@ -7,8 +7,10 @@ import androidx.work.Data
 import androidx.work.WorkerParameters
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import io.github.pnck.gallery.data.settings.AppSettingsStore
 import io.github.pnck.gallery.data.sync.UploadBatchProcessor
 import io.github.pnck.gallery.provider.AuthManager
+import kotlinx.coroutines.flow.first
 
 /**
  * Silent background upload (T-301, PRD §7.1). Thin WorkManager shell around
@@ -23,6 +25,7 @@ class UploadWorker @AssistedInject constructor(
     @Assisted params: WorkerParameters,
     private val processor: UploadBatchProcessor,
     private val authManager: AuthManager,
+    private val settings: AppSettingsStore,
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
@@ -30,6 +33,9 @@ class UploadWorker @AssistedInject constructor(
 
         // Non-empty → multi-select targeted sync; absent → full background sweep.
         val targetIds = inputData.getStringArray(KEY_TARGET_IDS)?.toList()
+
+        // The bulk sweep honours the pause switch; explicit (targeted) syncs never do.
+        if (targetIds == null && settings.backupPaused.first()) return Result.success()
 
         var lastKey = ""
         return when (

@@ -39,6 +39,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,6 +52,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.pnck.gallery.R
 import io.github.pnck.gallery.ui.util.rememberSystemDelete
+import kotlinx.coroutines.launch
 
 /**
  * Settings (PRD §9.1): device-flow account connection (ADR-0001), plus
@@ -66,8 +68,10 @@ fun SettingsScreen(
     val state by viewModel.state.collectAsState()
     val freeUris by viewModel.freeUris.collectAsState()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val snackbarHost = remember { SnackbarHostState() }
     val systemDelete = rememberSystemDelete()
+    val folderUnavailable = stringResource(R.string.account_folder_unavailable)
 
     // "Free up space": run the gathered synced-local uris through the system
     // delete dialog, then flip those rows to CLOUD_ONLY (T-302).
@@ -240,6 +244,16 @@ fun SettingsScreen(
                 onSignIn = { showAccount = false; viewModel.signInGoogle() },
                 onSignOut = { showAccount = false; viewModel.signOutGoogle() },
                 onUpdateFolder = viewModel::updateRemoteFolderName,
+                onOpenFolder = {
+                    scope.launch {
+                        val link = viewModel.backupFolderLink()
+                        if (link != null) {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, link.toUri()))
+                        } else {
+                            snackbarHost.showSnackbar(folderUnavailable)
+                        }
+                    }
+                },
                 onDismiss = { showAccount = false },
             )
         }
@@ -255,6 +269,7 @@ private fun AccountSheet(
     onSignIn: () -> Unit,
     onSignOut: () -> Unit,
     onUpdateFolder: (String) -> Unit,
+    onOpenFolder: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     var editingFolder by remember { mutableStateOf(false) }
@@ -284,6 +299,13 @@ private fun AccountSheet(
                     modifier = Modifier.clickable { editingFolder = true },
                     headlineContent = { Text(stringResource(R.string.settings_folder)) },
                     supportingContent = { Text(folderName, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                )
+                ListItem(
+                    modifier = Modifier.clickable(onClick = onOpenFolder),
+                    headlineContent = { Text(stringResource(R.string.account_open_folder)) },
+                    supportingContent = {
+                        Text(stringResource(R.string.account_open_folder_hint), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    },
                 )
                 HorizontalDivider()
                 Spacer(Modifier.height(20.dp))

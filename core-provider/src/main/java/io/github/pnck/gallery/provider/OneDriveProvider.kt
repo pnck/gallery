@@ -49,4 +49,6 @@ class OneDriveProvider(
     override suspend fun getFileMetadata(cloudId: String): ApiResult<CloudFile> {
         TODO("T-103: GET /me/drive/items/{id} → quickXorHash → ContentHash.QuickXor")
     }
+
+    override suspend fun backupFolderLink(): ApiResult<String?> = ApiResult.Success(null)
 }

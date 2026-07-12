@@ -9,6 +9,7 @@ import io.github.pnck.gallery.network.ApiResult
 import io.github.pnck.gallery.network.transport.TransportState
 import io.github.pnck.gallery.provider.AuthManager
 import io.github.pnck.gallery.provider.DeviceAuthChallenge
+import io.github.pnck.gallery.provider.ICloudStorageProvider
 import io.github.pnck.gallery.transport.TransportController
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
@@ -53,8 +54,15 @@ class SettingsViewModel @Inject constructor(
     private val googleAuthManager: AuthManager,
     private val repo: PhotoRepository,
     private val settings: AppSettingsStore,
+    private val provider: ICloudStorageProvider,
     transportController: TransportController,
 ) : ViewModel() {
+
+    /** A web link to the cloud backup folder so the user can browse it directly. */
+    suspend fun backupFolderLink(): String? =
+        withContext(Dispatchers.IO) {
+            (provider.backupFolderLink() as? ApiResult.Success)?.data
+        }
 
     private val _state = MutableStateFlow(SettingsState())
     val state = _state.asStateFlow()

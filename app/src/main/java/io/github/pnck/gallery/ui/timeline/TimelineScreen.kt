@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sync
@@ -230,6 +231,8 @@ fun TimelineScreen(
             BackupBanner(
                 state = backupState,
                 onRetry = { viewModel.processIntent(TimelineIntent.ForceSync) },
+                onPause = viewModel::pauseBackup,
+                onResume = viewModel::resumeBackup,
             )
             if (photos.itemCount == 0) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -445,13 +448,18 @@ private fun CountPill(value: Int, label: String) {
  * while running, a waiting count with Retry otherwise, and nothing when idle.
  */
 @Composable
-private fun BackupBanner(state: BackupState, onRetry: () -> Unit) {
+private fun BackupBanner(
+    state: BackupState,
+    onRetry: () -> Unit,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
+) {
     when (state) {
         is BackupState.Idle -> Unit
 
         is BackupState.Running -> Surface(color = MaterialTheme.colorScheme.primaryContainer) {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (state.currentUri != null) {
@@ -478,6 +486,27 @@ private fun BackupBanner(state: BackupState, onRetry: () -> Unit) {
                         progress = { fraction.coerceIn(0f, 1f) },
                         modifier = Modifier.fillMaxWidth(),
                     )
+                }
+                IconButton(onClick = onPause) {
+                    Icon(Icons.Default.Pause, contentDescription = stringResource(R.string.backup_pause))
+                }
+            }
+        }
+
+        is BackupState.Paused -> Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Default.Pause, contentDescription = null)
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    stringResource(R.string.backup_paused, state.count),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onResume) {
+                    Text(stringResource(R.string.backup_resume))
                 }
             }
         }
