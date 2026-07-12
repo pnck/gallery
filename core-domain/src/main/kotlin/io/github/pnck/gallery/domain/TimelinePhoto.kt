@@ -20,6 +20,8 @@ data class TimelinePhoto(
     val cloudId: String?,
     /** G_DRIVE / ONE_DRIVE, or null before the first upload. */
     val provider: String?,
+    /** User dropped this photo from automatic backup ("clear queue"); still local. */
+    val excluded: Boolean = false,
 ) {
     /** True when only the cloud copy remains (PRD §3.7); the grid keeps a cloud badge. */
     val showCloudIcon: Boolean get() = syncState == SyncState.CLOUD_ONLY

@@ -33,10 +33,6 @@ interface PhotoDao {
     @Query("SELECT cloudId FROM photos WHERE provider = :provider AND cloudId IS NOT NULL")
     suspend fun getKnownCloudIds(provider: String): List<String>
 
-    /** Local copies of already-synced photos — the "free up space" candidate set (PRD §7.3). */
-    @Query("SELECT localUri FROM photos WHERE syncState = 1 AND localUri IS NOT NULL")
-    suspend fun getSyncedLocalUris(): List<String>
-
     /** Synced rows that still hold a local copy — verified individually before freeing. */
     @Query("SELECT * FROM photos WHERE syncState = 1 AND localUri IS NOT NULL")
     suspend fun getSyncedWithLocal(): List<PhotoEntity>
@@ -45,15 +41,20 @@ interface PhotoDao {
     @Query("SELECT * FROM photos WHERE provider = :provider AND contentHashType = :type AND contentHashValue = :value LIMIT 1")
     suspend fun findByContentHash(provider: String, type: String, value: String): PhotoEntity?
 
-    @Query("SELECT * FROM photos WHERE syncState = 0")
+    @Query("SELECT * FROM photos WHERE syncState = 0 AND excluded = 0")
     suspend fun getPendingUploads(): List<PhotoEntity>
+
+    /** "Clear queue": drop every waiting photo out of automatic backup (kept visible). */
+    @Query("UPDATE photos SET excluded = 1 WHERE syncState = 0")
+    suspend fun excludeAllPending()
+
+    /** Put photos back in the queue — e.g. the user explicitly selects them to sync. */
+    @Query("UPDATE photos SET excluded = 0 WHERE id IN (:ids)")
+    suspend fun includeForBackup(ids: List<String>)
 
     /** Targeted upload set for multi-select sync — only rows still PENDING_UPLOAD. */
     @Query("SELECT * FROM photos WHERE id IN (:ids) AND syncState = 0")
     suspend fun getPendingByIds(ids: List<String>): List<PhotoEntity>
-
-    @Query("SELECT * FROM photos WHERE syncState = 1 AND dateTaken < :beforeTs")
-    suspend fun getSyncedOlderThan(beforeTs: Long): List<PhotoEntity>
 
     @Query("UPDATE photos SET cloudId = :cloudId, provider = :provider, syncState = 1 WHERE id = :id")
     suspend fun markAsSynced(id: String, cloudId: String, provider: String)
@@ -88,7 +89,7 @@ interface PhotoDao {
     /** Live per-state totals for the sync-status panel (PRD §9.1). */
     @Query(
         "SELECT " +
-            "IFNULL(SUM(CASE WHEN syncState = 0 THEN 1 ELSE 0 END), 0) AS pendingUpload, " +
+            "IFNULL(SUM(CASE WHEN syncState = 0 AND excluded = 0 THEN 1 ELSE 0 END), 0) AS pendingUpload, " +
             "IFNULL(SUM(CASE WHEN syncState = 1 THEN 1 ELSE 0 END), 0) AS synced, " +
             "IFNULL(SUM(CASE WHEN syncState = 2 THEN 1 ELSE 0 END), 0) AS cloudOnly, " +
             "IFNULL(SUM(CASE WHEN syncState = 3 THEN 1 ELSE 0 END), 0) AS pendingDelete " +

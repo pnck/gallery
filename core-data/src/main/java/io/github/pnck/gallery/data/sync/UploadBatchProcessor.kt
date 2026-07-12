@@ -2,10 +2,13 @@ package io.github.pnck.gallery.data.sync
 
 import android.content.ContentResolver
 import android.net.Uri
+import android.util.Log
 import io.github.pnck.gallery.data.db.PhotoDao
 import io.github.pnck.gallery.network.ApiResult
 import io.github.pnck.gallery.provider.ContentHash
 import io.github.pnck.gallery.provider.ICloudStorageProvider
+
+private const val TAG = "gallery-sync"
 
 /**
  * Upload loop shared by workers (T-301 core, PRD §7.1). Framework-free: the
@@ -43,11 +46,16 @@ class UploadBatchProcessor(
             photoDao.getPendingByIds(targetIds)
         }
         if (pending.isEmpty()) return Outcome.Done(0, 0)
+        Log.i(TAG, "upload: ${pending.size} pending (targeted=${!targetIds.isNullOrEmpty()})")
 
         var uploaded = 0
         var failed = 0
         pending.forEachIndexed { index, photo ->
-            val localUri = photo.localUri ?: run { failed++; return@forEachIndexed }
+            val localUri = photo.localUri ?: run {
+                Log.w(TAG, "upload: skip ${photo.id} — no localUri")
+                failed++
+                return@forEachIndexed
+            }
             val uri = Uri.parse(localUri)
             val mime = resolver.getType(uri) ?: "image/jpeg"
             onProgress(Progress(done = index, total = pending.size, currentUri = localUri, pct = 0))
@@ -65,13 +73,17 @@ class UploadBatchProcessor(
                         photoDao.setContentHash(photo.id, "MD5", it.value)
                     }
                     uploaded++
+                    Log.i(TAG, "upload: OK ${photo.id} -> ${result.data.id}")
                     onProgress(Progress(index + 1, pending.size, localUri, 100))
                 }
-                is ApiResult.Error ->
+                is ApiResult.Error -> {
+                    Log.w(TAG, "upload: FAILED ${photo.id} code=${result.code} retryable=${result.retryable} — ${result.message}")
                     if (result.retryable) return Outcome.Retry(uploaded)
                     else failed++ // permanent failure: stays PENDING_UPLOAD, next batch retries
+                }
             }
         }
+        Log.i(TAG, "upload: done uploaded=$uploaded failed=$failed")
         return Outcome.Done(uploaded, failed)
     }
 }

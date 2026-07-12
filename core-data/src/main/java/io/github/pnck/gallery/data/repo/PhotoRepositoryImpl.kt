@@ -62,6 +62,14 @@ class PhotoRepositoryImpl(
     override suspend fun countWithoutCloud(ids: List<String>): Int =
         withContext(Dispatchers.IO) { photoDao.countWithoutCloud(ids) }
 
+    override suspend fun clearBackupQueue() = withContext(Dispatchers.IO) {
+        photoDao.excludeAllPending()
+    }
+
+    override suspend fun includeForBackup(ids: List<String>) = withContext(Dispatchers.IO) {
+        photoDao.includeForBackup(ids)
+    }
+
     override suspend fun photoDetails(id: String): PhotoDetails? = withContext(Dispatchers.IO) {
         photoDao.getById(id)?.let { row ->
             PhotoDetails(
@@ -230,4 +238,5 @@ internal fun PhotoEntity.toTimelinePhoto(): TimelinePhoto =
         localUri = localUri,
         cloudId = cloudId,
         provider = provider,
+        excluded = excluded,
     )

@@ -4,7 +4,6 @@
     <string name="settings">Settings</string>
     <string name="back">Back</string>
     <string name="more">More</string>
-    <string name="photo_detail">Photo</string>
     <string name="timeline_empty">No photos yet — sign in to your cloud storage in Settings to get started.</string>
 
     <string name="force_sync">Sync now</string>
@@ -14,8 +13,6 @@
     <string name="settings_google_account">Google Drive</string>
     <string name="settings_google_connected">Connected — tap to sign out</string>
     <string name="settings_google_disconnected">Not connected — tap to sign in (no GMS required)</string>
-    <string name="auth_success">Google Drive connected</string>
-    <string name="auth_failed">Sign-in failed: %1$s</string>
     <string name="cancel">Cancel</string>
 
     <!-- Device flow (ADR-0001) -->
@@ -53,6 +50,7 @@
     <string name="badge_pending_upload">Not backed up</string>
     <string name="badge_synced">Backed up</string>
     <string name="badge_cloud_only">Cloud only</string>
+    <string name="badge_excluded">Excluded from backup</string>
 
     <!-- Multi-select (PRD §9.1) -->
     <string name="selection_count">%1$d selected</string>
@@ -81,6 +79,10 @@
     <string name="sync_count_cloud">Cloud only</string>
     <string name="sync_queue_title">Queue</string>
     <string name="sync_queue_empty">Nothing running</string>
+    <string name="clear_queue">Clear backup queue</string>
+    <string name="clear_queue_title">Clear backup queue?</string>
+    <string name="clear_queue_message">%1$d photos will stop backing up automatically. They stay on your device, and you can still back up individual photos by selecting them.</string>
+    <string name="clear_queue_confirm">Clear</string>
     <string name="work_running">Running</string>
     <string name="work_enqueued">Queued</string>
     <string name="work_blocked">Waiting</string>
@@ -100,7 +102,6 @@
     <string name="detail_edit">Edit</string>
     <string name="detail_share">Share</string>
     <string name="detail_save">Save to device</string>
-    <string name="detail_downloading">Downloading original…</string>
     <string name="detail_download_failed">Couldn\'t download the original.</string>
     <string name="detail_saved">Saved to your gallery</string>
     <string name="detail_save_failed">Couldn\'t save the photo.</string>
@@ -124,5 +125,4 @@
     <string name="info_focal">Focal length</string>
     <string name="info_location">Location</string>
     <string name="info_hash">Content hash</string>
-    <string name="info_unknown">—</string>
 </resources>

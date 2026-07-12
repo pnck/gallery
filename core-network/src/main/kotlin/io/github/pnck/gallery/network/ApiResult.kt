@@ -15,18 +15,3 @@ sealed class ApiResult<out T> {
         val retryable: Boolean,
     ) : ApiResult<Nothing>()
 }
-
-inline fun <T, R> ApiResult<T>.map(transform: (T) -> R): ApiResult<R> = when (this) {
-    is ApiResult.Success -> ApiResult.Success(transform(data))
-    is ApiResult.Error -> this
-}
-
-inline fun <T> ApiResult<T>.onSuccess(block: (T) -> Unit): ApiResult<T> {
-    if (this is ApiResult.Success) block(data)
-    return this
-}
-
-inline fun <T> ApiResult<T>.onError(block: (ApiResult.Error) -> Unit): ApiResult<T> {
-    if (this is ApiResult.Error) block(this)
-    return this
-}

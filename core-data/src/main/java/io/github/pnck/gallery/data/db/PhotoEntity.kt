@@ -35,6 +35,13 @@ data class PhotoEntity(
     val width: Int,
     val height: Int,
     val syncState: SyncState,
+    /**
+     * User opted this photo out of automatic backup ("clear queue"): it stays local
+     * and visible but the bulk sweep skips it. Orthogonal to [syncState] so the
+     * four-state machine (invariant #2) is untouched. Selecting it for an explicit
+     * sync clears this.
+     */
+    val excluded: Boolean = false,
 )
 
 /** RemoteMediator cursors (PRD §3.4): initial paging tokens + delta tokens per target. */

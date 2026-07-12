@@ -30,6 +30,12 @@ interface PhotoRepository {
     /** How many of [ids] have no cloud copy — deleting them is unrecoverable. */
     suspend fun countWithoutCloud(ids: List<String>): Int
 
+    /** Drop every waiting photo out of automatic backup (kept visible in the grid). */
+    suspend fun clearBackupQueue()
+
+    /** Put photos back in the backup queue (e.g. the user selected them to sync). */
+    suspend fun includeForBackup(ids: List<String>)
+
     /**
      * Download the cloud original into app cache for viewing only, and return a
      * shareable content:// uri (FileProvider). Never writes DCIM/MediaStore, so

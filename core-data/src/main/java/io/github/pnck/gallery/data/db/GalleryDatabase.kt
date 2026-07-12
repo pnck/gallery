@@ -5,10 +5,12 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [PhotoEntity::class, SyncKeyEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 @TypeConverters(SyncStateConverter::class)
@@ -20,8 +22,17 @@ abstract class GalleryDatabase : RoomDatabase() {
     companion object {
         const val NAME = "gallery.db"
 
+        /** v2: `excluded` flag so photos can be dropped from the backup queue (kept visible). */
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE photos ADD COLUMN excluded INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         /** Single construction point so Room stays an implementation detail of :core-data. */
         fun create(context: Context): GalleryDatabase =
-            Room.databaseBuilder(context, GalleryDatabase::class.java, NAME).build()
+            Room.databaseBuilder(context, GalleryDatabase::class.java, NAME)
+                .addMigrations(MIGRATION_1_2)
+                .build()
     }
 }

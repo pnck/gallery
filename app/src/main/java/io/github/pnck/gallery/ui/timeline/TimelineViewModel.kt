@@ -28,8 +28,6 @@ import kotlinx.coroutines.launch
 /** MVI intents of the timeline (PRD §9.2). */
 sealed class TimelineIntent {
     data object ForceSync : TimelineIntent()
-    data class OnPhotoClick(val photoId: String) : TimelineIntent()
-    data object RequestFreeSpace : TimelineIntent()
 }
 
 sealed interface SyncStatus {
@@ -166,13 +164,24 @@ class TimelineViewModel @Inject constructor(
         }
     }
 
-    /** Enqueue a targeted upload for the selected (PENDING_UPLOAD) photos. */
+    /** Enqueue a targeted upload for the selected photos (un-excluding any dropped ones). */
     fun syncSelected() {
         val ids = _selection.value.toList()
         if (ids.isEmpty()) return
-        SyncPipeline.enqueueTargeted(workManager, ids)
         exitSelectionMode()
-        viewModelScope.launch { events.send(TimelineEvent.SyncQueued(ids.size)) }
+        viewModelScope.launch {
+            repo.includeForBackup(ids)
+            SyncPipeline.enqueueTargeted(workManager, ids)
+            events.send(TimelineEvent.SyncQueued(ids.size))
+        }
+    }
+
+    /** "Clear queue": stop the current sweep and drop all waiting photos from backup. */
+    fun clearBackupQueue() {
+        viewModelScope.launch {
+            workManager.cancelUniqueWork(SyncPipeline.UNIQUE_NAME)
+            repo.clearBackupQueue()
+        }
     }
 
     /** Re-materialise the selected cloud photos into the shared gallery (PRD §3.7). */
@@ -231,10 +240,6 @@ class TimelineViewModel @Inject constructor(
     fun processIntent(intent: TimelineIntent) {
         when (intent) {
             is TimelineIntent.ForceSync -> SyncPipeline.enqueue(workManager)
-            is TimelineIntent.RequestFreeSpace -> {
-                // T-302: compute deletable URIs, hand to UI for MediaStore.createDeleteRequest.
-            }
-            is TimelineIntent.OnPhotoClick -> Unit // navigation handled by the screen
         }
     }
 

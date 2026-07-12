@@ -29,7 +29,10 @@ class UploadWorker @AssistedInject constructor(
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
-        if (!authManager.isAuthorized()) return Result.success()
+        if (!authManager.isAuthorized()) {
+            android.util.Log.i("gallery-sync", "upload: not signed in — skipping")
+            return Result.success()
+        }
 
         // Non-empty → multi-select targeted sync; absent → full background sweep.
         val targetIds = inputData.getStringArray(KEY_TARGET_IDS)?.toList()

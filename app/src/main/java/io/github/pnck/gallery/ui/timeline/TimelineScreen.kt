@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -130,6 +131,7 @@ fun TimelineScreen(
     val systemDelete = rememberSystemDelete()
 
     var showStatus by remember { mutableStateOf(false) }
+    var showClearConfirm by remember { mutableStateOf(false) }
 
     // Pinch to change thumbnail density (Google-Photos grid zoom).
     val cellSizes: List<Dp> = remember { listOf(72.dp, 100.dp, 148.dp) }
@@ -277,6 +279,7 @@ fun TimelineScreen(
                         )
                         SyncStateBadge(
                             state = photo.syncState,
+                            excluded = photo.excluded,
                             modifier = Modifier.align(Alignment.TopEnd).padding(4.dp),
                         )
                         if (selectionMode) {
@@ -313,8 +316,25 @@ fun TimelineScreen(
                 counts = syncCounts,
                 queue = queue,
                 onSyncNow = { viewModel.processIntent(TimelineIntent.ForceSync) },
+                onClearQueue = { showStatus = false; showClearConfirm = true },
             )
         }
+    }
+
+    if (showClearConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirm = false },
+            title = { Text(stringResource(R.string.clear_queue_title)) },
+            text = { Text(stringResource(R.string.clear_queue_message, syncCounts.pendingUpload)) },
+            confirmButton = {
+                TextButton(onClick = { showClearConfirm = false; viewModel.clearBackupQueue() }) {
+                    Text(stringResource(R.string.clear_queue_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirm = false }) { Text(stringResource(R.string.cancel)) }
+            },
+        )
     }
 }
 
@@ -388,6 +408,7 @@ private fun SyncStatusSheet(
     counts: SyncCounts,
     queue: List<SyncJob>,
     onSyncNow: () -> Unit,
+    onClearQueue: () -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {
         Text(stringResource(R.string.sync_status_title), style = MaterialTheme.typography.titleLarge)
@@ -430,6 +451,12 @@ private fun SyncStatusSheet(
         Spacer(Modifier.height(16.dp))
         FilledTonalButton(onClick = onSyncNow, modifier = Modifier.fillMaxWidth()) {
             Text(stringResource(R.string.force_sync))
+        }
+        if (counts.pendingUpload > 0) {
+            Spacer(Modifier.height(8.dp))
+            TextButton(onClick = onClearQueue, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.clear_queue))
+            }
         }
         Spacer(Modifier.height(24.dp))
     }
@@ -540,12 +567,13 @@ private fun BackupBanner(
  * Monochrome (white) icons — differentiated by shape, not colour, for a clean look.
  */
 @Composable
-private fun SyncStateBadge(state: SyncState, modifier: Modifier = Modifier) {
-    val (icon: ImageVector, description: String) = when (state) {
-        SyncState.PENDING_UPLOAD -> Icons.Default.CloudUpload to stringResource(R.string.badge_pending_upload)
-        SyncState.SYNCED -> Icons.Default.CloudDone to stringResource(R.string.badge_synced)
-        SyncState.CLOUD_ONLY -> Icons.Default.Cloud to stringResource(R.string.badge_cloud_only)
-        SyncState.PENDING_DELETE -> return // transient; no badge
+private fun SyncStateBadge(state: SyncState, excluded: Boolean, modifier: Modifier = Modifier) {
+    val (icon: ImageVector, description: String) = when {
+        excluded -> Icons.Default.CloudOff to stringResource(R.string.badge_excluded)
+        state == SyncState.PENDING_UPLOAD -> Icons.Default.CloudUpload to stringResource(R.string.badge_pending_upload)
+        state == SyncState.SYNCED -> Icons.Default.CloudDone to stringResource(R.string.badge_synced)
+        state == SyncState.CLOUD_ONLY -> Icons.Default.Cloud to stringResource(R.string.badge_cloud_only)
+        else -> return // PENDING_DELETE: transient; no badge
     }
     Box(
         modifier = modifier

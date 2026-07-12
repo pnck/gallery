@@ -91,19 +91,19 @@ fn init_logging() {
         use std::sync::Once;
         static INIT: Once = Once::new();
         INIT.call_once(|| {
-            // Per-module filter so the UniFFI binding layer's per-call debug logs
-            // (target `gallery_transport`: "health", "start", …) and smoltcp's
-            // retransmit spam don't flood; only our wg/socks modules stay at debug.
-            let filter = env_filter::Builder::new()
-                .parse("warn,gallery_transport::wg=debug,gallery_transport::socks=debug")
-                .build();
+            // Transport is quiet by default (warn+) so logcat stays focused on the
+            // app layer; flip GALLERY_WG_LOG=debug to bring the wg/socks traces back.
+            let spec = std::env::var("GALLERY_WG_LOG")
+                .ok()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "warn".to_string());
+            let filter = env_filter::Builder::new().parse(&spec).build();
             android_logger::init_once(
                 android_logger::Config::default()
                     .with_tag("gallery-wg")
                     // BOTH are required: with_max_level sets the log crate's GLOBAL
                     // max (without it android_logger never calls log::set_max_level,
-                    // so it stays Off and nothing prints); with_filter refines per
-                    // module on top of that.
+                    // so it stays Off and nothing prints); with_filter refines on top.
                     .with_max_level(log::LevelFilter::Debug)
                     .with_filter(filter),
             );
