@@ -1,5 +1,6 @@
 package io.github.pnck.gallery.provider.api
 
+import io.github.pnck.gallery.provider.dto.DriveAboutResponse
 import io.github.pnck.gallery.provider.dto.DriveChangeListResponse
 import io.github.pnck.gallery.provider.dto.DriveFileDTO
 import io.github.pnck.gallery.provider.dto.DriveFileListResponse
@@ -33,6 +34,12 @@ interface DriveApiService {
         @Query("fields") fields: String =
             "nextPageToken, files(id, name, size, md5Checksum, thumbnailLink, imageMediaMetadata)",
     ): Response<DriveFileListResponse>
+
+    /** Which Google account this token belongs to — diagnoses account mismatch. */
+    @GET("drive/v3/about")
+    suspend fun about(
+        @Query("fields") fields: String = "user(emailAddress,displayName)",
+    ): Response<DriveAboutResponse>
 
     /** Entry point of incremental sync — page tokens are NOT delta tokens (PRD §4.3). */
     @GET("drive/v3/changes/startPageToken")

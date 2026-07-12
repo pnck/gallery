@@ -59,4 +59,10 @@ interface ICloudStorageProvider {
      * normal, visible Drive folder — not hidden app-data (we never use appDataFolder).
      */
     suspend fun backupFolderLink(): ApiResult<String?>
+
+    /**
+     * The email of the account this session is signed into — so the user can
+     * confirm uploads are landing where they expect (diagnoses account mismatch).
+     */
+    suspend fun getAccountEmail(): ApiResult<String?>
 }

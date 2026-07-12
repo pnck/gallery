@@ -116,6 +116,9 @@ class GoogleDriveProvider(
         return ApiResult.Success("https://drive.google.com/drive/folders/$id")
     }
 
+    override suspend fun getAccountEmail(): ApiResult<String?> =
+        safeApiCall({ api.about() }) { it.user?.emailAddress }
+
     override suspend fun getThumbnailUrl(cloudId: String): ApiResult<String> =
         when (val res = safeApiCall({ api.getFile(cloudId) }) { it.thumbnailLink }) {
             is ApiResult.Success ->

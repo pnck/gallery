@@ -41,6 +41,8 @@ sealed interface SignInPhase {
 data class SettingsState(
     val googleAuthorized: Boolean = false,
     val signIn: SignInPhase = SignInPhase.Idle,
+    /** Email of the signed-in account, so the user can spot an account mismatch. */
+    val accountEmail: String? = null,
 )
 
 /** One-shot feedback for the "free up space" action. */
@@ -121,6 +123,15 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             val authorized = withContext(Dispatchers.IO) { googleAuthManager.isAuthorized() }
             _state.value = _state.value.copy(googleAuthorized = authorized)
+            if (authorized) {
+                // Show which account we're actually signed into (account-mismatch check).
+                val email = withContext(Dispatchers.IO) {
+                    (provider.getAccountEmail() as? ApiResult.Success)?.data
+                }
+                _state.value = _state.value.copy(accountEmail = email)
+            } else {
+                _state.value = _state.value.copy(accountEmail = null)
+            }
         }
     }
 

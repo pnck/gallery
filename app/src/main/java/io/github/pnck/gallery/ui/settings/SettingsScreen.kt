@@ -240,6 +240,7 @@ fun SettingsScreen(
             AccountSheet(
                 authorized = state.googleAuthorized,
                 busy = busy,
+                accountEmail = state.accountEmail,
                 folderName = folderName,
                 onSignIn = { showAccount = false; viewModel.signInGoogle() },
                 onSignOut = { showAccount = false; viewModel.signOutGoogle() },
@@ -265,6 +266,7 @@ fun SettingsScreen(
 private fun AccountSheet(
     authorized: Boolean,
     busy: Boolean,
+    accountEmail: String?,
     folderName: String,
     onSignIn: () -> Unit,
     onSignOut: () -> Unit,
@@ -293,6 +295,13 @@ private fun AccountSheet(
             )
 
             if (authorized) {
+                if (accountEmail != null) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        stringResource(R.string.account_signed_in_as, accountEmail),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
                 Spacer(Modifier.height(16.dp))
                 HorizontalDivider()
                 ListItem(

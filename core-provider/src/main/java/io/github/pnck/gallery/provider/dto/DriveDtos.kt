@@ -11,6 +11,16 @@ data class DriveFileListResponse(
     val nextPageToken: String?,
 )
 
+/** drive/v3/about — used to show which account the app is actually signed into. */
+@JsonClass(generateAdapter = true)
+data class DriveAboutResponse(val user: DriveUser?)
+
+@JsonClass(generateAdapter = true)
+data class DriveUser(
+    val emailAddress: String? = null,
+    val displayName: String? = null,
+)
+
 @JsonClass(generateAdapter = true)
 data class DriveFileDTO(
     val id: String,

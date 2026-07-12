@@ -51,4 +51,6 @@ class OneDriveProvider(
     }
 
     override suspend fun backupFolderLink(): ApiResult<String?> = ApiResult.Success(null)
+
+    override suspend fun getAccountEmail(): ApiResult<String?> = ApiResult.Success(null)
 }
