@@ -900,7 +900,19 @@ impl Driver {
                         log::debug!("wg: <- udp {n} B from peer");
                         self.handle_incoming(&mut tunn, &udp, &recv_buf[..n], &mut device, &mut scratch);
                     }
-                    Err(ref e) if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut => break,
+                    // WouldBlock/TimedOut: drain done for this tick. Interrupted
+                    // (EINTR, e.g. a signal during recv) is transient — just stop
+                    // draining; the next driver tick re-reads. None are fatal.
+                    Err(ref e)
+                        if matches!(
+                            e.kind(),
+                            io::ErrorKind::WouldBlock
+                                | io::ErrorKind::TimedOut
+                                | io::ErrorKind::Interrupted
+                        ) =>
+                    {
+                        break
+                    }
                     Err(e) => {
                         log::warn!("wg udp recv error: {e}");
                         break;

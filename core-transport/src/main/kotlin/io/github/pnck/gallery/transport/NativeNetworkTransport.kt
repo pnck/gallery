@@ -30,8 +30,10 @@ import uniffi.gallery_transport.TransportHealth as CoreHealth
  * [proxyFor] returns `null` and the shared client dials direct — so a stopped
  * transport is byte-for-byte "never integrated" (invariant #8, Transport §3.0).
  *
- * A single [WgCore] handle is held for the process (single tunnel, Transport §6.4);
- * [start]/[stop] are idempotent-ish and serialized by the core's own lock.
+ * Each instance owns one [WgCore] (one Rust driver). "At most one tunnel for the
+ * process" (Transport §6.4) is enforced by [TransportController], which serializes
+ * connect/disconnect so a new instance is only started after the previous one is
+ * fully stopped — never two drivers racing the same WG peer.
  */
 class NativeNetworkTransport(
     private val config: TransportConfig,

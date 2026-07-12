@@ -12,6 +12,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Process-wide owner of the (at most one) active [NetworkTransport], and the
@@ -37,6 +39,10 @@ class TransportController(
 
     private var stateJob: Job? = null
 
+    /** Serializes connect/disconnect so two concurrent connects can't each spawn a
+     *  driver (leaking one → two WG tunnels fighting the same peer). */
+    private val lifecycleLock = Mutex()
+
     private val _state = MutableStateFlow<TransportState>(TransportState.Disconnected)
     val state: StateFlow<TransportState> = _state.asStateFlow()
 
@@ -44,8 +50,8 @@ class TransportController(
     val router: OutboundRouter = OutboundRouter { host -> active?.proxyFor(host) }
 
     /** Start (or restart) the transport for [config]. Direct mode is a no-op router. */
-    suspend fun connect(config: TransportConfig) {
-        disconnect()
+    suspend fun connect(config: TransportConfig) = lifecycleLock.withLock {
+        teardownLocked()
         val transport = NativeNetworkTransport(config, scope)
         stateJob = scope.launch {
             transport.state.collect { _state.value = it }
@@ -54,7 +60,10 @@ class TransportController(
         transport.start()
     }
 
-    suspend fun disconnect() {
+    suspend fun disconnect() = lifecycleLock.withLock { teardownLocked() }
+
+    /** Must be called with [lifecycleLock] held. */
+    private suspend fun teardownLocked() {
         active?.let { transport ->
             active = null
             transport.stop()
