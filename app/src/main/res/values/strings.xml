@@ -3,6 +3,7 @@
     <string name="app_name">BYOS Gallery</string>
     <string name="settings">Settings</string>
     <string name="back">Back</string>
+    <string name="more">More</string>
     <string name="photo_detail">Photo</string>
     <string name="timeline_empty">No photos yet — sign in to your cloud storage in Settings to get started.</string>
 

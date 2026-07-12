@@ -3,8 +3,6 @@ package io.github.pnck.gallery.ui.detail
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,10 +20,13 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -88,6 +89,7 @@ fun PhotoDetailScreen(
     val scope = rememberCoroutineScope()
     val snackbarHost = remember { SnackbarHostState() }
     val systemDelete = rememberSystemDelete()
+    var menuExpanded by remember { mutableStateOf(false) }
 
     val pagerState = rememberPagerState(pageCount = { photos.size })
 
@@ -174,8 +176,9 @@ fun PhotoDetailScreen(
                     containerColor = Color.Black.copy(alpha = 0.4f),
                     titleContentColor = Color.White,
                     navigationIconContentColor = Color.White,
+                    actionIconContentColor = Color.White,
                 ),
-                title = { Text(stringResource(R.string.photo_detail)) },
+                title = {},
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
@@ -183,27 +186,47 @@ fun PhotoDetailScreen(
                 },
                 actions = {
                     if (current != null) {
-                        IconButton(onClick = { viewModel.showInfo(current) }) {
-                            Icon(Icons.Default.Info, contentDescription = stringResource(R.string.detail_info))
+                        // Actions live in the title bar so they don't hug the bottom
+                        // edge on gesture-nav / full-screen phones.
+                        IconButton(onClick = {
+                            val p = pagerState.currentPage
+                            rotations[p] = snapTo90((rotations[p] ?: 0f) + 90f)
+                        }) {
+                            Icon(Icons.Default.RotateRight, contentDescription = stringResource(R.string.detail_rotate))
+                        }
+                        IconButton(onClick = { share(current) }) {
+                            Icon(Icons.Default.Share, contentDescription = stringResource(R.string.detail_share))
+                        }
+                        IconButton(onClick = { viewModel.requestDelete(current) }) {
+                            Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.detail_delete))
+                        }
+                        Box {
+                            IconButton(onClick = { menuExpanded = true }) {
+                                Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more))
+                            }
+                            DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.detail_edit)) },
+                                    leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                                    onClick = { menuExpanded = false; edit(current) },
+                                )
+                                if (current.syncState == SyncState.CLOUD_ONLY) {
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.detail_save)) },
+                                        leadingIcon = { Icon(Icons.Default.Download, contentDescription = null) },
+                                        onClick = { menuExpanded = false; viewModel.save(current) },
+                                    )
+                                }
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.detail_info)) },
+                                    leadingIcon = { Icon(Icons.Default.Info, contentDescription = null) },
+                                    onClick = { menuExpanded = false; viewModel.showInfo(current) },
+                                )
+                            }
                         }
                     }
                 },
             )
-        },
-        bottomBar = {
-            if (current != null) {
-                DetailActionBar(
-                    photo = current,
-                    onRotate = {
-                        val p = pagerState.currentPage
-                        rotations[p] = snapTo90((rotations[p] ?: 0f) + 90f)
-                    },
-                    onEdit = { edit(current) },
-                    onShare = { share(current) },
-                    onSave = { viewModel.save(current) },
-                    onDelete = { viewModel.requestDelete(current) },
-                )
-            }
         },
     ) { padding ->
         HorizontalPager(
@@ -271,43 +294,6 @@ fun PhotoDetailScreen(
                 TextButton(onClick = viewModel::cancelDelete) { Text(stringResource(R.string.cancel)) }
             },
         )
-    }
-}
-
-@Composable
-private fun DetailActionBar(
-    photo: TimelinePhoto,
-    onRotate: () -> Unit,
-    onEdit: () -> Unit,
-    onShare: () -> Unit,
-    onSave: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color.Black.copy(alpha = 0.4f))
-            .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-    ) {
-        IconButton(onClick = onRotate) {
-            Icon(Icons.Default.RotateRight, contentDescription = stringResource(R.string.detail_rotate), tint = Color.White)
-        }
-        IconButton(onClick = onEdit) {
-            Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.detail_edit), tint = Color.White)
-        }
-        IconButton(onClick = onShare) {
-            Icon(Icons.Default.Share, contentDescription = stringResource(R.string.detail_share), tint = Color.White)
-        }
-        // Save-to-device only makes sense while the local copy is gone (CLOUD_ONLY).
-        if (photo.syncState == SyncState.CLOUD_ONLY) {
-            IconButton(onClick = onSave) {
-                Icon(Icons.Default.Download, contentDescription = stringResource(R.string.detail_save), tint = Color.White)
-            }
-        }
-        IconButton(onClick = onDelete) {
-            Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.detail_delete), tint = Color.White)
-        }
     }
 }
 
