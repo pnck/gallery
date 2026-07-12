@@ -3,6 +3,7 @@ package io.github.pnck.gallery.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import io.github.pnck.gallery.data.settings.AppSettingsStore
 import io.github.pnck.gallery.domain.PhotoRepository
 import io.github.pnck.gallery.network.ApiResult
 import io.github.pnck.gallery.network.transport.TransportState
@@ -51,11 +52,20 @@ sealed interface SettingsEvent {
 class SettingsViewModel @Inject constructor(
     private val googleAuthManager: AuthManager,
     private val repo: PhotoRepository,
+    private val settings: AppSettingsStore,
     transportController: TransportController,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SettingsState())
     val state = _state.asStateFlow()
+
+    /** The cloud backup folder name (user-configurable, default MyGalleryBackup). */
+    val remoteFolderName: StateFlow<String> = settings.remoteFolderName
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AppSettingsStore.DEFAULT_FOLDER_NAME)
+
+    fun updateRemoteFolderName(name: String) {
+        viewModelScope.launch { settings.setRemoteFolderName(name) }
+    }
 
     // ── Free up space (T-302, PRD §7.3) ────────────────────────────────────
     private val _freeUris = MutableStateFlow<List<String>?>(null)

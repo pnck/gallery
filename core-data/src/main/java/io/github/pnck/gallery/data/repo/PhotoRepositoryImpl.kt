@@ -120,8 +120,8 @@ class PhotoRepositoryImpl(
             put(MediaStore.Images.Media.DISPLAY_NAME, "gallery-$cloudId.jpg")
             put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                // Pictures/BYOS Gallery — a scoped, app-authored album (not DCIM).
-                put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/BYOS Gallery")
+                // Android's default Pictures folder (scoped storage, not DCIM — invariant #9).
+                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES)
                 put(MediaStore.Images.Media.IS_PENDING, 1)
             }
         }

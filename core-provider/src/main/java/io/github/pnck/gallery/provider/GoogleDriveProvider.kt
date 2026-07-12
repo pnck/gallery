@@ -26,6 +26,8 @@ import kotlinx.coroutines.sync.withLock
 class GoogleDriveProvider(
     private val api: DriveApiService,
     private val resolver: ContentResolver,
+    /** Current backup-folder name (user-configurable); read fresh so changes apply. */
+    private val folderName: suspend () -> String = { DEFAULT_FOLDER_NAME },
 ) : ICloudStorageProvider {
 
     override val providerType: ProviderType = ProviderType.G_DRIVE
@@ -33,6 +35,8 @@ class GoogleDriveProvider(
     private val folderMutex = Mutex()
     @Volatile
     private var cachedFolderId: String? = null
+    @Volatile
+    private var cachedFolderName: String? = null
 
     override suspend fun listPhotos(pageToken: String?): ApiResult<CloudPage> =
         safeApiCall({ api.listFiles(pageToken = pageToken) }) { body ->
@@ -123,21 +127,25 @@ class GoogleDriveProvider(
      * creating duplicate folders. A failure returns null → upload falls back to root.
      */
     private suspend fun ensureFolderId(): String? {
-        cachedFolderId?.let { return it }
+        val name = folderName()
+        // Re-resolve if the user renamed the folder since we cached the id.
+        cachedFolderId?.let { if (cachedFolderName == name) return it }
         return folderMutex.withLock {
-            cachedFolderId?.let { return it }
-            val query = "name = '$FOLDER_NAME' and mimeType = '$FOLDER_MIME' and trashed = false"
+            cachedFolderId?.let { if (cachedFolderName == name) return it }
+            val escaped = name.replace("'", "\\'")
+            val query = "name = '$escaped' and mimeType = '$FOLDER_MIME' and trashed = false"
             val existing = safeApiCall({ api.listFiles(query = query, pageToken = null) }) {
                 it.files.firstOrNull()?.id
             }
             val found = (existing as? ApiResult.Success)?.data
             val resolved = found ?: run {
                 val created = safeApiCall({
-                    api.createFile(DriveUploadMetadata(name = FOLDER_NAME, mimeType = FOLDER_MIME))
+                    api.createFile(DriveUploadMetadata(name = name, mimeType = FOLDER_MIME))
                 }) { it.id }
                 (created as? ApiResult.Success)?.data
             }
             cachedFolderId = resolved
+            cachedFolderName = name
             resolved
         }
     }
@@ -148,7 +156,7 @@ class GoogleDriveProvider(
         } ?: uri.lastPathSegment ?: "photo-${System.currentTimeMillis()}.jpg"
 
     private companion object {
-        const val FOLDER_NAME = "BYOS Gallery"
+        const val DEFAULT_FOLDER_NAME = "MyGalleryBackup"
         const val FOLDER_MIME = "application/vnd.google-apps.folder"
     }
 }

@@ -18,6 +18,7 @@ import io.github.pnck.gallery.data.db.PhotoDao
 import io.github.pnck.gallery.data.db.SyncKeyDao
 import io.github.pnck.gallery.data.repo.PhotoRepositoryImpl
 import io.github.pnck.gallery.data.scanner.LocalMediaScanner
+import io.github.pnck.gallery.data.settings.AppSettingsStore
 import io.github.pnck.gallery.data.sync.DownstreamSyncProcessor
 import io.github.pnck.gallery.data.sync.MediaReconciler
 import io.github.pnck.gallery.data.sync.UploadBatchProcessor
@@ -28,6 +29,7 @@ import io.github.pnck.gallery.transport.TransportController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
 import io.github.pnck.gallery.provider.AuthManager
 import io.github.pnck.gallery.provider.GoogleDriveProvider
 import io.github.pnck.gallery.provider.ICloudStorageProvider
@@ -177,10 +179,17 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideAppSettingsStore(@ApplicationContext context: Context): AppSettingsStore =
+        AppSettingsStore(context)
+
+    @Provides
+    @Singleton
     fun provideCloudStorageProvider(
         api: DriveApiService,
         resolver: ContentResolver,
-    ): ICloudStorageProvider = GoogleDriveProvider(api, resolver)
+        settings: AppSettingsStore,
+    ): ICloudStorageProvider =
+        GoogleDriveProvider(api, resolver, folderName = { settings.remoteFolderName.first() })
 
     // ── Sync machinery (PRD §6/§7) ─────────────────────────────────────────
 

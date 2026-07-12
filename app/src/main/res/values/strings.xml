@@ -29,6 +29,9 @@
     <string name="settings_google_connecting">Connecting…</string>
     <string name="settings_free_space">Free up space</string>
     <string name="settings_free_space_hint">Remove local copies of already-synced photos</string>
+    <string name="settings_folder">Cloud backup folder</string>
+    <string name="folder_dialog_title">Backup folder name</string>
+    <string name="save">Save</string>
     <string name="settings_transport">Network acceleration</string>
     <string name="settings_transport_hint">Direct / SOCKS / WireGuard + LAN SOCKS chain</string>
     <string name="settings_transport_connected">Connected — acceleration active</string>

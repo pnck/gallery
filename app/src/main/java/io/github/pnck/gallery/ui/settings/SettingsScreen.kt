@@ -21,6 +21,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -197,6 +198,23 @@ fun SettingsScreen(
                 },
             )
             HorizontalDivider()
+            val folderName by viewModel.remoteFolderName.collectAsState()
+            var editingFolder by remember { mutableStateOf(false) }
+            ListItem(
+                modifier = Modifier.clickable { editingFolder = true },
+                headlineContent = { Text(stringResource(R.string.settings_folder)) },
+                supportingContent = {
+                    Text(folderName, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                },
+            )
+            if (editingFolder) {
+                FolderNameDialog(
+                    initial = folderName,
+                    onConfirm = { viewModel.updateRemoteFolderName(it); editingFolder = false },
+                    onDismiss = { editingFolder = false },
+                )
+            }
+            HorizontalDivider()
             ListItem(
                 modifier = Modifier.clickable(onClick = viewModel::requestFreeSpace),
                 headlineContent = { Text(stringResource(R.string.settings_free_space)) },
@@ -225,4 +243,30 @@ fun SettingsScreen(
             )
         }
     }
+}
+
+@Composable
+private fun FolderNameDialog(
+    initial: String,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var text by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.folder_dialog_title)) },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                singleLine = true,
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(text) }) { Text(stringResource(R.string.save)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+        },
+    )
 }
