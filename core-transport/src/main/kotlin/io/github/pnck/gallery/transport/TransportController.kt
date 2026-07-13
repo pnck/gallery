@@ -8,6 +8,7 @@ import io.github.pnck.gallery.network.transport.TransportConfig
 import io.github.pnck.gallery.network.transport.TransportState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -38,6 +39,12 @@ class TransportController(
     private var active: NetworkTransport? = null
 
     private var stateJob: Job? = null
+    private var supervisorJob: Job? = null
+
+    /** The config the user WANTS connected; null means "stay disconnected". The
+     *  supervisor only auto-reconnects while this is non-null. */
+    @Volatile
+    private var desiredConfig: TransportConfig? = null
 
     /** Serializes connect/disconnect so two concurrent connects can't each spawn a
      *  driver (leaking one → two WG tunnels fighting the same peer). */
@@ -51,16 +58,45 @@ class TransportController(
 
     /** Start (or restart) the transport for [config]. Direct mode is a no-op router. */
     suspend fun connect(config: TransportConfig) = lifecycleLock.withLock {
+        desiredConfig = config
         teardownLocked()
         val transport = NativeNetworkTransport(config, scope)
         stateJob = scope.launch {
             transport.state.collect { _state.value = it }
         }
         active = transport
+        ensureSupervisor()
         transport.start()
     }
 
-    suspend fun disconnect() = lifecycleLock.withLock { teardownLocked() }
+    suspend fun disconnect() = lifecycleLock.withLock {
+        desiredConfig = null
+        supervisorJob?.cancel()
+        supervisorJob = null
+        teardownLocked()
+    }
+
+    /**
+     * Watch the published state and, when a WG tunnel reports Failed(retryable) (e.g.
+     * a handshake it can't recover), reconnect with a fresh driver after a short
+     * backoff. Runs for the controller's lifetime; only reconnects while the user
+     * still wants a connection ([desiredConfig] non-null). Separate from [stateJob]
+     * so a reconnect's teardown doesn't cancel the supervisor itself.
+     */
+    private fun ensureSupervisor() {
+        if (supervisorJob?.isActive == true) return
+        supervisorJob = scope.launch {
+            _state.collect { st ->
+                if (st is TransportState.Failed && st.retryable) {
+                    val cfg = desiredConfig ?: return@collect
+                    delay(RECONNECT_BACKOFF_MS)
+                    if (desiredConfig != null) {
+                        runCatching { connect(cfg) }
+                    }
+                }
+            }
+        }
+    }
 
     /** Must be called with [lifecycleLock] held. */
     private suspend fun teardownLocked() {
@@ -81,4 +117,9 @@ class TransportController(
 
     /** Ground-truth dump of the running config, or null when off. */
     suspend fun diagnosticInfo(): String? = active?.diagnosticInfo()
+
+    private companion object {
+        /** Delay before an automatic reconnect, so a flapping peer can't hot-loop us. */
+        const val RECONNECT_BACKOFF_MS = 5_000L
+    }
 }

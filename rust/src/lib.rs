@@ -314,7 +314,12 @@ impl WgCore {
             inner = self.inner.lock().unwrap();
         }
         inner.running = false;
-        // Dropping the tunnel signals its driver thread to shut down.
+        // Deterministically stop the WG driver (join its thread) BEFORE dropping the
+        // handle — an in-flight tunnel connection may still hold an Arc<WgTunnel>, so
+        // relying on Drop alone can leave the old driver running and racing the peer.
+        if let Some(t) = &inner.tunnel {
+            t.shutdown();
+        }
         inner.tunnel = None;
         self.port.store(0, Ordering::SeqCst);
         drop(inner);

@@ -109,9 +109,6 @@ import androidx.compose.ui.unit.Dp
 import java.text.SimpleDateFormat
 import java.util.Locale
 
-/** Clean selection accent (Google-blue), instead of the dynamic-theme purple. */
-private val SelectionAccent = Color(0xFF1A73E8)
-
 /** The media-read permission for this SDK level (PRD §6.3 matrix). */
 private fun mediaPermission(): String =
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -258,7 +255,7 @@ fun TimelineScreen(
                         IconButton(onClick = viewModel::enterSelectionMode) {
                             Icon(Icons.Default.Checklist, contentDescription = stringResource(R.string.action_select))
                         }
-                        IconButton(onClick = { viewModel.processIntent(TimelineIntent.ForceSync) }) {
+                        IconButton(onClick = viewModel::backupNow) {
                             Icon(Icons.Default.Sync, contentDescription = stringResource(R.string.force_sync))
                         }
                         IconButton(onClick = onSettingsClick) {
@@ -272,7 +269,7 @@ fun TimelineScreen(
         Column(Modifier.fillMaxSize().padding(padding)) {
             BackupBanner(
                 state = backupState,
-                onRetry = { viewModel.processIntent(TimelineIntent.ForceSync) },
+                onRetry = viewModel::backupNow,
                 onPause = viewModel::pauseBackup,
                 onResume = viewModel::resumeBackup,
             )
@@ -325,13 +322,14 @@ fun TimelineScreen(
                             modifier = Modifier.align(Alignment.TopEnd).padding(4.dp),
                         )
                         if (selectionMode) {
+                            val accent = MaterialTheme.colorScheme.primary
                             if (selected) {
-                                Box(Modifier.fillMaxSize().background(SelectionAccent.copy(alpha = 0.25f)))
+                                Box(Modifier.fillMaxSize().background(accent.copy(alpha = 0.25f)))
                             }
                             Icon(
                                 imageVector = if (selected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
                                 contentDescription = null,
-                                tint = if (selected) SelectionAccent else Color.White,
+                                tint = if (selected) accent else Color.White,
                                 modifier = Modifier.align(Alignment.TopStart).padding(4.dp).size(22.dp),
                             )
                         }
@@ -364,7 +362,7 @@ fun TimelineScreen(
                 status = syncStatus,
                 counts = syncCounts,
                 queue = queue,
-                onSyncNow = { viewModel.processIntent(TimelineIntent.ForceSync) },
+                onSyncNow = viewModel::backupNow,
                 onClearQueue = { showStatus = false; showClearConfirm = true },
             )
         }

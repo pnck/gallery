@@ -36,7 +36,13 @@ object SyncPipeline {
         workManager.enqueueUniquePeriodicWork(PERIODIC_NAME, ExistingPeriodicWorkPolicy.KEEP, request)
     }
 
-    fun enqueue(workManager: WorkManager) {
+    /**
+     * Kick the scan → downstream → upload chain. [force] uses REPLACE so an explicit
+     * user action ("Back up now") restarts the chain even when a previous one is stuck
+     * retrying (e.g. it was blocked on a wedged tunnel); the default KEEP coalesces the
+     * automatic triggers (ContentObserver, permission grant) so they don't pile up.
+     */
+    fun enqueue(workManager: WorkManager, force: Boolean = false) {
         val scan = OneTimeWorkRequestBuilder<ScanWorker>().build()
         val downstream = OneTimeWorkRequestBuilder<DownstreamSyncWorker>()
             .setConstraints(
@@ -47,9 +53,10 @@ object SyncPipeline {
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .build()
 
+        val policy = if (force) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP
         // scan (local) → downstream (pull cloud) → upload (push local).
         workManager
-            .beginUniqueWork(UNIQUE_NAME, ExistingWorkPolicy.KEEP, scan)
+            .beginUniqueWork(UNIQUE_NAME, policy, scan)
             .then(downstream)
             .then(uploadRequest())
             .enqueue()

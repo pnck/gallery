@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -101,6 +102,19 @@ class TimelineViewModel @Inject constructor(
         .flatMapLatest { repo.getPagedTimelinePhotos(it) }
         .cachedIn(viewModelScope)
 
+    init {
+        // One-time upgrade fix: rows created before the v3 size/bucket columns have
+        // sizeBytes=0 (breaks size sorting + the space-management totals). Force a full
+        // rescan once to backfill their metadata, then remember it's done.
+        viewModelScope.launch {
+            if (!settings.sizeBackfilled.first()) {
+                reconciler.resetCursor()
+                SyncPipeline.enqueue(workManager)
+                settings.setSizeBackfilled()
+            }
+        }
+    }
+
     fun setSort(newSort: TimelineSort) {
         viewModelScope.launch { settings.setTimelineSort(newSort) }
     }
@@ -176,6 +190,15 @@ class TimelineViewModel @Inject constructor(
         viewModelScope.launch {
             settings.setBackupPaused(false)
             SyncPipeline.enqueue(workManager)
+        }
+    }
+
+    /** Explicit "Back up now" / "Sync now": un-pause and force-restart the chain so a
+     *  stuck (retrying) sweep doesn't swallow the request via KEEP. */
+    fun backupNow() {
+        viewModelScope.launch {
+            settings.setBackupPaused(false)
+            SyncPipeline.enqueue(workManager, force = true)
         }
     }
 

@@ -22,9 +22,11 @@
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 use std::net::{IpAddr, SocketAddr, UdpSocket};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant as StdInstant};
 
 use base64::Engine;
@@ -281,7 +283,8 @@ enum Command {
     Shutdown,
 }
 
-/// Handle to the running tunnel. Cloneable; the last drop stops the driver.
+/// Handle to the running tunnel. Shared via `Arc`; call [`WgTunnel::shutdown`] (or
+/// drop the last reference) to stop the driver.
 pub struct WgTunnel {
     cmd: Sender<Command>,
     /// Effective DNS servers: the WG-configured ones, or our defaults if none were
@@ -292,6 +295,10 @@ pub struct WgTunnel {
     tx_bytes: Arc<AtomicU64>,
     rx_bytes: Arc<AtomicU64>,
     stopped: Arc<AtomicBool>,
+    /// Driver thread handle, joined by [`shutdown`] so teardown is deterministic even
+    /// when an in-flight tunnel connection still holds an `Arc<WgTunnel>` (otherwise a
+    /// leaked driver keeps racing the peer — two tunnels for one session).
+    join: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl WgTunnel {
@@ -327,9 +334,18 @@ impl WgTunnel {
             rx_bytes: Arc::clone(&rx_bytes),
             stopped: Arc::clone(&stopped),
         };
-        std::thread::Builder::new()
+        // Panic-safety: if the driver ever unwinds (or exits), zero the health atoms
+        // so `health()` reports the tunnel DOWN instead of freezing at its last-good
+        // values — otherwise diag lies "OK" while all traffic is dead.
+        let hs_ok = Arc::clone(&handshake_ok);
+        let hs_epoch = Arc::clone(&last_handshake_epoch);
+        let handle = std::thread::Builder::new()
             .name("gallery-wg-driver".into())
-            .spawn(move || driver.run(params, udp))
+            .spawn(move || {
+                let _ = catch_unwind(AssertUnwindSafe(|| driver.run(params, udp)));
+                hs_ok.store(false, Ordering::SeqCst);
+                hs_epoch.store(0, Ordering::SeqCst);
+            })
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
 
         Ok(WgTunnel {
@@ -340,7 +356,20 @@ impl WgTunnel {
             tx_bytes,
             rx_bytes,
             stopped,
+            join: Mutex::new(Some(handle)),
         })
+    }
+
+    /// Deterministically stop the driver and wait for its thread to exit. Safe to
+    /// call more than once. Unlike relying on `Drop`, this does NOT depend on every
+    /// `Arc<WgTunnel>` having been released — the driver loop polls `stopped` each
+    /// ~5 ms tick and exits, so a stuck in-flight connection can't keep it alive.
+    pub fn shutdown(&self) {
+        self.stopped.store(true, Ordering::SeqCst);
+        let _ = self.cmd.send(Command::Shutdown);
+        if let Some(handle) = self.join.lock().unwrap().take() {
+            let _ = handle.join();
+        }
     }
 
     /// Blocking dial of `host:port` (an IP literal inside the tunnel) — the SOCKS5
@@ -419,8 +448,8 @@ impl WgTunnel {
 
 impl Drop for WgTunnel {
     fn drop(&mut self) {
-        self.stopped.store(true, Ordering::SeqCst);
-        let _ = self.cmd.send(Command::Shutdown);
+        // Idempotent with an explicit shutdown(); joins the driver if still running.
+        self.shutdown();
     }
 }
 
@@ -946,6 +975,9 @@ impl Driver {
                 log::info!("wg: handshake established");
             } else if !ok && established {
                 established = false;
+                // Report the tunnel as down (not a stale "recent handshake") so diag
+                // and the Kotlin monitor can see the loss and trigger a reconnect.
+                self.last_handshake_epoch.store(0, Ordering::SeqCst);
                 log::warn!("wg: handshake lost, re-initiating");
             }
             if !ok && last_hs_attempt.elapsed() >= Duration::from_secs(1) {

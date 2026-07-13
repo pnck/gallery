@@ -74,7 +74,11 @@ interface DriveApiService {
     @POST("upload/drive/v3/files?uploadType=resumable")
     suspend fun initResumableUpload(
         @Body metadata: DriveUploadMetadata,
-        @Query("fields") fields: String = "id",
+        // Drive derives the FINAL upload response's fields from THIS initiation request,
+        // so md5Checksum must be requested here (not just on the PUT) — otherwise the
+        // upload response carries no hash and the SYNCED row never stores its identity,
+        // defeating the anti-state-machine-failure MD5 dedup (phantom CLOUD_ONLY rows).
+        @Query("fields") fields: String = "id, name, size, md5Checksum, imageMediaMetadata",
     ): Response<Unit>
 
     /** Resumable upload, step 2: PUT the bytes to the session URI. */

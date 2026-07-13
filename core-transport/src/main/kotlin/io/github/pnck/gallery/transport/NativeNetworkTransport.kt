@@ -91,23 +91,44 @@ class NativeNetworkTransport(
         }
     }
 
-    /** Poll the WG handshake and drive Connecting → Connected, with a helpful
-     *  Degraded reason if it stays down (keys / endpoint / peer misconfig). */
+    /** Poll the WG handshake and drive Connecting → Connected. If a working tunnel
+     *  later loses its handshake and doesn't recover within a grace window, surface
+     *  Failed(retryable) so the controller reconnects with a fresh driver (self-heal
+     *  for the "handshake lost then permanent stall" case). */
     private fun monitorHandshake(port: Int) {
         _state.value = TransportState.Connecting
         handshakeJob?.cancel()
         handshakeJob = scope.launch {
             val startMs = System.currentTimeMillis()
+            var everConnected = false
+            var lastOkMs = 0L
             while (isActive) {
                 val h = withContext(Dispatchers.IO) { core.health() }
-                val elapsed = System.currentTimeMillis() - startMs
-                _state.value = when {
-                    h.handshakeOk -> TransportState.Connected(port, h.lastHandshakeEpoch?.toLong() ?: epochSeconds())
-                    elapsed > HANDSHAKE_WARN_MS -> TransportState.Degraded(
+                val now = System.currentTimeMillis()
+                when {
+                    h.handshakeOk -> {
+                        everConnected = true
+                        lastOkMs = now
+                        _state.value = TransportState.Connected(port, h.lastHandshakeEpoch?.toLong() ?: epochSeconds())
+                    }
+                    // Lost a previously-good handshake: allow a grace period to
+                    // self-recover, then declare Failed(retryable) → controller reconnects.
+                    everConnected -> {
+                        if (now - lastOkMs >= RECONNECT_AFTER_MS) {
+                            _state.value = TransportState.Failed(
+                                "WireGuard handshake lost and didn't recover — reconnecting.",
+                                retryable = true,
+                            )
+                            return@launch
+                        }
+                        _state.value = TransportState.Degraded("WireGuard handshake lost — recovering…")
+                    }
+                    // Initial connect, never handshaked yet.
+                    now - startMs > HANDSHAKE_WARN_MS -> _state.value = TransportState.Degraded(
                         "No WireGuard handshake yet. Check: the server has YOUR public key as a peer, " +
                             "the endpoint host:port is reachable, and the peer public key is correct.",
                     )
-                    else -> TransportState.Connecting
+                    else -> _state.value = TransportState.Connecting
                 }
                 delay(1_000)
             }
@@ -145,5 +166,8 @@ class NativeNetworkTransport(
     private companion object {
         const val LOOPBACK = "127.0.0.1"
         const val HANDSHAKE_WARN_MS = 12_000L
+
+        /** Grace window for a lost handshake to self-recover before we force a reconnect. */
+        const val RECONNECT_AFTER_MS = 20_000L
     }
 }

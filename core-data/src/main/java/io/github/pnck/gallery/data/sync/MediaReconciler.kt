@@ -41,10 +41,11 @@ class MediaReconciler(
         val allowed = settings.scanBuckets.first()
         val inScope = if (allowed.isEmpty()) items else items.filter { it.bucketId in allowed }
 
-        val fresh = inScope
-            .filter { photoDao.findByLocalUri(it.contentUri) == null }
-            .map { item ->
-                PhotoEntity(
+        val fresh = mutableListOf<PhotoEntity>()
+        for (item in inScope) {
+            val existing = photoDao.findByLocalUri(item.contentUri)
+            if (existing == null) {
+                fresh += PhotoEntity(
                     id = UUID.randomUUID().toString(),
                     localUri = item.contentUri,
                     cloudId = null,
@@ -60,7 +61,11 @@ class MediaReconciler(
                     bucketName = item.bucketName,
                     syncState = SyncState.PENDING_UPLOAD,
                 )
+            } else if (existing.sizeBytes == 0L || existing.bucketId == null) {
+                // Backfill metadata for a row that predates the v3 columns (upgraded lib).
+                photoDao.updateLocalMeta(item.contentUri, item.sizeBytes, item.bucketId, item.bucketName)
             }
+        }
         if (fresh.isNotEmpty()) photoDao.upsertAll(fresh)
 
         // Advance the cursor over EVERY scanned row (even ones filtered out), so an

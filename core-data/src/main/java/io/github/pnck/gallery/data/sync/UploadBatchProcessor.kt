@@ -68,10 +68,13 @@ class UploadBatchProcessor(
                 is ApiResult.Success -> {
                     photoDao.markAsSynced(photo.id, result.data.id, result.data.provider.name)
                     // Persist the content hash so local/cloud identity is recoverable
-                    // even if the state machine later breaks (PRD §3.5).
-                    (result.data.contentHash as? ContentHash.Md5)?.let {
-                        photoDao.setContentHash(photo.id, "MD5", it.value)
-                    }
+                    // even if the state machine later breaks (PRD §3.5). If the upload
+                    // response didn't include a hash (Drive resumable quirk), fetch the
+                    // file metadata so downstream sync can dedup by MD5 (no phantom rows).
+                    val md5 = (result.data.contentHash as? ContentHash.Md5)?.value
+                        ?: (provider.getFileMetadata(result.data.id) as? ApiResult.Success)
+                            ?.data?.contentHash?.let { it as? ContentHash.Md5 }?.value
+                    if (md5 != null) photoDao.setContentHash(photo.id, "MD5", md5)
                     uploaded++
                     Log.i(TAG, "upload: OK ${photo.id} -> ${result.data.id}")
                     onProgress(Progress(index + 1, pending.size, localUri, 100))

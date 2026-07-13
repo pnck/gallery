@@ -22,6 +22,7 @@ class AppSettingsStore(private val context: Context) {
     private val backupPausedKey = booleanPreferencesKey("backup_paused")
     private val scanBucketsKey = stringSetPreferencesKey("scan_bucket_ids")
     private val sortKey = stringPreferencesKey("timeline_sort")
+    private val sizeBackfilledKey = booleanPreferencesKey("size_backfilled_v3")
 
     /** Name of the app's cloud folder that uploads are pinned to. */
     val remoteFolderName: Flow<String> = context.appSettingsStore.data.map { prefs ->
@@ -36,6 +37,9 @@ class AppSettingsStore(private val context: Context) {
      * "all folders" (the default). Doubles as the timeline's directory filter.
      */
     val scanBuckets: Flow<Set<String>> = context.appSettingsStore.data.map { it[scanBucketsKey] ?: emptySet() }
+
+    /** False until the one-time v3 size/bucket backfill scan has been kicked off. */
+    val sizeBackfilled: Flow<Boolean> = context.appSettingsStore.data.map { it[sizeBackfilledKey] ?: false }
 
     /** Persisted timeline ordering (defaults to newest-first). */
     val timelineSort: Flow<TimelineSort> = context.appSettingsStore.data.map { prefs ->
@@ -58,6 +62,10 @@ class AppSettingsStore(private val context: Context) {
 
     suspend fun setTimelineSort(sort: TimelineSort) {
         context.appSettingsStore.edit { it[sortKey] = sort.name }
+    }
+
+    suspend fun setSizeBackfilled() {
+        context.appSettingsStore.edit { it[sizeBackfilledKey] = true }
     }
 
     companion object {

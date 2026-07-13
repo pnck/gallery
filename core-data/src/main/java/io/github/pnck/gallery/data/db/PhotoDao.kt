@@ -101,6 +101,11 @@ interface PhotoDao {
     @Query("SELECT * FROM photos WHERE localUri = :localUri LIMIT 1")
     suspend fun findByLocalUri(localUri: String): PhotoEntity?
 
+    /** Backfill size/folder for an existing local row (e.g. after the v3 migration,
+     *  which defaults sizeBytes to 0 until the next scan sees the row). */
+    @Query("UPDATE photos SET sizeBytes = :sizeBytes, bucketId = :bucketId, bucketName = :bucketName WHERE localUri = :localUri")
+    suspend fun updateLocalMeta(localUri: String, sizeBytes: Long, bucketId: String?, bucketName: String?)
+
     /** Live per-state totals for the sync-status panel (PRD §9.1). */
     @Query(
         "SELECT " +
