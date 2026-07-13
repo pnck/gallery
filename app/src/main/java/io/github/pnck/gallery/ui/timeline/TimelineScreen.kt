@@ -44,7 +44,6 @@ import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
@@ -599,17 +598,26 @@ private fun SelectionAppBar(
         },
         title = { Text(stringResource(R.string.selection_count, count)) },
         actions = {
+            // Primary batch actions (backup-first): Back up · Free up space · Delete.
+            // Save-to-device is secondary → overflow (docs/GALLERY-UX-INTERACTION.md §3).
             IconButton(onClick = onSync) {
                 Icon(Icons.Default.CloudUpload, contentDescription = stringResource(R.string.action_sync_selected))
-            }
-            IconButton(onClick = onSave) {
-                Icon(Icons.Default.Download, contentDescription = stringResource(R.string.action_save_selected))
             }
             IconButton(onClick = onFreeSpace) {
                 Icon(Icons.Default.DeleteSweep, contentDescription = stringResource(R.string.action_free_selected))
             }
             IconButton(onClick = onDelete) {
                 Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.action_delete_selected))
+            }
+            var menu by remember { mutableStateOf(false) }
+            IconButton(onClick = { menu = true }) {
+                Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more))
+            }
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.action_save_selected)) },
+                    onClick = { menu = false; onSave() },
+                )
             }
         },
     )
