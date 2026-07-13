@@ -7,19 +7,25 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.pnck.gallery.data.settings.AppSettingsStore
+import io.github.pnck.gallery.data.sync.MediaReconciler
+import io.github.pnck.gallery.domain.MediaBucket
 import io.github.pnck.gallery.domain.PhotoRepository
 import io.github.pnck.gallery.domain.SyncCounts
+import io.github.pnck.gallery.domain.SyncFilter
+import io.github.pnck.gallery.domain.TimelineSort
 import io.github.pnck.gallery.ui.util.DeleteConfirm
 import io.github.pnck.gallery.ui.util.DeleteRequest
 import io.github.pnck.gallery.work.SyncPipeline
 import io.github.pnck.gallery.work.UploadWorker
 import javax.inject.Inject
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
@@ -41,6 +47,10 @@ sealed interface TimelineEvent {
     data class SyncQueued(val count: Int) : TimelineEvent
     data class SaveStarted(val count: Int) : TimelineEvent
     data class Deleted(val count: Int) : TimelineEvent
+    /** Selected photos weren't backed up yet — queued for backup before space can be freed. */
+    data class FreeQueued(val count: Int) : TimelineEvent
+    /** Released the local copies of already-backed-up selected photos. */
+    data class SpaceFreed(val count: Int) : TimelineEvent
 }
 
 /** A named entry in the sync-queue view (PRD §9.1). */
@@ -61,15 +71,60 @@ sealed interface BackupState {
     data class Paused(val count: Int) : BackupState
 }
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class TimelineViewModel @Inject constructor(
     private val repo: PhotoRepository,
     private val settings: AppSettingsStore,
     private val workManager: WorkManager,
+    private val reconciler: MediaReconciler,
+    private val queryHolder: TimelineQueryHolder,
 ) : ViewModel() {
 
+    // ── View options: sort (persisted) + sync-state filter (shared) + folders ──
+    val sort: StateFlow<TimelineSort> = settings.timelineSort
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TimelineSort.DATE_DESC)
+
+    /** Shared with the detail pager so both swipe through the same filtered set. */
+    val syncFilter: StateFlow<SyncFilter> = queryHolder.filter
+
+    /** The scan-allowlist / directory filter (empty = all folders). */
+    val scanBuckets: StateFlow<Set<String>> = settings.scanBuckets
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
+    /** Device folders offered in the directory picker; loaded on demand. */
+    private val _buckets = MutableStateFlow<List<MediaBucket>>(emptyList())
+    val buckets: StateFlow<List<MediaBucket>> = _buckets.asStateFlow()
+
     /** PagingData is collected in the UI, never stored in a state object (PRD §9.2). */
-    val photosFlow = repo.getPagedTimelinePhotos().cachedIn(viewModelScope)
+    val photosFlow = queryHolder.query
+        .flatMapLatest { repo.getPagedTimelinePhotos(it) }
+        .cachedIn(viewModelScope)
+
+    fun setSort(newSort: TimelineSort) {
+        viewModelScope.launch { settings.setTimelineSort(newSort) }
+    }
+
+    fun setSyncFilter(filter: SyncFilter) {
+        queryHolder.setFilter(filter)
+    }
+
+    /** Load the device folder list (MediaStore buckets) for the directory picker. */
+    fun refreshBuckets() {
+        viewModelScope.launch { _buckets.value = repo.availableBuckets() }
+    }
+
+    /**
+     * Change the scan allowlist / directory filter. Widening it must re-import the
+     * newly-included folders, so we reset the scan cursor and kick a fresh sweep.
+     */
+    fun setScanFolders(bucketIds: Set<String>) {
+        viewModelScope.launch {
+            settings.setScanBuckets(bucketIds)
+            reconciler.resetCursor()
+            SyncPipeline.enqueue(workManager)
+        }
+    }
 
     /** Sync indicator for the TopAppBar (PRD §9.1), derived from the unique chain. */
     val syncStatus = workManager
@@ -181,6 +236,45 @@ class TimelineViewModel @Inject constructor(
         viewModelScope.launch {
             workManager.cancelUniqueWork(SyncPipeline.UNIQUE_NAME)
             repo.clearBackupQueue()
+        }
+    }
+
+    // ── Free space for the selection (PRD §7.3) ────────────────────────────
+    // Photos not yet backed up are queued for backup first; already-synced ones
+    // have their verified local copy released now (kept as a cloud preview).
+    private val _freeRequest = MutableStateFlow<List<String>?>(null)
+    val freeRequest: StateFlow<List<String>?> = _freeRequest.asStateFlow()
+
+    fun freeSpaceSelected() {
+        val ids = _selection.value.toList()
+        if (ids.isEmpty()) return
+        exitSelectionMode()
+        viewModelScope.launch {
+            val notBackedUp = repo.countWithoutCloud(ids)
+            if (notBackedUp > 0) {
+                // "先同步": put them back in the queue and upload now; they become
+                // freeable on a later pass once the backup completes.
+                repo.includeForBackup(ids)
+                SyncPipeline.enqueueTargeted(workManager, ids)
+            }
+            val uris = repo.freeableLocalUrisFor(ids)
+            if (uris.isNotEmpty()) {
+                _freeRequest.value = uris
+            } else if (notBackedUp > 0) {
+                events.send(TimelineEvent.FreeQueued(notBackedUp))
+            }
+        }
+    }
+
+    fun onFreeHandled() {
+        _freeRequest.value = null
+    }
+
+    /** After the system delete removed the local files, flip those rows to CLOUD_ONLY. */
+    fun confirmFreed(uris: List<String>) {
+        viewModelScope.launch {
+            repo.releaseLocalCopies(uris)
+            events.send(TimelineEvent.SpaceFreed(uris.size))
         }
     }
 

@@ -25,10 +25,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Checklist
@@ -38,20 +43,26 @@ import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -86,11 +97,17 @@ import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.work.WorkInfo
 import coil3.compose.AsyncImage
 import io.github.pnck.gallery.R
+import io.github.pnck.gallery.domain.MediaBucket
 import io.github.pnck.gallery.domain.SyncCounts
+import io.github.pnck.gallery.domain.SyncFilter
 import io.github.pnck.gallery.domain.SyncState
+import io.github.pnck.gallery.domain.TimelineSort
+import io.github.pnck.gallery.ui.util.FastScroller
 import io.github.pnck.gallery.ui.util.pinchToStep
 import io.github.pnck.gallery.ui.util.rememberSystemDelete
 import androidx.compose.ui.unit.Dp
+import java.text.SimpleDateFormat
+import java.util.Locale
 
 /** Clean selection accent (Google-blue), instead of the dynamic-theme purple. */
 private val SelectionAccent = Color(0xFF1A73E8)
@@ -122,16 +139,24 @@ fun TimelineScreen(
     val selectionMode by viewModel.selectionActive.collectAsState()
     val deleteRequest by viewModel.deleteRequest.collectAsState()
     val deleteConfirm by viewModel.deleteConfirm.collectAsState()
+    val freeRequest by viewModel.freeRequest.collectAsState()
     val syncCounts by viewModel.syncCounts.collectAsState()
     val queue by viewModel.queue.collectAsState()
     val backupState by viewModel.backupState.collectAsState()
+    val sort by viewModel.sort.collectAsState()
+    val syncFilter by viewModel.syncFilter.collectAsState()
+    val scanBuckets by viewModel.scanBuckets.collectAsState()
+    val buckets by viewModel.buckets.collectAsState()
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
     val snackbarHost = remember { SnackbarHostState() }
     val systemDelete = rememberSystemDelete()
+    val gridState = rememberLazyGridState()
 
     var showStatus by remember { mutableStateOf(false) }
     var showClearConfirm by remember { mutableStateOf(false) }
+    var showViewOptions by remember { mutableStateOf(false) }
+    var showFolders by remember { mutableStateOf(false) }
 
     // Pinch to change thumbnail density (Google-Photos grid zoom).
     val cellSizes: List<Dp> = remember { listOf(72.dp, 100.dp, 148.dp) }
@@ -161,6 +186,15 @@ fun TimelineScreen(
         }
     }
 
+    // "Free space for these photos": release the verified local copies via the system
+    // dialog, then flip those rows to CLOUD_ONLY (they stay as a cloud preview).
+    LaunchedEffect(freeRequest) {
+        freeRequest?.let { uris ->
+            systemDelete(uris.map { it.toUri() }) { viewModel.confirmFreed(uris) }
+            viewModel.onFreeHandled()
+        }
+    }
+
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
@@ -186,6 +220,8 @@ fun TimelineScreen(
         is TimelineEvent.SyncQueued -> stringResource(R.string.sync_queued, event.count)
         is TimelineEvent.SaveStarted -> stringResource(R.string.save_started, event.count)
         is TimelineEvent.Deleted -> stringResource(R.string.photos_deleted, event.count)
+        is TimelineEvent.FreeQueued -> stringResource(R.string.free_queued, event.count)
+        is TimelineEvent.SpaceFreed -> stringResource(R.string.space_freed, event.count)
         null -> null
     }
     LaunchedEffect(eventMessage) {
@@ -204,6 +240,7 @@ fun TimelineScreen(
                     onClear = viewModel::exitSelectionMode,
                     onSync = viewModel::syncSelected,
                     onSave = viewModel::saveSelected,
+                    onFreeSpace = viewModel::freeSpaceSelected,
                     onDelete = viewModel::deleteSelected,
                 )
             } else {
@@ -215,6 +252,9 @@ fun TimelineScreen(
                         )
                     },
                     actions = {
+                        IconButton(onClick = { showViewOptions = true }) {
+                            Icon(Icons.Default.Tune, contentDescription = stringResource(R.string.view_options))
+                        }
                         IconButton(onClick = viewModel::enterSelectionMode) {
                             Icon(Icons.Default.Checklist, contentDescription = stringResource(R.string.action_select))
                         }
@@ -244,7 +284,9 @@ fun TimelineScreen(
                     )
                 }
             } else {
+                Box(Modifier.fillMaxSize()) {
                 LazyVerticalGrid(
+                    state = gridState,
                     columns = GridCells.Adaptive(minSize = cellSizes[cellIndex]),
                     modifier = Modifier.fillMaxSize().pinchToStep(
                         onZoomIn = { cellIndex = (cellIndex + 1).coerceAtMost(cellSizes.lastIndex) },
@@ -296,6 +338,13 @@ fun TimelineScreen(
                     }
                 }
             }
+                    FastScroller(
+                        state = gridState,
+                        itemCount = photos.itemCount,
+                        labelForIndex = { i -> photos.peek(i)?.dateTaken?.let(::yearMonthLabel) },
+                        modifier = Modifier.align(Alignment.TopEnd),
+                    )
+                }
             }
         }
     }
@@ -336,7 +385,170 @@ fun TimelineScreen(
             },
         )
     }
+
+    if (showViewOptions) {
+        ModalBottomSheet(onDismissRequest = { showViewOptions = false }) {
+            ViewOptionsSheet(
+                sort = sort,
+                filter = syncFilter,
+                folderCount = scanBuckets.size,
+                onSortChange = viewModel::setSort,
+                onFilterChange = viewModel::setSyncFilter,
+                onFoldersClick = { showViewOptions = false; showFolders = true },
+            )
+        }
+    }
+
+    if (showFolders) {
+        LaunchedEffect(Unit) { viewModel.refreshBuckets() }
+        ModalBottomSheet(onDismissRequest = { showFolders = false }) {
+            FoldersSheet(
+                buckets = buckets,
+                selected = scanBuckets,
+                onApply = { ids -> viewModel.setScanFolders(ids); showFolders = false },
+            )
+        }
+    }
 }
+
+@Composable
+private fun ViewOptionsSheet(
+    sort: TimelineSort,
+    filter: SyncFilter,
+    folderCount: Int,
+    onSortChange: (TimelineSort) -> Unit,
+    onFilterChange: (SyncFilter) -> Unit,
+    onFoldersClick: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 8.dp)) {
+        Text(stringResource(R.string.sort_title), style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(4.dp))
+        val sorts = listOf(
+            TimelineSort.DATE_DESC to R.string.sort_date_desc,
+            TimelineSort.DATE_ASC to R.string.sort_date_asc,
+            TimelineSort.SIZE_DESC to R.string.sort_size_desc,
+            TimelineSort.SIZE_ASC to R.string.sort_size_asc,
+        )
+        sorts.forEach { (value, label) ->
+            OptionRow(selected = sort == value, label = stringResource(label)) { onSortChange(value) }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        HorizontalDivider()
+        Spacer(Modifier.height(12.dp))
+
+        Text(stringResource(R.string.filter_title), style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(4.dp))
+        val filters = listOf(
+            SyncFilter.ALL to R.string.filter_all,
+            SyncFilter.NOT_BACKED_UP to R.string.filter_not_backed,
+            SyncFilter.BACKED_UP to R.string.filter_backed,
+            SyncFilter.CLOUD_ONLY to R.string.filter_cloud,
+        )
+        filters.forEach { (value, label) ->
+            OptionRow(selected = filter == value, label = stringResource(label)) { onFilterChange(value) }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        HorizontalDivider()
+        ListItem(
+            modifier = Modifier.clickable(onClick = onFoldersClick),
+            leadingContent = { Icon(Icons.Default.Folder, contentDescription = null) },
+            headlineContent = { Text(stringResource(R.string.folders_row)) },
+            supportingContent = {
+                Text(
+                    if (folderCount == 0) {
+                        stringResource(R.string.folders_all)
+                    } else {
+                        stringResource(R.string.folders_selected, folderCount)
+                    },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
+        )
+        Spacer(Modifier.height(16.dp))
+    }
+}
+
+@Composable
+private fun OptionRow(selected: Boolean, label: String, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = onClick)
+        Spacer(Modifier.width(8.dp))
+        Text(label, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+/**
+ * Directory picker = the scan allowlist (PRD §6.1). No folders checked means "all
+ * folders"; checking a subset restricts both the grid AND what the scanner imports
+ * and backs up. A local, editable copy is applied on confirm.
+ */
+@Composable
+private fun FoldersSheet(
+    buckets: List<MediaBucket>,
+    selected: Set<String>,
+    onApply: (Set<String>) -> Unit,
+) {
+    var working by remember(selected) { mutableStateOf(selected) }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp).padding(bottom = 16.dp)) {
+        Text(
+            stringResource(R.string.folders_title),
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        )
+        Text(
+            stringResource(R.string.folders_hint),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
+        Spacer(Modifier.height(8.dp))
+        LazyColumn(Modifier.fillMaxWidth().height(360.dp)) {
+            item {
+                FolderRow(
+                    name = stringResource(R.string.folders_all),
+                    subtitle = null,
+                    checked = working.isEmpty(),
+                    onToggle = { working = emptySet() },
+                )
+            }
+            items(buckets, key = { it.id }) { bucket ->
+                FolderRow(
+                    name = bucket.name,
+                    subtitle = stringResource(R.string.folders_photo_count, bucket.count),
+                    checked = bucket.id in working,
+                    onToggle = {
+                        working = working.toMutableSet().apply { if (!add(bucket.id)) remove(bucket.id) }
+                    },
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        FilledTonalButton(
+            onClick = { onApply(working) },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        ) { Text(stringResource(R.string.folders_apply)) }
+    }
+}
+
+@Composable
+private fun FolderRow(name: String, subtitle: String?, checked: Boolean, onToggle: () -> Unit) {
+    ListItem(
+        modifier = Modifier.clickable(onClick = onToggle),
+        leadingContent = { Checkbox(checked = checked, onCheckedChange = { onToggle() }) },
+        headlineContent = { Text(name) },
+        supportingContent = subtitle?.let { { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
+    )
+}
+
+/** Year-month label for the fast-scroll bubble (e.g. "Jul 2026"). */
+private val yearMonthFormat = SimpleDateFormat("MMM yyyy", Locale.getDefault())
+
+private fun yearMonthLabel(epochMs: Long): String = yearMonthFormat.format(java.util.Date(epochMs))
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -345,6 +557,7 @@ private fun SelectionAppBar(
     onClear: () -> Unit,
     onSync: () -> Unit,
     onSave: () -> Unit,
+    onFreeSpace: () -> Unit,
     onDelete: () -> Unit,
 ) {
     TopAppBar(
@@ -360,6 +573,9 @@ private fun SelectionAppBar(
             }
             IconButton(onClick = onSave) {
                 Icon(Icons.Default.Download, contentDescription = stringResource(R.string.action_save_selected))
+            }
+            IconButton(onClick = onFreeSpace) {
+                Icon(Icons.Default.DeleteSweep, contentDescription = stringResource(R.string.action_free_selected))
             }
             IconButton(onClick = onDelete) {
                 Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.action_delete_selected))

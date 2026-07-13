@@ -10,8 +10,8 @@
     <string name="sync_scanning">Scanning library…</string>
     <string name="sync_uploading">Uploading %1$d/%2$d…</string>
 
-    <string name="settings_google_account">Google Drive</string>
-    <string name="settings_google_connected">Connected — tap to sign out</string>
+    <string name="settings_google_account">Google Drive account</string>
+    <string name="settings_google_connected">Connected — tap to manage account</string>
     <string name="settings_google_disconnected">Not connected — tap to sign in (no GMS required)</string>
     <string name="cancel">Cancel</string>
 
@@ -25,8 +25,8 @@
     <string name="auth_retry">Retry</string>
     <string name="auth_network_hint">Can\'t reach Google. If you use the WireGuard tunnel, enable Network acceleration first, then retry.</string>
     <string name="settings_google_connecting">Connecting…</string>
-    <string name="settings_free_space">Free up space</string>
-    <string name="settings_free_space_hint">Remove local copies of already-synced photos</string>
+    <string name="settings_storage">Storage</string>
+    <string name="settings_storage_hint">See what your library uses and free up space</string>
     <string name="settings_folder">Cloud backup folder</string>
     <string name="folder_dialog_title">Backup folder name</string>
     <string name="save">Save</string>
@@ -43,7 +43,7 @@
     <string name="account_open_folder_hint">Browse your uploaded photos in Google Drive</string>
     <string name="account_folder_unavailable">Couldn\'t open the folder — try again after a sync.</string>
     <string name="settings_transport">Network acceleration</string>
-    <string name="settings_transport_hint">Direct / SOCKS / WireGuard + LAN SOCKS chain</string>
+    <string name="settings_transport_hint">Tunnel traffic through WireGuard or a SOCKS proxy</string>
     <string name="settings_transport_connected">Connected — acceleration active</string>
 
     <!-- Sync-state badges (PRD §3.7 / §9.1) -->
@@ -55,13 +55,15 @@
     <!-- Multi-select (PRD §9.1) -->
     <string name="selection_count">%1$d selected</string>
     <string name="selection_clear">Clear selection</string>
-    <string name="action_sync_selected">Sync</string>
+    <string name="action_sync_selected">Back up</string>
     <string name="action_save_selected">Save to device</string>
+    <string name="action_free_selected">Free up space</string>
     <string name="action_delete_selected">Delete</string>
-    <string name="sync_queued">Sync queued for %1$d photo(s)</string>
+    <string name="sync_queued">Backup queued for %1$d photo(s)</string>
     <string name="save_started">Saving %1$d photo(s)…</string>
     <string name="photos_deleted">Deleted %1$d photo(s)</string>
-    <string name="space_freed">Freed %1$d photo(s)</string>
+    <string name="space_freed">Freed space from %1$d photo(s)</string>
+    <string name="free_queued">Backing up %1$d photo(s) first — free up space again once they finish</string>
     <string name="free_space_none">Nothing to free up</string>
     <string name="action_select">Select</string>
 
@@ -125,4 +127,42 @@
     <string name="info_focal">Focal length</string>
     <string name="info_location">Location</string>
     <string name="info_hash">Content hash</string>
+
+    <!-- Timeline view options: sort / filter / folders -->
+    <string name="view_options">View options</string>
+    <string name="sort_title">Sort by</string>
+    <string name="sort_date_desc">Newest first</string>
+    <string name="sort_date_asc">Oldest first</string>
+    <string name="sort_size_desc">Largest first</string>
+    <string name="sort_size_asc">Smallest first</string>
+    <string name="filter_title">Show</string>
+    <string name="filter_all">All photos</string>
+    <string name="filter_not_backed">Not backed up</string>
+    <string name="filter_backed">Backed up</string>
+    <string name="filter_cloud">Cloud only</string>
+    <string name="folders_row">Folders</string>
+    <string name="folders_all">All folders</string>
+    <string name="folders_selected">%1$d selected</string>
+    <string name="folders_title">Folders to include</string>
+    <string name="folders_hint">Only photos in the selected folders are shown and backed up. Choosing none includes every folder.</string>
+    <string name="folders_photo_count">%1$d photos</string>
+    <string name="folders_apply">Apply</string>
+
+    <!-- Space management (T-302) -->
+    <string name="storage_title">Storage</string>
+    <string name="storage_device_title">This device</string>
+    <string name="storage_device_total">%1$s total</string>
+    <string name="storage_legend_app">Your photos</string>
+    <string name="storage_legend_other">Used by other apps</string>
+    <string name="storage_legend_free">Free</string>
+    <string name="storage_app_title">Your library on this device</string>
+    <string name="storage_app_total">%1$d photos on device</string>
+    <string name="storage_app_freeable">%1$d backed up · freeable</string>
+    <string name="storage_app_not_backed">Not backed up yet</string>
+    <string name="storage_free_button">Free up %1$s</string>
+    <string name="storage_free_none">Nothing to free up</string>
+    <string name="storage_free_explainer">Only backed-up photos are released. The local copy is removed after its cloud copy is verified; a cloud preview stays in the timeline.</string>
+    <string name="storage_free_confirm_title">Free up space?</string>
+    <string name="storage_free_confirm_message">%1$d backed-up photos (%2$s) will have their local copies removed. They stay in your cloud and remain viewable in the timeline.</string>
+    <string name="storage_free_confirm_button">Free up space</string>
 </resources>

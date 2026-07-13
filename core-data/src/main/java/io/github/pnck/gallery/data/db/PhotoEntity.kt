@@ -34,6 +34,12 @@ data class PhotoEntity(
     val dateTaken: Long,
     val width: Int,
     val height: Int,
+    /** File size in bytes; 0 when unknown (e.g. a cloud row before metadata is known). */
+    val sizeBytes: Long = 0,
+    /** MediaStore BUCKET_ID of the local folder (null for cloud-only photos). */
+    val bucketId: String? = null,
+    /** MediaStore BUCKET_DISPLAY_NAME — the folder label shown in the directory filter. */
+    val bucketName: String? = null,
     val syncState: SyncState,
     /**
      * User opted this photo out of automatic backup ("clear queue"): it stays local

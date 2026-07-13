@@ -7,6 +7,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import io.github.pnck.gallery.data.db.PhotoDao
 import io.github.pnck.gallery.data.db.PhotoEntity
 import io.github.pnck.gallery.data.scanner.LocalMediaScanner
+import io.github.pnck.gallery.data.settings.AppSettingsStore
 import io.github.pnck.gallery.domain.SyncState
 import java.util.UUID
 import kotlinx.coroutines.flow.first
@@ -25,6 +26,7 @@ class MediaReconciler(
     private val appContext: Context,
     private val scanner: LocalMediaScanner,
     private val photoDao: PhotoDao,
+    private val settings: AppSettingsStore,
 ) {
     private val cursorKey = longPreferencesKey("last_scan_date_modified_sec")
 
@@ -34,7 +36,12 @@ class MediaReconciler(
         val items = scanner.scanIncremental(since)
         if (items.isEmpty()) return 0
 
-        val fresh = items
+        // Scan allowlist (PRD §6.1): when non-empty, only import photos from the chosen
+        // folders — this is what makes the directory filter "only scan these folders".
+        val allowed = settings.scanBuckets.first()
+        val inScope = if (allowed.isEmpty()) items else items.filter { it.bucketId in allowed }
+
+        val fresh = inScope
             .filter { photoDao.findByLocalUri(it.contentUri) == null }
             .map { item ->
                 PhotoEntity(
@@ -48,13 +55,25 @@ class MediaReconciler(
                     dateTaken = item.dateTakenMs,
                     width = item.width,
                     height = item.height,
+                    sizeBytes = item.sizeBytes,
+                    bucketId = item.bucketId,
+                    bucketName = item.bucketName,
                     syncState = SyncState.PENDING_UPLOAD,
                 )
             }
         if (fresh.isNotEmpty()) photoDao.upsertAll(fresh)
 
+        // Advance the cursor over EVERY scanned row (even ones filtered out), so an
+        // unchanged allowlist doesn't re-scan them next time. Widening the allowlist
+        // resets the cursor (see resetCursor) to force a one-time full re-import.
         val newCursor = items.maxOf { it.dateModifiedSec }
         appContext.scanCursorStore.edit { it[cursorKey] = maxOf(newCursor, since) }
         return fresh.size
+    }
+
+    /** Force the next [reconcile] to re-scan the whole library — used when the scan
+     *  allowlist changes so newly-included folders get imported. */
+    suspend fun resetCursor() {
+        appContext.scanCursorStore.edit { it[cursorKey] = 0L }
     }
 }

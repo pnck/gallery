@@ -9,6 +9,7 @@ import androidx.navigation.navArgument
 import io.github.pnck.gallery.ui.detail.PhotoDetailScreen
 import io.github.pnck.gallery.ui.settings.SettingsScreen
 import io.github.pnck.gallery.ui.settings.TransportScreen
+import io.github.pnck.gallery.ui.storage.SpaceManagementScreen
 import io.github.pnck.gallery.ui.timeline.TimelineScreen
 
 /** NavHost (PRD §9.1): timeline / photo detail / settings, plus the transport debug screen. */
@@ -16,6 +17,7 @@ object Routes {
     const val TIMELINE = "timeline"
     const val SETTINGS = "settings"
     const val TRANSPORT = "transport"
+    const val STORAGE = "storage"
     const val PHOTO_DETAIL = "photo/{photoId}"
 
     fun photoDetail(photoId: String) = "photo/$photoId"
@@ -45,10 +47,14 @@ fun GalleryNavHost() {
             SettingsScreen(
                 onBack = { navController.popBackStack() },
                 onTransportClick = { navController.navigate(Routes.TRANSPORT) },
+                onStorageClick = { navController.navigate(Routes.STORAGE) },
             )
         }
         composable(Routes.TRANSPORT) {
             TransportScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Routes.STORAGE) {
+            SpaceManagementScreen(onBack = { navController.popBackStack() })
         }
     }
 }

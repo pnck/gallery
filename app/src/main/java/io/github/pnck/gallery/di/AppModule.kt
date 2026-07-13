@@ -208,7 +208,8 @@ object AppModule {
         @ApplicationContext context: Context,
         scanner: LocalMediaScanner,
         photoDao: PhotoDao,
-    ): MediaReconciler = MediaReconciler(context, scanner, photoDao)
+        settings: AppSettingsStore,
+    ): MediaReconciler = MediaReconciler(context, scanner, photoDao, settings)
 
     @Provides
     @Singleton

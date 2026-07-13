@@ -12,6 +12,10 @@ data class TimelinePhoto(
     val renderUri: String,
     /** width / height, used by grid/staggered layouts. */
     val aspectRatio: Float,
+    /** Unix ms the photo was taken — the timeline's ordering key and the fast-scroll label. */
+    val dateTaken: Long,
+    /** File size in bytes (0 when unknown), for size sorting and the space-management view. */
+    val sizeBytes: Long,
     /** The four-state machine value (PRD §3.7); the grid draws a per-state badge. */
     val syncState: SyncState,
     /** content://media/... when a local copy exists — used by share/edit intents. */

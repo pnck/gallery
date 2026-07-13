@@ -3,7 +3,9 @@ package io.github.pnck.gallery.data.db
 import androidx.paging.PagingSource
 import androidx.room.Dao
 import androidx.room.Query
+import androidx.room.RawQuery
 import androidx.room.Upsert
+import androidx.sqlite.db.SupportSQLiteQuery
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -13,12 +15,21 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface PhotoDao {
 
-    @Query("SELECT * FROM photos ORDER BY dateTaken DESC")
-    fun getPhotosPaged(): PagingSource<Int, PhotoEntity>
+    /**
+     * Timeline page source with a caller-built ORDER BY / WHERE (sort + sync-state +
+     * folder allowlist). The query string is assembled in the repository from a
+     * closed set of columns/keywords — never user text — so there is no injection
+     * surface (PRD §9.1).
+     */
+    @RawQuery(observedEntities = [PhotoEntity::class])
+    fun getPhotosPaged(query: SupportSQLiteQuery): PagingSource<Int, PhotoEntity>
 
-    /** Ordered snapshot for the detail-view pager (PRD §9.1). */
-    @Query("SELECT * FROM photos ORDER BY dateTaken DESC")
-    fun observeAllPhotos(): Flow<List<PhotoEntity>>
+    /**
+     * Ordered/filtered snapshot for the detail-view pager (PRD §9.1) — same caller-built
+     * query as [getPhotosPaged] so the pager order matches the grid.
+     */
+    @RawQuery(observedEntities = [PhotoEntity::class])
+    fun observePhotos(query: SupportSQLiteQuery): Flow<List<PhotoEntity>>
 
     @Query("SELECT * FROM photos WHERE id = :id LIMIT 1")
     fun observeById(id: String): Flow<PhotoEntity?>
@@ -36,6 +47,10 @@ interface PhotoDao {
     /** Synced rows that still hold a local copy — verified individually before freeing. */
     @Query("SELECT * FROM photos WHERE syncState = 1 AND localUri IS NOT NULL")
     suspend fun getSyncedWithLocal(): List<PhotoEntity>
+
+    /** Freeable subset limited to a selection (T-302, per-selection free-up-space). */
+    @Query("SELECT * FROM photos WHERE id IN (:ids) AND syncState = 1 AND localUri IS NOT NULL")
+    suspend fun getSyncedWithLocalByIds(ids: List<String>): List<PhotoEntity>
 
     /** Content-hash lookup — the anti-state-machine-failure identity of a photo (PRD §3.5). */
     @Query("SELECT * FROM photos WHERE provider = :provider AND contentHashType = :type AND contentHashValue = :value LIMIT 1")
@@ -100,7 +115,28 @@ interface PhotoDao {
     /** How many of these photos have NO cloud copy — deleting them is unrecoverable. */
     @Query("SELECT COUNT(*) FROM photos WHERE id IN (:ids) AND cloudId IS NULL")
     suspend fun countWithoutCloud(ids: List<String>): Int
+
+    /** Aggregate on-device footprint for the space-management screen (T-302). */
+    @Query(
+        "SELECT " +
+            "IFNULL(SUM(CASE WHEN localUri IS NOT NULL THEN sizeBytes ELSE 0 END), 0) AS localBytes, " +
+            "IFNULL(SUM(CASE WHEN syncState = 1 AND localUri IS NOT NULL THEN sizeBytes ELSE 0 END), 0) AS freeableBytes, " +
+            "IFNULL(SUM(CASE WHEN syncState = 0 AND localUri IS NOT NULL THEN sizeBytes ELSE 0 END), 0) AS notBackedUpBytes, " +
+            "IFNULL(SUM(CASE WHEN syncState = 1 AND localUri IS NOT NULL THEN 1 ELSE 0 END), 0) AS freeableCount, " +
+            "IFNULL(SUM(CASE WHEN localUri IS NOT NULL THEN 1 ELSE 0 END), 0) AS localCount " +
+            "FROM photos",
+    )
+    fun observeStorage(): Flow<StorageSummaryEntity>
 }
+
+/** Projection for [PhotoDao.observeStorage]. */
+data class StorageSummaryEntity(
+    val localBytes: Long,
+    val freeableBytes: Long,
+    val notBackedUpBytes: Long,
+    val freeableCount: Int,
+    val localCount: Int,
+)
 
 /** Projection for [PhotoDao.observeCounts]. */
 data class SyncCountsEntity(

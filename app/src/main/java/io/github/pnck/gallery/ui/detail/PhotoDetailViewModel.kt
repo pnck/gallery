@@ -7,15 +7,18 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.pnck.gallery.domain.PhotoRepository
 import io.github.pnck.gallery.domain.TimelinePhoto
+import io.github.pnck.gallery.ui.timeline.TimelineQueryHolder
 import io.github.pnck.gallery.ui.util.DeleteConfirm
 import io.github.pnck.gallery.ui.util.DeleteRequest
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -42,13 +45,18 @@ sealed interface DetailEvent {
  * timeline for the pager, lazy download of CLOUD_ONLY originals into cacheDir,
  * and the save-to-device action.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class PhotoDetailViewModel @Inject constructor(
     private val repo: PhotoRepository,
     @ApplicationContext private val context: Context,
+    queryHolder: TimelineQueryHolder,
 ) : ViewModel() {
 
-    val photos: StateFlow<List<TimelinePhoto>> = repo.getTimeline()
+    // Same shared query as the grid, so the pager swipes through the identical
+    // ordered/filtered set the user was just looking at.
+    val photos: StateFlow<List<TimelinePhoto>> = queryHolder.query
+        .flatMapLatest { repo.getTimeline(it) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     // ── Photo details / EXIF panel (T-403) ─────────────────────────────────

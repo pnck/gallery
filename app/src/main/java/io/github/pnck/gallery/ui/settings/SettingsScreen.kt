@@ -51,7 +51,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.pnck.gallery.R
-import io.github.pnck.gallery.ui.util.rememberSystemDelete
 import kotlinx.coroutines.launch
 
 /**
@@ -63,38 +62,14 @@ import kotlinx.coroutines.launch
 fun SettingsScreen(
     onBack: () -> Unit,
     onTransportClick: () -> Unit,
+    onStorageClick: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
-    val freeUris by viewModel.freeUris.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbarHost = remember { SnackbarHostState() }
-    val systemDelete = rememberSystemDelete()
     val folderUnavailable = stringResource(R.string.account_folder_unavailable)
-
-    // "Free up space": run the gathered synced-local uris through the system
-    // delete dialog, then flip those rows to CLOUD_ONLY (T-302).
-    LaunchedEffect(freeUris) {
-        freeUris?.let { uris ->
-            systemDelete(uris.map { it.toUri() }) { viewModel.confirmFreed(uris) }
-            viewModel.onFreeHandled()
-        }
-    }
-
-    var pendingEvent by remember { mutableStateOf<SettingsEvent?>(null) }
-    LaunchedEffect(Unit) { viewModel.eventFlow.collect { pendingEvent = it } }
-    val freeMessage = when (val event = pendingEvent) {
-        SettingsEvent.NothingToFree -> stringResource(R.string.free_space_none)
-        is SettingsEvent.Freed -> stringResource(R.string.space_freed, event.count)
-        null -> null
-    }
-    LaunchedEffect(freeMessage) {
-        freeMessage?.let {
-            snackbarHost.showSnackbar(it)
-            pendingEvent = null
-        }
-    }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -209,9 +184,9 @@ fun SettingsScreen(
             )
             HorizontalDivider()
             ListItem(
-                modifier = Modifier.clickable(onClick = viewModel::requestFreeSpace),
-                headlineContent = { Text(stringResource(R.string.settings_free_space)) },
-                supportingContent = { Text(stringResource(R.string.settings_free_space_hint)) },
+                modifier = Modifier.clickable(onClick = onStorageClick),
+                headlineContent = { Text(stringResource(R.string.settings_storage)) },
+                supportingContent = { Text(stringResource(R.string.settings_storage_hint)) },
             )
             HorizontalDivider()
             val transportState by viewModel.transportState.collectAsState()

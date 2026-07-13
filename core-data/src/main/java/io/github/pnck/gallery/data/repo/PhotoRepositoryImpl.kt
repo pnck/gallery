@@ -12,13 +12,21 @@ import androidx.paging.Pager
 import androidx.paging.PagingConfig
 import androidx.paging.PagingData
 import androidx.paging.map
+import androidx.sqlite.db.SimpleSQLiteQuery
+import androidx.sqlite.db.SupportSQLiteQuery
 import io.github.pnck.gallery.data.db.PhotoDao
 import io.github.pnck.gallery.data.db.PhotoEntity
+import io.github.pnck.gallery.data.scanner.LocalMediaScanner
+import io.github.pnck.gallery.domain.MediaBucket
 import io.github.pnck.gallery.domain.PhotoDetails
 import io.github.pnck.gallery.domain.PhotoRepository
+import io.github.pnck.gallery.domain.StorageSummary
 import io.github.pnck.gallery.domain.SyncCounts
+import io.github.pnck.gallery.domain.SyncFilter
 import io.github.pnck.gallery.domain.SyncState
 import io.github.pnck.gallery.domain.TimelinePhoto
+import io.github.pnck.gallery.domain.TimelineQuery
+import io.github.pnck.gallery.domain.TimelineSort
 import io.github.pnck.gallery.network.ApiResult
 import io.github.pnck.gallery.provider.ContentHash
 import io.github.pnck.gallery.provider.ICloudStorageProvider
@@ -42,14 +50,28 @@ class PhotoRepositoryImpl(
     private val resolver: ContentResolver,
 ) : PhotoRepository {
 
-    override fun getPagedTimelinePhotos(): Flow<PagingData<TimelinePhoto>> =
+    override fun getPagedTimelinePhotos(query: TimelineQuery): Flow<PagingData<TimelinePhoto>> =
         Pager(
             config = PagingConfig(pageSize = 90, enablePlaceholders = true),
-            pagingSourceFactory = { photoDao.getPhotosPaged() },
+            pagingSourceFactory = { photoDao.getPhotosPaged(buildTimelineQuery(query)) },
         ).flow.map { paging -> paging.map { it.toTimelinePhoto() } }
 
-    override fun getTimeline(): Flow<List<TimelinePhoto>> =
-        photoDao.observeAllPhotos().map { rows -> rows.map { it.toTimelinePhoto() } }
+    override fun getTimeline(query: TimelineQuery): Flow<List<TimelinePhoto>> =
+        photoDao.observePhotos(buildTimelineQuery(query)).map { rows -> rows.map { it.toTimelinePhoto() } }
+
+    override suspend fun availableBuckets(): List<MediaBucket> =
+        LocalMediaScanner(resolver).listBuckets()
+
+    override fun observeStorageSummary(): Flow<StorageSummary> =
+        photoDao.observeStorage().map {
+            StorageSummary(
+                localBytes = it.localBytes,
+                freeableBytes = it.freeableBytes,
+                notBackedUpBytes = it.notBackedUpBytes,
+                freeableCount = it.freeableCount,
+                localCount = it.localCount,
+            )
+        }
 
     override fun observePhoto(id: String): Flow<TimelinePhoto?> =
         photoDao.observeById(id).map { it?.toTimelinePhoto() }
@@ -180,7 +202,22 @@ class PhotoRepositoryImpl(
      * persisted so the local/cloud identity survives a broken state machine.
      */
     override suspend fun freeableLocalUris(): List<String> = withContext(Dispatchers.IO) {
-        photoDao.getSyncedWithLocal().mapNotNull { row ->
+        verifyFreeable(photoDao.getSyncedWithLocal())
+    }
+
+    override suspend fun freeableLocalUrisFor(ids: List<String>): List<String> =
+        withContext(Dispatchers.IO) {
+            if (ids.isEmpty()) emptyList() else verifyFreeable(photoDao.getSyncedWithLocalByIds(ids))
+        }
+
+    /**
+     * The anti-data-loss guard (PRD §7.3): a synced+local row is only freeable if its
+     * cloud copy is verified present with matching content (MD5) BEFORE the local file
+     * is deleted. The confirmed hash is persisted so local/cloud identity survives a
+     * broken state machine.
+     */
+    private suspend fun verifyFreeable(rows: List<PhotoEntity>): List<String> =
+        rows.mapNotNull { row ->
             val cloudId = row.cloudId ?: return@mapNotNull null
             val localUri = row.localUri ?: return@mapNotNull null
             val cloudMd5 = when (val res = provider.getFileMetadata(cloudId)) {
@@ -195,7 +232,6 @@ class PhotoRepositoryImpl(
                 null
             }
         }
-    }
 
     override suspend fun releaseLocalCopies(uris: List<String>) = withContext(Dispatchers.IO) {
         val ids = uris.mapNotNull { photoDao.findByLocalUri(it)?.id }
@@ -226,6 +262,42 @@ class PhotoRepositoryImpl(
 
     private fun fileProviderUri(file: File): Uri =
         FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+
+    /**
+     * Assemble the timeline page query from a closed vocabulary of columns/keywords
+     * (never user-provided text). Folder ids are bound as `?` args; cloud-only rows
+     * (null bucket) always pass the folder filter since they have no local folder.
+     */
+    private fun buildTimelineQuery(query: TimelineQuery): SupportSQLiteQuery {
+        val where = mutableListOf<String>()
+        val args = mutableListOf<Any>()
+
+        when (query.filter) {
+            SyncFilter.ALL -> Unit
+            SyncFilter.NOT_BACKED_UP -> where += "syncState = 0"
+            SyncFilter.BACKED_UP -> where += "syncState = 1"
+            SyncFilter.CLOUD_ONLY -> where += "syncState = 2"
+        }
+        if (query.bucketIds.isNotEmpty()) {
+            val placeholders = query.bucketIds.joinToString(",") { "?" }
+            where += "(bucketId IN ($placeholders) OR bucketId IS NULL)"
+            args.addAll(query.bucketIds)
+        }
+
+        val orderBy = when (query.sort) {
+            TimelineSort.DATE_DESC -> "dateTaken DESC"
+            TimelineSort.DATE_ASC -> "dateTaken ASC"
+            TimelineSort.SIZE_DESC -> "sizeBytes DESC"
+            TimelineSort.SIZE_ASC -> "sizeBytes ASC"
+        }
+
+        val sql = buildString {
+            append("SELECT * FROM photos")
+            if (where.isNotEmpty()) append(" WHERE ").append(where.joinToString(" AND "))
+            append(" ORDER BY ").append(orderBy)
+        }
+        return SimpleSQLiteQuery(sql, args.toTypedArray())
+    }
 }
 
 /** Anti-corruption mapping (PRD §3.8): the UI never sees PhotoEntity. */
@@ -234,6 +306,8 @@ internal fun PhotoEntity.toTimelinePhoto(): TimelinePhoto =
         id = id,
         renderUri = localUri ?: "${provider.orEmpty().lowercase()}://$cloudId",
         aspectRatio = if (height > 0) width.toFloat() / height else 1f,
+        dateTaken = dateTaken,
+        sizeBytes = sizeBytes,
         syncState = syncState,
         localUri = localUri,
         cloudId = cloudId,

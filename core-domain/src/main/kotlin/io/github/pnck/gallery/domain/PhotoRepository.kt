@@ -9,14 +9,21 @@ import kotlinx.coroutines.flow.Flow
  * Implementations live in :core-data (Room-backed PagingSource + RemoteMediator).
  */
 interface PhotoRepository {
-    /** Paged timeline ordered by dateTaken DESC. */
-    fun getPagedTimelinePhotos(): Flow<PagingData<TimelinePhoto>>
+    /** Paged timeline, ordered and filtered per [query] (sort / sync-state / folders). */
+    fun getPagedTimelinePhotos(query: TimelineQuery): Flow<PagingData<TimelinePhoto>>
+
+    /** Device media folders available for the scan-allowlist / directory filter (PRD §6.1). */
+    suspend fun availableBuckets(): List<MediaBucket>
+
+    /** Live aggregate footprint for the space-management screen (T-302). */
+    fun observeStorageSummary(): Flow<StorageSummary>
 
     /**
-     * Ordered snapshot of the whole timeline (dateTaken DESC) for the detail-view
-     * HorizontalPager, which needs a positional list to swipe between photos.
+     * Ordered/filtered snapshot of the timeline for the detail-view HorizontalPager,
+     * which needs a positional list to swipe between photos. Must use the SAME [query]
+     * as the grid so the pager order matches what the user is looking at.
      */
-    fun getTimeline(): Flow<List<TimelinePhoto>>
+    fun getTimeline(query: TimelineQuery): Flow<List<TimelinePhoto>>
 
     /** Observe a single photo (for the detail view's live state/actions). */
     fun observePhoto(id: String): Flow<TimelinePhoto?>
@@ -72,6 +79,12 @@ interface PhotoRepository {
 
     /** Local copies of already-synced photos, safe to release. */
     suspend fun freeableLocalUris(): List<String>
+
+    /**
+     * Freeable local copies limited to [ids] (verified cloud-existent + hash-matched,
+     * like [freeableLocalUris]). Used by "free space for these photos" on a selection.
+     */
+    suspend fun freeableLocalUrisFor(ids: List<String>): List<String>
 
     /** After the system delete removed the local files, flip those rows to CLOUD_ONLY. */
     suspend fun releaseLocalCopies(uris: List<String>)

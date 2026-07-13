@@ -10,7 +10,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [PhotoEntity::class, SyncKeyEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 @TypeConverters(SyncStateConverter::class)
@@ -29,10 +29,20 @@ abstract class GalleryDatabase : RoomDatabase() {
             }
         }
 
+        /** v3: `sizeBytes` + `bucketId`/`bucketName` for size sorting, the space-management
+         *  view and the per-folder scan allowlist (backfilled lazily by the next scan). */
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE photos ADD COLUMN sizeBytes INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE photos ADD COLUMN bucketId TEXT")
+                db.execSQL("ALTER TABLE photos ADD COLUMN bucketName TEXT")
+            }
+        }
+
         /** Single construction point so Room stays an implementation detail of :core-data. */
         fun create(context: Context): GalleryDatabase =
             Room.databaseBuilder(context, GalleryDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
     }
 }
