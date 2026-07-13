@@ -36,6 +36,8 @@ pub struct WgSettings {
     /// tunnel in WgOnly mode. Empty → local resolver fallback (leaks DNS).
     pub dns: Vec<String>,
     pub keepalive_secs: u16,
+    /// Tunnel MTU; 0 = default (1280, the safe floor for constrained paths).
+    pub mtu: u16,
 }
 
 /// Outbound routing for the local SOCKS5 inbound. WireGuard and the upstream
@@ -91,14 +93,13 @@ fn init_logging() {
         use std::sync::Once;
         static INIT: Once = Once::new();
         INIT.call_once(|| {
-            // Default to info: the driver lifecycle + a periodic throughput heartbeat
-            // are visible (so an empty log doesn't look like "wg isn't running"), but the
-            // per-packet debug flood stays off. Flip GALLERY_WG_LOG=debug for packet traces
-            // or =warn to quiet it back down.
+            // Transport is quiet by default (warn+) so logcat stays focused on the app
+            // layer (gallery-sync). Throughput is observable via the in-app diagnostics
+            // screen's tx/rx, not the log. Flip GALLERY_WG_LOG=debug/info for traces.
             let spec = std::env::var("GALLERY_WG_LOG")
                 .ok()
                 .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| "info".to_string());
+                .unwrap_or_else(|| "warn".to_string());
             let filter = env_filter::Builder::new().parse(&spec).build();
             android_logger::init_once(
                 android_logger::Config::default()
@@ -384,6 +385,7 @@ fn start_tunnel(wg: &WgSettings) -> Result<Arc<WgTunnel>, TransportError> {
         &wg.interface_addresses,
         &wg.dns,
         wg.keepalive_secs,
+        wg.mtu,
     )
     .map_err(|msg| TransportError::WgConfig { msg })?;
     WgTunnel::start(params)

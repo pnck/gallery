@@ -86,6 +86,7 @@ fun TransportScreen(
     var interfaceAddress by rememberSaveable { mutableStateOf("10.0.0.2/32") }
     var dns by rememberSaveable { mutableStateOf("") }
     var keepalive by rememberSaveable { mutableStateOf("25") }
+    var mtu by rememberSaveable { mutableStateOf("") }
     var socksHost by rememberSaveable { mutableStateOf("") }
     var socksPort by rememberSaveable { mutableStateOf("1080") }
     var socksUser by rememberSaveable { mutableStateOf("") }
@@ -102,7 +103,7 @@ fun TransportScreen(
             wgEnabled = f.wgEnabled; socksEnabled = f.socksEnabled
             privateKey = f.privateKey; peerPublicKey = f.peerPublicKey
             presharedKey = f.presharedKey; useSrv = f.useSrv; endpoint = f.endpoint; srvName = f.srvName
-            interfaceAddress = f.interfaceAddress; dns = f.dns; keepalive = f.keepaliveSecs
+            interfaceAddress = f.interfaceAddress; dns = f.dns; keepalive = f.keepaliveSecs; mtu = f.mtu
             socksHost = f.socksHost; socksPort = f.socksPort; socksUser = f.socksUser; socksPass = f.socksPass
         }
     }
@@ -111,7 +112,7 @@ fun TransportScreen(
         wgEnabled = wgEnabled, socksEnabled = socksEnabled,
         privateKey = privateKey, peerPublicKey = peerPublicKey, presharedKey = presharedKey,
         useSrv = useSrv, endpoint = endpoint, srvName = srvName,
-        interfaceAddress = interfaceAddress, dns = dns, keepaliveSecs = keepalive,
+        interfaceAddress = interfaceAddress, dns = dns, keepaliveSecs = keepalive, mtu = mtu,
         socksHost = socksHost, socksPort = socksPort, socksUser = socksUser, socksPass = socksPass,
     )
 
@@ -195,6 +196,13 @@ fun TransportScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 field(keepalive, { keepalive = it }, "Keepalive seconds", number = true)
+                field(mtu, { mtu = it }, "MTU (blank = 1280)", number = true)
+                Text(
+                    "Tunnel MTU. Blank/0 uses 1280 (safe for cellular/nested paths). Lower it if " +
+                        "large transfers stall despite a good handshake; raise toward 1420 on clean links.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
 
             toggleRow("Upstream SOCKS5", socksEnabled) { socksEnabled = it }

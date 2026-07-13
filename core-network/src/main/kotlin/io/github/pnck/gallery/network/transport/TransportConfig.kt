@@ -19,6 +19,8 @@ data class WgConfig(
     val interfaceAddresses: List<String>,
     val dns: List<String>,
     val persistentKeepaliveSeconds: Int = 25,
+    /** Tunnel MTU; 0 = core default (1280, safe for constrained paths). Clamped 576–1500. */
+    val mtu: Int = 0,
 )
 
 /** Selectable transport modes (PRD §8.4.3, Transport Design §3.1). */

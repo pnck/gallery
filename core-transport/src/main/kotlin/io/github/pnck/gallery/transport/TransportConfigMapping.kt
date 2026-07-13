@@ -40,4 +40,5 @@ private fun WgConfig.toWgSettings(): WgSettings = WgSettings(
     interfaceAddresses = interfaceAddresses,
     dns = dns,
     keepaliveSecs = persistentKeepaliveSeconds.toUShort(),
+    mtu = mtu.toUShort(),
 )

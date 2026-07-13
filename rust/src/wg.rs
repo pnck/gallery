@@ -40,12 +40,13 @@ use smoltcp::wire::{DnsQueryType, HardwareAddress, IpAddress, IpCidr, IpEndpoint
 
 use crate::socks::Conn;
 
-/// Max IP packet we shuttle through the tunnel. Kept at the IPv6 minimum (1280) so the
-/// WG-encapsulated UDP datagram (inner + ~60B WG + 28B IP/UDP ≈ 1368) survives paths
-/// with a reduced MTU — cellular, PPPoE, nested tunnels. The classic "handshake OK but
-/// large transfers stall" is a too-large MTU: full-size data packets get dropped while
-/// small requests slip through, so TCP crawls on retransmits. 1280 is the safe floor.
-const MTU: usize = 1280;
+/// Default tunnel MTU when the config leaves it unset (0). The IPv6 minimum (1280) is a
+/// safe floor: the WG-encapsulated UDP datagram (inner + ~60B WG + 28B IP/UDP ≈ 1368)
+/// survives paths with a reduced MTU — cellular, PPPoE, nested tunnels. The classic
+/// "handshake OK but large transfers stall" is a too-large MTU: full-size data packets
+/// get dropped while small requests slip through, so TCP crawls on retransmits. The MTU
+/// is configurable per tunnel (WgSettings.mtu) for users who want to push it higher.
+const DEFAULT_MTU: usize = 1280;
 /// Scratch buffer for boringtun in/out (must fit MTU + WG framing).
 const SCRATCH: usize = 2048;
 /// Per-connection app↔socket buffer high-water mark (backpressure).
@@ -69,6 +70,8 @@ pub struct WgParams {
     /// tunnel. Empty → fall back to the phone's local resolver (with a DNS leak).
     pub dns_servers: Vec<IpAddress>,
     pub keepalive_secs: Option<u16>,
+    /// Tunnel-interior MTU; smoltcp derives the TCP MSS from it.
+    pub mtu: usize,
 }
 
 impl WgParams {
@@ -81,6 +84,7 @@ impl WgParams {
         interface_addrs: &[String],
         dns: &[String],
         keepalive_secs: u16,
+        mtu: u16,
     ) -> Result<WgParams, String> {
         let sk = decode_key(private_key_b64).map_err(|e| format!("private_key: {e}"))?;
         let pk = decode_key(peer_public_key_b64).map_err(|e| format!("peer_public_key: {e}"))?;
@@ -116,6 +120,7 @@ impl WgParams {
             interface_addrs: addrs,
             dns_servers,
             keepalive_secs: if keepalive_secs == 0 { None } else { Some(keepalive_secs) },
+            mtu: if mtu == 0 { DEFAULT_MTU } else { (mtu as usize).clamp(576, 1500) },
         })
     }
 }
@@ -182,11 +187,12 @@ fn parse_cidr(s: &str) -> Result<IpCidr, String> {
 struct TunDevice {
     inbound: VecDeque<Vec<u8>>,
     outbound: VecDeque<Vec<u8>>,
+    mtu: usize,
 }
 
 impl TunDevice {
-    fn new() -> Self {
-        TunDevice { inbound: VecDeque::new(), outbound: VecDeque::new() }
+    fn new(mtu: usize) -> Self {
+        TunDevice { inbound: VecDeque::new(), outbound: VecDeque::new(), mtu }
     }
 }
 
@@ -224,7 +230,7 @@ impl Device for TunDevice {
     fn capabilities(&self) -> DeviceCapabilities {
         let mut caps = DeviceCapabilities::default();
         caps.medium = Medium::Ip;
-        caps.max_transmission_unit = MTU;
+        caps.max_transmission_unit = self.mtu;
         caps
     }
 }
@@ -709,7 +715,7 @@ impl Driver {
             None,
         );
 
-        let mut device = TunDevice::new();
+        let mut device = TunDevice::new(params.mtu);
         let smol_start = StdInstant::now();
         let mut config = Config::new(HardwareAddress::Ip);
         // Randomize TCP ISN/port selection per boot (smoltcp guidance).
@@ -764,10 +770,6 @@ impl Driver {
         let mut last_hs_attempt = StdInstant::now();
         let mut last_timers = StdInstant::now();
         let mut established = false;
-        // Periodic throughput heartbeat so the log shows whether data is actually moving.
-        let mut last_stats_log = StdInstant::now();
-        let mut last_tx: usize = 0;
-        let mut last_rx: usize = 0;
 
         loop {
             if self.stopped.load(Ordering::SeqCst) {
@@ -977,17 +979,8 @@ impl Driver {
             self.rx_bytes.store(rx as u64, Ordering::SeqCst);
             let ok = since_handshake.is_some();
             self.handshake_ok.store(ok, Ordering::SeqCst);
-            // Throughput heartbeat every ~5s: shows whether bytes are actually flowing
-            // (an empty log otherwise looks like "wg isn't running"). Rates in KiB/s.
-            if last_stats_log.elapsed() >= Duration::from_secs(5) {
-                let secs = last_stats_log.elapsed().as_secs_f64().max(0.001);
-                let up = (tx.saturating_sub(last_tx) as f64 / secs / 1024.0) as u64;
-                let down = (rx.saturating_sub(last_rx) as f64 / secs / 1024.0) as u64;
-                log::info!("wg: link ok={ok} tx={tx}B rx={rx}B ({up} KiB/s up, {down} KiB/s down)");
-                last_stats_log = StdInstant::now();
-                last_tx = tx;
-                last_rx = rx;
-            }
+            // Throughput is exposed via health()/transport_info (tx/rx bytes) for the
+            // in-app diagnostics screen — deliberately NOT logged, to keep logcat quiet.
             // Log establish/lose transitions and keep re-initiating until up.
             if ok && !established {
                 established = true;
@@ -1103,7 +1096,7 @@ mod tests {
     /// out the device (i.e. into the tunnel) rather than dropping them.
     #[test]
     fn routes_offlink_remote_subnet_through_the_tunnel_device() {
-        let mut device = TunDevice::new();
+        let mut device = TunDevice::new(DEFAULT_MTU);
         let mut config = Config::new(HardwareAddress::Ip);
         config.random_seed = 1;
         let mut iface = Interface::new(config, &mut device, SmolInstant::from_millis(0));
@@ -1229,7 +1222,7 @@ mod tests {
         // Both keys decode to 32 bytes and the pair round-trips through parse().
         assert_eq!(decode_key(&kp.private_key).unwrap().len(), 32);
         assert_eq!(decode_key(&kp.public_key).unwrap().len(), 32);
-        WgParams::parse(&kp.private_key, &kp.public_key, None, "1.2.3.4:51820", &["10.0.0.2/32".into()], &[], 25)
+        WgParams::parse(&kp.private_key, &kp.public_key, None, "1.2.3.4:51820", &["10.0.0.2/32".into()], &[], 25, 0)
             .expect("generated keys should parse");
     }
 
@@ -1263,7 +1256,7 @@ mod tests {
         let sk_b64 = base64::engine::general_purpose::STANDARD.encode(sk.to_bytes());
         let pk_b64 = base64::engine::general_purpose::STANDARD.encode(pk.to_bytes());
         // A user typing "10.94.1.200" (no /32) must become 10.94.1.200/32, not a default.
-        let p = WgParams::parse(&sk_b64, &pk_b64, None, "1.2.3.4:51820", &["10.94.1.200".into()], &[], 25)
+        let p = WgParams::parse(&sk_b64, &pk_b64, None, "1.2.3.4:51820", &["10.94.1.200".into()], &[], 25, 0)
             .expect("bare interface IP should parse");
         assert_eq!(p.interface_addrs.len(), 1);
         assert_eq!(p.interface_addrs[0].address().to_string(), "10.94.1.200");
@@ -1272,7 +1265,7 @@ mod tests {
 
     #[test]
     fn parse_rejects_bad_key() {
-        assert!(WgParams::parse("not-base64!!", "AAAA", None, "1.2.3.4:51820", &["10.0.0.2/32".into()], &[], 25).is_err());
+        assert!(WgParams::parse("not-base64!!", "AAAA", None, "1.2.3.4:51820", &["10.0.0.2/32".into()], &[], 25, 0).is_err());
     }
 
     #[test]
@@ -1281,7 +1274,7 @@ mod tests {
         let (_, pk) = keypair();
         let sk_b64 = base64::engine::general_purpose::STANDARD.encode(sk.to_bytes());
         let pk_b64 = base64::engine::general_purpose::STANDARD.encode(pk.to_bytes());
-        let p = WgParams::parse(&sk_b64, &pk_b64, None, "10.0.0.1:51820", &["10.0.0.2/32".into()], &[], 25)
+        let p = WgParams::parse(&sk_b64, &pk_b64, None, "10.0.0.1:51820", &["10.0.0.2/32".into()], &[], 25, 0)
             .expect("valid config should parse");
         assert_eq!(p.endpoint.port(), 51820);
         assert_eq!(p.keepalive_secs, Some(25));

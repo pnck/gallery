@@ -1650,7 +1650,11 @@ data class WgSettings (
      * tunnel in WgOnly mode. Empty → local resolver fallback (leaks DNS).
      */
     var `dns`: List<kotlin.String>, 
-    var `keepaliveSecs`: kotlin.UShort
+    var `keepaliveSecs`: kotlin.UShort, 
+    /**
+     * Tunnel MTU; 0 = default (1280, the safe floor for constrained paths).
+     */
+    var `mtu`: kotlin.UShort
 ) {
     
     companion object
@@ -1669,6 +1673,7 @@ public object FfiConverterTypeWgSettings: FfiConverterRustBuffer<WgSettings> {
             FfiConverterSequenceString.read(buf),
             FfiConverterSequenceString.read(buf),
             FfiConverterUShort.read(buf),
+            FfiConverterUShort.read(buf),
         )
     }
 
@@ -1679,7 +1684,8 @@ public object FfiConverterTypeWgSettings: FfiConverterRustBuffer<WgSettings> {
             FfiConverterString.allocationSize(value.`endpoint`) +
             FfiConverterSequenceString.allocationSize(value.`interfaceAddresses`) +
             FfiConverterSequenceString.allocationSize(value.`dns`) +
-            FfiConverterUShort.allocationSize(value.`keepaliveSecs`)
+            FfiConverterUShort.allocationSize(value.`keepaliveSecs`) +
+            FfiConverterUShort.allocationSize(value.`mtu`)
     )
 
     override fun write(value: WgSettings, buf: ByteBuffer) {
@@ -1690,6 +1696,7 @@ public object FfiConverterTypeWgSettings: FfiConverterRustBuffer<WgSettings> {
             FfiConverterSequenceString.write(value.`interfaceAddresses`, buf)
             FfiConverterSequenceString.write(value.`dns`, buf)
             FfiConverterUShort.write(value.`keepaliveSecs`, buf)
+            FfiConverterUShort.write(value.`mtu`, buf)
     }
 }
 

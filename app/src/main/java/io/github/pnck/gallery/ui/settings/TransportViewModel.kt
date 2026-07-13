@@ -36,6 +36,8 @@ data class TransportForm(
     val interfaceAddress: String,
     val dns: String,
     val keepaliveSecs: String,
+    /** Tunnel MTU; blank/0 = core default (1280). */
+    val mtu: String,
     val socksHost: String,
     val socksPort: String,
     val socksUser: String,

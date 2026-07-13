@@ -93,6 +93,7 @@ class TransportConnector @Inject constructor(
             interfaceAddresses = listOf(interfaceAddress.trim()),
             dns = dns.split(Regex("[,\\s]+")).map { it.trim() }.filter { it.isNotBlank() },
             persistentKeepaliveSeconds = keepaliveSecs.trim().toIntOrNull() ?: 25,
+            mtu = mtu.trim().toIntOrNull() ?: 0,
         )
     }
 
