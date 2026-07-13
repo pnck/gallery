@@ -3,9 +3,11 @@ package io.github.pnck.gallery.ui.mydrive
 import android.content.Intent
 import android.text.format.Formatter
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -33,6 +36,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -111,12 +115,27 @@ fun MyDriveScreen(
     val inSubfolder = state.stack.size > 1
     val selecting = state.selection.isNotEmpty()
     val listState = rememberLazyListState()
+    var filter by remember { mutableStateOf(DriveFilter.ALL) }
+
+    // Client-side type filter; folders always stay visible so navigation still works.
+    val shown = remember(state.entries, filter) {
+        state.entries.filter { it.isFolder || filter.matches(it.mimeType) }
+    }
+
+    // Pick a destination folder (SAF, any volume) then download the selection into it.
+    val downloadPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) viewModel.downloadSelectedTo(uri)
+    }
 
     // Infinite-ish paging: fetch the next page as the end approaches. loadMore() is a
     // no-op when there's no next page or a load is in flight, so over-calling is safe.
     LaunchedEffect(listState) {
         snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }
-            .collect { lastVisible -> if (lastVisible >= state.entries.size - 4) viewModel.loadMore() }
+            .collect { lastVisible -> if (lastVisible >= shown.size - 4) viewModel.loadMore() }
+    }
+    // When a filter hides most of a page, keep pulling pages so matches can surface.
+    LaunchedEffect(filter, state.entries.size, state.nextPageToken) {
+        if (state.nextPageToken != null && shown.size < 25) viewModel.loadMore()
     }
 
     Scaffold(
@@ -131,7 +150,7 @@ fun MyDriveScreen(
                     },
                     title = { Text(stringResource(R.string.selection_count, state.selection.size)) },
                     actions = {
-                        IconButton(onClick = viewModel::downloadSelected) {
+                        IconButton(onClick = { downloadPicker.launch(null) }) {
                             Icon(Icons.Default.Download, contentDescription = stringResource(R.string.mydrive_download))
                         }
                     },
@@ -158,32 +177,35 @@ fun MyDriveScreen(
             }
         },
     ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
-            when {
-                state.loading && state.entries.isEmpty() ->
-                    CircularProgressIndicator(Modifier.align(Alignment.Center))
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            FilterRow(selected = filter, onSelect = { filter = it })
+            Box(Modifier.fillMaxSize()) {
+                when {
+                    state.loading && state.entries.isEmpty() ->
+                        CircularProgressIndicator(Modifier.align(Alignment.Center))
 
-                state.error != null && state.entries.isEmpty() ->
-                    Text(
-                        stringResource(R.string.mydrive_error, state.error!!),
-                        Modifier.align(Alignment.Center).padding(24.dp),
-                        color = MaterialTheme.colorScheme.error,
-                        textAlign = TextAlign.Center,
-                    )
-
-                state.entries.isEmpty() ->
-                    Text(stringResource(R.string.mydrive_empty), Modifier.align(Alignment.Center))
-
-                else -> LazyColumn(Modifier.fillMaxSize(), state = listState) {
-                    items(state.entries, key = { it.id }) { entry ->
-                        DriveRow(
-                            entry = entry,
-                            selected = entry.id in state.selection,
-                            thumbModel = if (entry.isImage) "g_drive://${entry.id}" else null,
-                            sizeText = entry.sizeBytes?.let { Formatter.formatShortFileSize(context, it) },
-                            onClick = { if (selecting && !entry.isFolder) viewModel.toggleSelect(entry.id) else viewModel.open(entry) },
-                            onLongClick = { if (!entry.isFolder) viewModel.toggleSelect(entry.id) },
+                    state.error != null && state.entries.isEmpty() ->
+                        Text(
+                            stringResource(R.string.mydrive_error, state.error!!),
+                            Modifier.align(Alignment.Center).padding(24.dp),
+                            color = MaterialTheme.colorScheme.error,
+                            textAlign = TextAlign.Center,
                         )
+
+                    shown.isEmpty() ->
+                        Text(stringResource(R.string.mydrive_empty), Modifier.align(Alignment.Center))
+
+                    else -> LazyColumn(Modifier.fillMaxSize(), state = listState) {
+                        items(shown, key = { it.id }) { entry ->
+                            DriveRow(
+                                entry = entry,
+                                selected = entry.id in state.selection,
+                                thumbModel = if (entry.isImage) "g_drive://${entry.id}" else null,
+                                sizeText = entry.sizeBytes?.let { Formatter.formatShortFileSize(context, it) },
+                                onClick = { if (selecting && !entry.isFolder) viewModel.toggleSelect(entry.id) else viewModel.open(entry) },
+                                onLongClick = { if (!entry.isFolder) viewModel.toggleSelect(entry.id) },
+                            )
+                        }
                     }
                 }
             }
@@ -319,6 +341,49 @@ private fun DriveRow(
         headlineContent = { Text(entry.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent = sizeText?.let { { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
     )
+}
+
+/** File-type categories for the browser filter. Folders always show regardless. */
+enum class DriveFilter(val labelRes: Int) {
+    ALL(R.string.mydrive_filter_all),
+    IMAGES(R.string.mydrive_filter_images),
+    VIDEOS(R.string.mydrive_filter_videos),
+    DOCS(R.string.mydrive_filter_docs),
+    AUDIO(R.string.mydrive_filter_audio),
+    OTHER(R.string.mydrive_filter_other),
+    ;
+
+    fun matches(mime: String): Boolean = when (this) {
+        ALL -> true
+        IMAGES -> mime.startsWith("image/")
+        VIDEOS -> mime.startsWith("video/")
+        AUDIO -> mime.startsWith("audio/")
+        DOCS -> mime == "application/pdf" || mime.startsWith("text/") ||
+            mime.startsWith("application/vnd.google-apps") ||
+            mime.contains("word") || mime.contains("document") ||
+            mime.contains("sheet") || mime.contains("presentation") || mime.contains("excel")
+        OTHER -> !(mime.startsWith("image/") || mime.startsWith("video/") || mime.startsWith("audio/") ||
+            mime == "application/pdf" || mime.startsWith("text/") ||
+            mime.startsWith("application/vnd.google-apps") ||
+            mime.contains("word") || mime.contains("document") ||
+            mime.contains("sheet") || mime.contains("presentation") || mime.contains("excel"))
+    }
+}
+
+@Composable
+private fun FilterRow(selected: DriveFilter, onSelect: (DriveFilter) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        DriveFilter.entries.forEach { f ->
+            FilterChip(
+                selected = selected == f,
+                onClick = { onSelect(f) },
+                label = { Text(stringResource(f.labelRes)) },
+            )
+        }
+    }
 }
 
 @Composable

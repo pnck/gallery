@@ -1,10 +1,8 @@
 package io.github.pnck.gallery.ui.mydrive
 
-import android.content.ContentValues
 import android.content.Context
-import android.os.Build
-import android.os.Environment
-import android.provider.MediaStore
+import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -14,7 +12,6 @@ import io.github.pnck.gallery.provider.AuthManager
 import io.github.pnck.gallery.provider.DeviceAuthChallenge
 import io.github.pnck.gallery.provider.DriveEntry
 import io.github.pnck.gallery.provider.ICloudStorageProvider
-import java.io.File
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -176,52 +173,48 @@ class MyDriveViewModel @Inject constructor(
     /** Full-resolution authenticated URL for the image preview (Bearer added by the shared client). */
     fun originalUrl(id: String): String = "https://www.googleapis.com/drive/v3/files/$id?alt=media"
 
-    // ── Multi-select download (any file type → device Downloads) ─────────────
-    fun downloadSelected() {
+    // ── Multi-select download to a user-chosen folder (SAF, any location) ────
+    /**
+     * Download the selected files into [treeUri] — a folder the user picked via the
+     * system document-tree picker (works on any volume: Downloads, Documents, SD card…).
+     * Writing goes through SAF, so no storage permission and no useless app-private dir.
+     */
+    fun downloadSelectedTo(treeUri: Uri) {
         val ids = _state.value.selection.toList()
         if (ids.isEmpty()) return
         val byId = _state.value.entries.associateBy { it.id }
         clearSelection()
         viewModelScope.launch {
-            var ok = 0
-            var failed = 0
-            for (id in ids) {
-                val entry = byId[id] ?: continue
-                if (entry.isFolder) continue
-                if (saveToDownloads(entry)) ok++ else failed++
+            val ok: Int
+            val failed: Int
+            withContext(Dispatchers.IO) {
+                val root = DocumentsContract.buildDocumentUriUsingTree(
+                    treeUri, DocumentsContract.getTreeDocumentId(treeUri),
+                )
+                var okN = 0
+                var failN = 0
+                for (id in ids) {
+                    val entry = byId[id] ?: continue
+                    if (entry.isFolder) continue
+                    if (saveInto(root, entry)) okN++ else failN++
+                }
+                ok = okN
+                failed = failN
             }
             events.send(MyDriveEvent.Downloaded(ok, failed))
         }
     }
 
-    private suspend fun saveToDownloads(entry: DriveEntry): Boolean = withContext(Dispatchers.IO) {
+    private suspend fun saveInto(parentDoc: Uri, entry: DriveEntry): Boolean {
         val stream = when (val res = provider.downloadOriginal(entry.id)) {
             is ApiResult.Success -> res.data
-            is ApiResult.Error -> return@withContext false
+            is ApiResult.Error -> return false
         }
-        runCatching {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val values = ContentValues().apply {
-                    put(MediaStore.Downloads.DISPLAY_NAME, entry.name)
-                    put(MediaStore.Downloads.MIME_TYPE, entry.mimeType)
-                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-                    put(MediaStore.Downloads.IS_PENDING, 1)
-                }
-                val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-                val uri = context.contentResolver.insert(collection, values) ?: return@runCatching false
-                context.contentResolver.openOutputStream(uri)?.use { out -> stream.use { it.copyTo(out) } }
-                    ?: return@runCatching false
-                values.clear()
-                values.put(MediaStore.Downloads.IS_PENDING, 0)
-                context.contentResolver.update(uri, values, null, null)
-                true
-            } else {
-                // Pre-Q: app-specific external dir (no runtime permission needed).
-                val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: return@runCatching false
-                val file = File(dir, entry.name)
-                stream.use { input -> file.outputStream().use { input.copyTo(it) } }
-                true
-            }
+        return runCatching {
+            val resolver = context.contentResolver
+            val doc = DocumentsContract.createDocument(resolver, parentDoc, entry.mimeType, entry.name)
+                ?: return@runCatching false
+            resolver.openOutputStream(doc)?.use { out -> stream.use { it.copyTo(out) } } != null
         }.getOrDefault(false)
     }
 }
