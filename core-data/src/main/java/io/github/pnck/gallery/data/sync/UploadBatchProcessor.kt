@@ -57,6 +57,20 @@ class UploadBatchProcessor(
                 return@forEachIndexed
             }
             val uri = Uri.parse(localUri)
+
+            // Media access can be partial/revoked (Android 13/14 "Selected photos"): a
+            // file scanned earlier may now be unreadable. That's a PERMANENT per-file
+            // skip, not a retryable network error — otherwise the whole queue stalls on
+            // it forever. Fail fast and move on; it uploads automatically once the user
+            // grants access (the next sweep reads it fine). It stays PENDING_UPLOAD.
+            val readable = runCatching { resolver.openInputStream(uri)?.use { true } ?: false }
+                .getOrDefault(false)
+            if (!readable) {
+                Log.w(TAG, "upload: skip ${photo.id} — no read access to $localUri (grant \"All photos\"?)")
+                failed++
+                return@forEachIndexed
+            }
+
             val mime = resolver.getType(uri) ?: "image/jpeg"
             onProgress(Progress(done = index, total = pending.size, currentUri = localUri, pct = 0))
 
