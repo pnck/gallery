@@ -2,6 +2,7 @@ package io.github.pnck.gallery.data.scanner
 
 import android.content.ContentResolver
 import android.content.ContentUris
+import android.os.Build
 import android.provider.MediaStore
 import io.github.pnck.gallery.domain.MediaBucket
 import kotlinx.coroutines.Dispatchers
@@ -94,24 +95,38 @@ class LocalMediaScanner(private val resolver: ContentResolver) {
      * that don't support GROUP BY on the MediaStore provider.
      */
     suspend fun listBuckets(): List<MediaBucket> = withContext(Dispatchers.IO) {
-        val counts = LinkedHashMap<String, Pair<String, Int>>()
+        // RELATIVE_PATH ("DCIM/Camera/") is API 29+; below that fall back to the parent
+        // directory of the deprecated DATA column so same-named folders stay distinguishable.
+        val usePath = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+        @Suppress("DEPRECATION")
+        val pathCol = if (usePath) MediaStore.Images.Media.RELATIVE_PATH else MediaStore.Images.Media.DATA
+        val acc = LinkedHashMap<String, BucketAcc>()
         resolver.query(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-            arrayOf(MediaStore.Images.Media.BUCKET_ID, MediaStore.Images.Media.BUCKET_DISPLAY_NAME),
+            arrayOf(MediaStore.Images.Media.BUCKET_ID, MediaStore.Images.Media.BUCKET_DISPLAY_NAME, pathCol),
             null,
             null,
             "${MediaStore.Images.Media.BUCKET_DISPLAY_NAME} ASC",
         )?.use { cursor ->
             val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_ID)
             val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
+            val pCol = cursor.getColumnIndexOrThrow(pathCol)
             while (cursor.moveToNext()) {
                 val bucketId = cursor.getString(idCol) ?: continue
                 val name = cursor.getString(nameCol) ?: bucketId
-                val prev = counts[bucketId]
-                counts[bucketId] = name to ((prev?.second ?: 0) + 1)
+                val existing = acc[bucketId]
+                if (existing == null) {
+                    val raw = cursor.getString(pCol)
+                    val path = if (usePath) raw?.trimEnd('/') else raw?.substringBeforeLast('/', "")?.ifBlank { null }
+                    acc[bucketId] = BucketAcc(name, path, 1)
+                } else {
+                    existing.count++
+                }
             }
         }
-        counts.map { (id, nameCount) -> MediaBucket(id, nameCount.first, nameCount.second) }
+        acc.map { (id, b) -> MediaBucket(id, b.name, b.path, b.count) }
             .sortedByDescending { it.count }
     }
+
+    private class BucketAcc(val name: String, val path: String?, var count: Int)
 }

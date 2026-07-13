@@ -517,9 +517,14 @@ private fun FoldersSheet(
                 )
             }
             items(buckets, key = { it.id }) { bucket ->
+                val path = bucket.path
                 FolderRow(
                     name = bucket.name,
-                    subtitle = stringResource(R.string.folders_photo_count, bucket.count),
+                    subtitle = if (path != null) {
+                        stringResource(R.string.folders_path_count, path, bucket.count)
+                    } else {
+                        stringResource(R.string.folders_photo_count, bucket.count)
+                    },
                     checked = bucket.id in working,
                     onToggle = {
                         working = working.toMutableSet().apply { if (!add(bucket.id)) remove(bucket.id) }

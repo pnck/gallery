@@ -146,6 +146,7 @@
     <string name="folders_title">Folders to include</string>
     <string name="folders_hint">Only photos in the selected folders are shown and backed up. Choosing none includes every folder.</string>
     <string name="folders_photo_count">%1$d photos</string>
+    <string name="folders_path_count">%1$s · %2$d photos</string>
     <string name="folders_apply">Apply</string>
 
     <!-- Space management (T-302) -->

@@ -8,5 +8,8 @@ package io.github.pnck.gallery.domain
 data class MediaBucket(
     val id: String,
     val name: String,
+    /** Human-readable folder path (e.g. "DCIM/Camera/"), so same-named folders under
+     *  different paths can be told apart. Null when the platform can't provide it. */
+    val path: String?,
     val count: Int,
 )
