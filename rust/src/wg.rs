@@ -40,8 +40,12 @@ use smoltcp::wire::{DnsQueryType, HardwareAddress, IpAddress, IpCidr, IpEndpoint
 
 use crate::socks::Conn;
 
-/// Max IP packet we shuttle through the tunnel (WG adds ~32B overhead below this).
-const MTU: usize = 1420;
+/// Max IP packet we shuttle through the tunnel. Kept at the IPv6 minimum (1280) so the
+/// WG-encapsulated UDP datagram (inner + ~60B WG + 28B IP/UDP ≈ 1368) survives paths
+/// with a reduced MTU — cellular, PPPoE, nested tunnels. The classic "handshake OK but
+/// large transfers stall" is a too-large MTU: full-size data packets get dropped while
+/// small requests slip through, so TCP crawls on retransmits. 1280 is the safe floor.
+const MTU: usize = 1280;
 /// Scratch buffer for boringtun in/out (must fit MTU + WG framing).
 const SCRATCH: usize = 2048;
 /// Per-connection app↔socket buffer high-water mark (backpressure).
@@ -760,6 +764,10 @@ impl Driver {
         let mut last_hs_attempt = StdInstant::now();
         let mut last_timers = StdInstant::now();
         let mut established = false;
+        // Periodic throughput heartbeat so the log shows whether data is actually moving.
+        let mut last_stats_log = StdInstant::now();
+        let mut last_tx: usize = 0;
+        let mut last_rx: usize = 0;
 
         loop {
             if self.stopped.load(Ordering::SeqCst) {
@@ -969,6 +977,17 @@ impl Driver {
             self.rx_bytes.store(rx as u64, Ordering::SeqCst);
             let ok = since_handshake.is_some();
             self.handshake_ok.store(ok, Ordering::SeqCst);
+            // Throughput heartbeat every ~5s: shows whether bytes are actually flowing
+            // (an empty log otherwise looks like "wg isn't running"). Rates in KiB/s.
+            if last_stats_log.elapsed() >= Duration::from_secs(5) {
+                let secs = last_stats_log.elapsed().as_secs_f64().max(0.001);
+                let up = (tx.saturating_sub(last_tx) as f64 / secs / 1024.0) as u64;
+                let down = (rx.saturating_sub(last_rx) as f64 / secs / 1024.0) as u64;
+                log::info!("wg: link ok={ok} tx={tx}B rx={rx}B ({up} KiB/s up, {down} KiB/s down)");
+                last_stats_log = StdInstant::now();
+                last_tx = tx;
+                last_rx = rx;
+            }
             // Log establish/lose transitions and keep re-initiating until up.
             if ok && !established {
                 established = true;

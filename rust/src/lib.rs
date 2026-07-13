@@ -91,12 +91,14 @@ fn init_logging() {
         use std::sync::Once;
         static INIT: Once = Once::new();
         INIT.call_once(|| {
-            // Transport is quiet by default (warn+) so logcat stays focused on the
-            // app layer; flip GALLERY_WG_LOG=debug to bring the wg/socks traces back.
+            // Default to info: the driver lifecycle + a periodic throughput heartbeat
+            // are visible (so an empty log doesn't look like "wg isn't running"), but the
+            // per-packet debug flood stays off. Flip GALLERY_WG_LOG=debug for packet traces
+            // or =warn to quiet it back down.
             let spec = std::env::var("GALLERY_WG_LOG")
                 .ok()
                 .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| "warn".to_string());
+                .unwrap_or_else(|| "info".to_string());
             let filter = env_filter::Builder::new().parse(&spec).build();
             android_logger::init_once(
                 android_logger::Config::default()
