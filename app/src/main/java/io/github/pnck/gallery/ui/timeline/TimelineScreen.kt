@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Settings
@@ -128,6 +129,7 @@ private fun mediaPermission(): String =
 fun TimelineScreen(
     onPhotoClick: (String) -> Unit,
     onSettingsClick: () -> Unit,
+    onOpenDrawer: () -> Unit = {},
     viewModel: TimelineViewModel = hiltViewModel(),
 ) {
     val photos = viewModel.photosFlow.collectAsLazyPagingItems()
@@ -242,6 +244,11 @@ fun TimelineScreen(
                 )
             } else {
                 TopAppBar(
+                    navigationIcon = {
+                        IconButton(onClick = onOpenDrawer) {
+                            Icon(Icons.Default.Menu, contentDescription = stringResource(R.string.open_drawer))
+                        }
+                    },
                     title = {
                         Text(
                             text = syncStatusLabel(syncStatus),
