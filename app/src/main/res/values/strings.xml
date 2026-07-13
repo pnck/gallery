@@ -81,6 +81,8 @@
     <string name="sync_count_cloud">Cloud only</string>
     <string name="sync_queue_title">Queue</string>
     <string name="sync_queue_empty">Nothing running</string>
+    <string name="rebuild_sync">Rebuild sync state</string>
+    <string name="rebuild_sync_hint">Re-checks every photo against your cloud by content and fixes any wrong badges. Doesn\'t delete photos.</string>
     <string name="clear_queue">Clear backup queue</string>
     <string name="clear_queue_title">Clear backup queue?</string>
     <string name="clear_queue_message">%1$d photos will stop backing up automatically. They stay on your device, and you can still back up individual photos by selecting them.</string>

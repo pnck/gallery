@@ -40,6 +40,10 @@ interface PhotoDao {
     @Query("SELECT * FROM photos WHERE id IN (:ids)")
     suspend fun getByIds(ids: List<String>): List<PhotoEntity>
 
+    /** Every row — the reconcile-from-truth pass diffs the whole table against cloud + local. */
+    @Query("SELECT * FROM photos")
+    suspend fun getAllRows(): List<PhotoEntity>
+
     /** Cloud ids already tracked for a provider — downstream sync inserts only new ones. */
     @Query("SELECT cloudId FROM photos WHERE provider = :provider AND cloudId IS NOT NULL")
     suspend fun getKnownCloudIds(provider: String): List<String>
@@ -101,10 +105,19 @@ interface PhotoDao {
     @Query("SELECT * FROM photos WHERE localUri = :localUri LIMIT 1")
     suspend fun findByLocalUri(localUri: String): PhotoEntity?
 
-    /** Backfill size/folder for an existing local row (e.g. after the v3 migration,
-     *  which defaults sizeBytes to 0 until the next scan sees the row). */
-    @Query("UPDATE photos SET sizeBytes = :sizeBytes, bucketId = :bucketId, bucketName = :bucketName WHERE localUri = :localUri")
-    suspend fun updateLocalMeta(localUri: String, sizeBytes: Long, bucketId: String?, bucketName: String?)
+    /** Backfill size/folder/mtime for an existing local row (e.g. after a migration
+     *  that defaults these until the next scan sees the row). */
+    @Query(
+        "UPDATE photos SET sizeBytes = :sizeBytes, bucketId = :bucketId, bucketName = :bucketName, " +
+            "dateModifiedSec = :dateModifiedSec WHERE localUri = :localUri",
+    )
+    suspend fun updateLocalMeta(
+        localUri: String,
+        sizeBytes: Long,
+        bucketId: String?,
+        bucketName: String?,
+        dateModifiedSec: Long,
+    )
 
     /** Live per-state totals for the sync-status panel (PRD §9.1). */
     @Query(

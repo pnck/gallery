@@ -54,6 +54,7 @@ class MediaReconciler(
                     contentHashValue = null,
                     cloudThumbnailUrl = null,
                     dateTaken = item.dateTakenMs,
+                    dateModifiedSec = item.dateModifiedSec,
                     width = item.width,
                     height = item.height,
                     sizeBytes = item.sizeBytes,
@@ -63,7 +64,9 @@ class MediaReconciler(
                 )
             } else if (existing.sizeBytes == 0L || existing.bucketId == null) {
                 // Backfill metadata for a row that predates the v3 columns (upgraded lib).
-                photoDao.updateLocalMeta(item.contentUri, item.sizeBytes, item.bucketId, item.bucketName)
+                photoDao.updateLocalMeta(
+                    item.contentUri, item.sizeBytes, item.bucketId, item.bucketName, item.dateModifiedSec,
+                )
             }
         }
         if (fresh.isNotEmpty()) photoDao.upsertAll(fresh)

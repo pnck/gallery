@@ -10,7 +10,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [PhotoEntity::class, SyncKeyEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 @TypeConverters(SyncStateConverter::class)
@@ -39,10 +39,17 @@ abstract class GalleryDatabase : RoomDatabase() {
             }
         }
 
+        /** v4: `dateModifiedSec` validates the cached content hash for reconcile-from-truth. */
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE photos ADD COLUMN dateModifiedSec INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         /** Single construction point so Room stays an implementation detail of :core-data. */
         fun create(context: Context): GalleryDatabase =
             Room.databaseBuilder(context, GalleryDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
     }
 }

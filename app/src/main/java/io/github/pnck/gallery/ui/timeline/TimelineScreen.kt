@@ -363,6 +363,7 @@ fun TimelineScreen(
                 counts = syncCounts,
                 queue = queue,
                 onSyncNow = viewModel::backupNow,
+                onRebuild = { showStatus = false; viewModel.rebuildSyncState() },
                 onClearQueue = { showStatus = false; showClearConfirm = true },
             )
         }
@@ -627,6 +628,7 @@ private fun SyncStatusSheet(
     counts: SyncCounts,
     queue: List<SyncJob>,
     onSyncNow: () -> Unit,
+    onRebuild: () -> Unit,
     onClearQueue: () -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {
@@ -671,6 +673,15 @@ private fun SyncStatusSheet(
         FilledTonalButton(onClick = onSyncNow, modifier = Modifier.fillMaxWidth()) {
             Text(stringResource(R.string.force_sync))
         }
+        Spacer(Modifier.height(8.dp))
+        TextButton(onClick = onRebuild, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.rebuild_sync))
+        }
+        Text(
+            stringResource(R.string.rebuild_sync_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         if (counts.pendingUpload > 0) {
             Spacer(Modifier.height(8.dp))
             TextButton(onClick = onClearQueue, modifier = Modifier.fillMaxWidth()) {

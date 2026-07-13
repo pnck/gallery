@@ -21,6 +21,7 @@ import io.github.pnck.gallery.data.scanner.LocalMediaScanner
 import io.github.pnck.gallery.data.settings.AppSettingsStore
 import io.github.pnck.gallery.data.sync.DownstreamSyncProcessor
 import io.github.pnck.gallery.data.sync.MediaReconciler
+import io.github.pnck.gallery.data.sync.ReconcileProcessor
 import io.github.pnck.gallery.data.sync.UploadBatchProcessor
 import io.github.pnck.gallery.domain.PhotoRepository
 import io.github.pnck.gallery.network.SharedHttpClient
@@ -218,6 +219,16 @@ object AppModule {
         photoDao: PhotoDao,
         syncKeyDao: SyncKeyDao,
     ): DownstreamSyncProcessor = DownstreamSyncProcessor(provider, photoDao, syncKeyDao)
+
+    @Provides
+    @Singleton
+    fun provideReconcileProcessor(
+        provider: ICloudStorageProvider,
+        photoDao: PhotoDao,
+        scanner: LocalMediaScanner,
+        settings: AppSettingsStore,
+        resolver: ContentResolver,
+    ): ReconcileProcessor = ReconcileProcessor(provider, photoDao, scanner, settings, resolver)
 
     @Provides
     @Singleton

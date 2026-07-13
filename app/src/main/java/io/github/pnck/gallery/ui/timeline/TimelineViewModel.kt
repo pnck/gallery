@@ -207,11 +207,13 @@ class TimelineViewModel @Inject constructor(
         workManager.getWorkInfosForUniqueWorkFlow(SyncPipeline.UNIQUE_NAME),
         workManager.getWorkInfosForUniqueWorkFlow(SyncPipeline.TARGETED_NAME),
         workManager.getWorkInfosForUniqueWorkFlow(SyncPipeline.PERIODIC_NAME),
-    ) { pipeline, targeted, periodic ->
+        workManager.getWorkInfosForUniqueWorkFlow(SyncPipeline.RECONCILE_NAME),
+    ) { pipeline, targeted, periodic, reconcile ->
         listOfNotNull(
             pipeline.activeState()?.let { SyncJob("Full sync", it) },
             targeted.activeState()?.let { SyncJob("Selected upload", it) },
             periodic.activeState()?.let { SyncJob("Background sync", it) },
+            reconcile.activeState()?.let { SyncJob("Rebuild sync state", it) },
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -252,6 +254,12 @@ class TimelineViewModel @Inject constructor(
             SyncPipeline.enqueueTargeted(workManager, ids)
             events.send(TimelineEvent.SyncQueued(ids.size))
         }
+    }
+
+    /** "Rebuild sync state": run the reconcile-from-truth pass (full cloud + local diff,
+     *  prune drift). Self-heals phantom/stale rows without touching any files. */
+    fun rebuildSyncState() {
+        SyncPipeline.enqueueReconcile(workManager)
     }
 
     /** "Clear queue": stop the current sweep and drop all waiting photos from backup. */

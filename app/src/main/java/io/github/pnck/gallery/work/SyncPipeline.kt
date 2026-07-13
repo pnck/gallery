@@ -19,6 +19,7 @@ object SyncPipeline {
     const val UNIQUE_NAME = "sync_pipeline"
     const val TARGETED_NAME = "sync_targeted"
     const val PERIODIC_NAME = "periodic_sync"
+    const val RECONCILE_NAME = "sync_reconcile"
 
     /**
      * Background incremental keep-up while the app is closed (T-304). Idempotent —
@@ -77,6 +78,22 @@ object SyncPipeline {
             ExistingWorkPolicy.REPLACE,
             uploadRequest(input),
         )
+    }
+
+    /**
+     * "Rebuild sync state": the reconcile-from-truth pass (full cloud + local diff,
+     * prune drift). REPLACE so a fresh request supersedes a stalled one.
+     */
+    fun enqueueReconcile(workManager: WorkManager) {
+        val request = OneTimeWorkRequestBuilder<ReconcileWorker>()
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build(),
+            )
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+            .build()
+        workManager.enqueueUniqueWork(RECONCILE_NAME, ExistingWorkPolicy.REPLACE, request)
     }
 
     private fun uploadRequest(input: Data = Data.EMPTY) =

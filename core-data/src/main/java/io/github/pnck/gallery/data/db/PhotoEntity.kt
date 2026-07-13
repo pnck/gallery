@@ -32,6 +32,9 @@ data class PhotoEntity(
     val cloudThumbnailUrl: String?,
     /** Unix ms — the ONLY ordering key of the timeline. */
     val dateTaken: Long,
+    /** MediaStore DATE_MODIFIED (sec); with [sizeBytes] it validates the cached MD5 —
+     *  if either changed the file changed, so the stored hash is stale. */
+    val dateModifiedSec: Long = 0,
     val width: Int,
     val height: Int,
     /** File size in bytes; 0 when unknown (e.g. a cloud row before metadata is known). */
