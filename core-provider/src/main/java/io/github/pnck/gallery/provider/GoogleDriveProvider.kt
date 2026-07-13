@@ -108,6 +108,24 @@ class GoogleDriveProvider(
     override suspend fun downloadOriginal(cloudId: String): ApiResult<InputStream> =
         safeApiCall({ api.downloadFile(cloudId) }) { it.byteStream() }
 
+    override suspend fun browse(folderId: String, pageToken: String?): ApiResult<DriveListing> =
+        safeApiCall({
+            api.browseFolder(q = "'$folderId' in parents and trashed = false", pageToken = pageToken)
+        }) { resp ->
+            DriveListing(
+                entries = resp.files.map { dto ->
+                    DriveEntry(
+                        id = dto.id,
+                        name = dto.name ?: dto.id,
+                        mimeType = dto.mimeType ?: "application/octet-stream",
+                        sizeBytes = dto.size,
+                        thumbnailUrl = dto.thumbnailLink,
+                    )
+                },
+                nextPageToken = resp.nextPageToken,
+            )
+        }
+
     override suspend fun getFileMetadata(cloudId: String): ApiResult<CloudFile> =
         safeApiCall({ api.getFile(cloudId) }) { DriveMappers.toCloudFile(it) }
 

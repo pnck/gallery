@@ -56,6 +56,7 @@ class DeviceFlowAuthManagerTest {
         clientId = "cid",
         clientSecret = "csecret",
         scope = "scope",
+        readScope = "scope readscope",
         deviceCodeEndpoint = "https://example/device",
         tokenEndpoint = "https://example/token",
         api = api,

@@ -11,6 +11,8 @@ data class StoredTokens(
     val accessToken: String,
     val accessExpiryEpochMs: Long,
     val refreshToken: String,
+    /** Space-separated granted scopes — used to tell if the "My Drive" read grant is present. */
+    val scope: String = "",
 )
 
 /**
@@ -47,7 +49,8 @@ class EncryptedTokenStore(appContext: Context) : TokenStore {
         val refresh = prefs.getString(key(provider, REFRESH), null) ?: return null
         val access = prefs.getString(key(provider, ACCESS), null) ?: return null
         val expiry = prefs.getLong(key(provider, EXPIRY), 0L)
-        return StoredTokens(access, expiry, refresh)
+        val scope = prefs.getString(key(provider, SCOPE), "").orEmpty()
+        return StoredTokens(access, expiry, refresh, scope)
     }
 
     override fun write(provider: ProviderType, tokens: StoredTokens) {
@@ -55,6 +58,7 @@ class EncryptedTokenStore(appContext: Context) : TokenStore {
             .putString(key(provider, ACCESS), tokens.accessToken)
             .putLong(key(provider, EXPIRY), tokens.accessExpiryEpochMs)
             .putString(key(provider, REFRESH), tokens.refreshToken)
+            .putString(key(provider, SCOPE), tokens.scope)
             .apply()
     }
 
@@ -63,6 +67,7 @@ class EncryptedTokenStore(appContext: Context) : TokenStore {
             .remove(key(provider, ACCESS))
             .remove(key(provider, EXPIRY))
             .remove(key(provider, REFRESH))
+            .remove(key(provider, SCOPE))
             .apply()
     }
 
@@ -72,5 +77,6 @@ class EncryptedTokenStore(appContext: Context) : TokenStore {
         const val ACCESS = "access_token"
         const val EXPIRY = "access_expiry"
         const val REFRESH = "refresh_token"
+        const val SCOPE = "granted_scope"
     }
 }

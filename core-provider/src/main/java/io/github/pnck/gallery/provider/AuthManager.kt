@@ -14,8 +14,15 @@ import io.github.pnck.gallery.network.ApiResult
 interface AuthManager {
     val providerType: ProviderType
 
-    /** Step 1: obtain a device + user code to display (PRD §5, RFC 8628). */
-    suspend fun requestDeviceAuthorization(): ApiResult<DeviceAuthChallenge>
+    /**
+     * Step 1: obtain a device + user code to display (PRD §5, RFC 8628).
+     * @param readAccess when true, requests the elevated drive.readonly scope for the
+     *   "My Drive" browser (separate opt-in); the default backup flow passes false.
+     */
+    suspend fun requestDeviceAuthorization(readAccess: Boolean = false): ApiResult<DeviceAuthChallenge>
+
+    /** Whether the stored grant includes broad Drive-read (the "My Drive" browser). */
+    fun hasDriveRead(): Boolean
 
     /**
      * Step 2: poll the token endpoint until the user approves (or the code
@@ -57,6 +64,14 @@ object OAuthConfig {
 
         /** drive.file only touches files this app created — BYOS least privilege (PRD §5.3). */
         const val SCOPE = "https://www.googleapis.com/auth/drive.file"
+
+        /**
+         * Elevated scope for the SEPARATE "My Drive" browser only: drive.file (write,
+         * unchanged) + drive.readonly (read the user's whole Drive, incl. files this app
+         * didn't create). Requested on its own, never by the default backup flow.
+         */
+        const val SCOPE_DRIVE_READ =
+            "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly"
     }
 
     object Microsoft {

@@ -42,6 +42,10 @@ class OneDriveProvider(
         TODO("T-103: GET /me/drive/items/{id}/content")
     }
 
+    override suspend fun browse(folderId: String, pageToken: String?): ApiResult<DriveListing> {
+        TODO("T-103: GET /me/drive/items/{id}/children — all types, folder facet")
+    }
+
     override suspend fun getThumbnailUrl(cloudId: String): ApiResult<String> {
         TODO("T-103: GET /items/{id}/thumbnails — pre-authorized URL, direct fetch")
     }

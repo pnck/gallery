@@ -25,6 +25,8 @@ data class DriveUser(
 data class DriveFileDTO(
     val id: String,
     val name: String? = null,
+    /** e.g. "image/jpeg", "application/pdf", "application/vnd.google-apps.folder". */
+    val mimeType: String? = null,
     val size: Long? = null,
     val md5Checksum: String? = null,
     /** Requires an Authorization: Bearer header to fetch (PRD §8.3). */

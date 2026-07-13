@@ -23,6 +23,8 @@ class DeviceFlowAuthManager(
     private val clientId: String,
     private val clientSecret: String,
     private val scope: String,
+    /** Elevated scope for the "My Drive" browser (drive.file + drive.readonly). */
+    private val readScope: String,
     private val deviceCodeEndpoint: String,
     private val tokenEndpoint: String,
     private val api: DeviceAuthApiService,
@@ -32,11 +34,20 @@ class DeviceFlowAuthManager(
 
     private val refreshMutex = Mutex()
 
-    override suspend fun requestDeviceAuthorization(): ApiResult<DeviceAuthChallenge> {
+    /** The scope of the in-flight authorization, persisted with the resulting token. */
+    @Volatile
+    private var pendingScope: String = scope
+
+    override fun hasDriveRead(): Boolean =
+        tokenStore.read(providerType)?.scope?.contains("drive.readonly") == true
+
+    override suspend fun requestDeviceAuthorization(readAccess: Boolean): ApiResult<DeviceAuthChallenge> {
         if (clientId.isBlank()) {
             return ApiResult.Error(-1, "OAuth client id not configured (GALLERY_GOOGLE_CLIENT_ID)", false)
         }
-        return safeApiCall({ api.requestDeviceCode(deviceCodeEndpoint, clientId, scope) }) { body ->
+        val requested = if (readAccess) readScope else scope
+        pendingScope = requested
+        return safeApiCall({ api.requestDeviceCode(deviceCodeEndpoint, clientId, requested) }) { body ->
             DeviceAuthChallenge(
                 deviceCode = body.deviceCode,
                 userCode = body.userCode,
@@ -61,7 +72,7 @@ class DeviceFlowAuthManager(
 
             val body = response.body()
             if (response.isSuccessful && body?.accessToken != null && body.refreshToken != null) {
-                persist(body.accessToken, body.refreshToken, body.expiresIn)
+                persist(body.accessToken, body.refreshToken, body.expiresIn, pendingScope)
                 return ApiResult.Success(Unit)
             }
 
@@ -94,7 +105,8 @@ class DeviceFlowAuthManager(
             val body = response.body()
             if (response.isSuccessful && body?.accessToken != null) {
                 // refresh_token may rotate; fall back to the existing one if absent.
-                persist(body.accessToken, body.refreshToken ?: fresh.refreshToken, body.expiresIn)
+                // Preserve the granted scope across refreshes.
+                persist(body.accessToken, body.refreshToken ?: fresh.refreshToken, body.expiresIn, fresh.scope)
                 body.accessToken
             } else {
                 throw AuthNotAuthorizedException(providerType)
@@ -106,9 +118,9 @@ class DeviceFlowAuthManager(
 
     override suspend fun signOut() = tokenStore.clear(providerType)
 
-    private fun persist(accessToken: String, refreshToken: String, expiresInSec: Int?) {
+    private fun persist(accessToken: String, refreshToken: String, expiresInSec: Int?, scope: String) {
         val expiry = now() + (expiresInSec ?: DEFAULT_EXPIRY_SEC) * 1000L
-        tokenStore.write(providerType, StoredTokens(accessToken, expiry, refreshToken))
+        tokenStore.write(providerType, StoredTokens(accessToken, expiry, refreshToken, scope))
     }
 
     private fun parseError(raw: String): String? =
@@ -128,6 +140,7 @@ class DeviceFlowAuthManager(
             clientId = clientId,
             clientSecret = clientSecret,
             scope = OAuthConfig.Google.SCOPE,
+            readScope = OAuthConfig.Google.SCOPE_DRIVE_READ,
             deviceCodeEndpoint = OAuthConfig.Google.DEVICE_CODE_ENDPOINT,
             tokenEndpoint = OAuthConfig.Google.TOKEN_ENDPOINT,
             api = api,

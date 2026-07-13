@@ -90,6 +90,20 @@ interface DriveApiService {
             "id, name, size, md5Checksum, thumbnailLink, imageMediaMetadata",
     ): Response<DriveFileDTO>
 
+    /**
+     * Browse a folder's direct children — ALL file types (My Drive feature). Needs the
+     * drive.readonly grant to see files this app didn't create. Folders sort first.
+     */
+    @GET("drive/v3/files")
+    suspend fun browseFolder(
+        @Query("q") q: String,
+        @Query("pageToken") pageToken: String?,
+        @Query("orderBy") orderBy: String = "folder,name",
+        @Query("pageSize") pageSize: Int = 200,
+        @Query("fields") fields: String =
+            "nextPageToken, files(id, name, mimeType, size, thumbnailLink)",
+    ): Response<DriveFileListResponse>
+
     @Streaming
     @GET("drive/v3/files/{fileId}?alt=media")
     suspend fun downloadFile(@Path("fileId") fileId: String): Response<ResponseBody>

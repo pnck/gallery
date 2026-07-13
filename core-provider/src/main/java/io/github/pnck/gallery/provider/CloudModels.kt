@@ -44,6 +44,35 @@ data class CloudPage(
     val nextPageToken: String?,
 )
 
+/**
+ * A generic entry in the "My Drive" browser (any file type, incl. folders). This is
+ * the separate broad-read feature — distinct from [CloudFile], which is the backup
+ * layer's photo model. Requires drive.readonly.
+ */
+data class DriveEntry(
+    val id: String,
+    val name: String,
+    val mimeType: String,
+    /** Null for folders / when Drive omits it. */
+    val sizeBytes: Long?,
+    /** Short-lived thumbnail URL (needs a Bearer header); null for non-previewable types. */
+    val thumbnailUrl: String?,
+) {
+    val isFolder: Boolean get() = mimeType == FOLDER_MIME
+    val isImage: Boolean get() = mimeType.startsWith("image/")
+
+    companion object {
+        const val FOLDER_MIME = "application/vnd.google-apps.folder"
+        /** Drive's virtual root folder id (the "My Drive" top level). */
+        const val ROOT_ID = "root"
+    }
+}
+
+data class DriveListing(
+    val entries: List<DriveEntry>,
+    val nextPageToken: String?,
+)
+
 /** Result of a delta/changes query (PRD §4.3). */
 data class CloudChangeSet(
     val upserted: List<CloudFile>,

@@ -43,6 +43,13 @@ interface ICloudStorageProvider {
     suspend fun downloadOriginal(cloudId: String): ApiResult<InputStream>
 
     /**
+     * Browse ANY folder in the user's Drive (all file types + subfolders) for the
+     * separate "My Drive" feature. Needs the broad drive.readonly grant — the backup
+     * layer never calls this. Use [DriveEntry.ROOT_ID] for the top level.
+     */
+    suspend fun browse(folderId: String, pageToken: String?): ApiResult<DriveListing>
+
+    /**
      * Current cloud metadata (id, content hash, size, dims). Used to *verify* a
      * photo really exists in the cloud with matching content before releasing its
      * local copy (PRD §7.3) — the anti-data-loss guard for "free up space".
