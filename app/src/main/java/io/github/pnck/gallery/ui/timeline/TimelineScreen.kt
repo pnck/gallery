@@ -47,13 +47,14 @@ import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Sync
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
@@ -156,6 +157,7 @@ fun TimelineScreen(
     var showClearConfirm by remember { mutableStateOf(false) }
     var showViewOptions by remember { mutableStateOf(false) }
     var showFolders by remember { mutableStateOf(false) }
+    var showMenu by remember { mutableStateOf(false) }
 
     // Pinch to change thumbnail density (Google-Photos grid zoom).
     val cellSizes: List<Dp> = remember { listOf(72.dp, 100.dp, 148.dp) }
@@ -250,23 +252,41 @@ fun TimelineScreen(
                         }
                     },
                     title = {
-                        Text(
-                            text = syncStatusLabel(syncStatus),
-                            modifier = Modifier.clickable { showStatus = true },
-                        )
+                        // Plain title + a small spinner while syncing — the title is NOT a
+                        // menu (see docs/GALLERY-UX-INTERACTION.md). Sync status lives in the
+                        // overflow menu / status sheet.
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(stringResource(R.string.timeline_title))
+                            if (syncStatus !is SyncStatus.Idle) {
+                                Spacer(Modifier.width(10.dp))
+                                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                            }
+                        }
                     },
                     actions = {
-                        IconButton(onClick = { showViewOptions = true }) {
-                            Icon(Icons.Default.Tune, contentDescription = stringResource(R.string.view_options))
-                        }
                         IconButton(onClick = viewModel::enterSelectionMode) {
                             Icon(Icons.Default.Checklist, contentDescription = stringResource(R.string.action_select))
                         }
-                        IconButton(onClick = viewModel::backupNow) {
-                            Icon(Icons.Default.Sync, contentDescription = stringResource(R.string.force_sync))
+                        IconButton(onClick = { showMenu = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more))
                         }
-                        IconButton(onClick = onSettingsClick) {
-                            Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.settings))
+                        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.view_options)) },
+                                onClick = { showMenu = false; showViewOptions = true },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.backup_now)) },
+                                onClick = { showMenu = false; viewModel.backupNow() },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.sync_status_title)) },
+                                onClick = { showMenu = false; showStatus = true },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.settings)) },
+                                onClick = { showMenu = false; onSettingsClick() },
+                            )
                         }
                     },
                 )
@@ -825,13 +845,6 @@ private fun SyncStateBadge(state: SyncState, excluded: Boolean, modifier: Modifi
             modifier = Modifier.size(15.dp),
         )
     }
-}
-
-@Composable
-private fun syncStatusLabel(status: SyncStatus): String = when (status) {
-    is SyncStatus.Idle -> stringResource(R.string.app_name)
-    is SyncStatus.Scanning -> stringResource(R.string.sync_scanning)
-    is SyncStatus.Uploading -> stringResource(R.string.sync_uploading, status.done, status.total)
 }
 
 @Composable
