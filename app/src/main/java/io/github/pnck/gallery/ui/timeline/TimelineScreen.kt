@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
@@ -94,7 +95,6 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.work.WorkInfo
 import coil3.compose.AsyncImage
 import io.github.pnck.gallery.R
@@ -132,7 +132,7 @@ fun TimelineScreen(
     onOpenDrawer: () -> Unit = {},
     viewModel: TimelineViewModel = hiltViewModel(),
 ) {
-    val photos = viewModel.photosFlow.collectAsLazyPagingItems()
+    val photos by viewModel.photos.collectAsState()
     val syncStatus by viewModel.syncStatus.collectAsState()
     val selection by viewModel.selection.collectAsState()
     val selectionMode by viewModel.selectionActive.collectAsState()
@@ -299,7 +299,7 @@ fun TimelineScreen(
                 onPause = viewModel::pauseBackup,
                 onResume = viewModel::resumeBackup,
             )
-            if (photos.itemCount == 0) {
+            if (photos.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
                         text = stringResource(R.string.timeline_empty),
@@ -307,65 +307,52 @@ fun TimelineScreen(
                     )
                 }
             } else {
+                // Group into year sections (Google-Photos style) when sorted by date;
+                // other sorts (size) show a flat grid with no headers.
+                val cells = remember(photos, sort) { buildTimelineCells(photos, sort) }
                 Box(Modifier.fillMaxSize()) {
-                LazyVerticalGrid(
-                    state = gridState,
-                    columns = GridCells.Adaptive(minSize = cellSizes[cellIndex]),
-                    modifier = Modifier.fillMaxSize().pinchToStep(
-                        onZoomIn = { cellIndex = (cellIndex + 1).coerceAtMost(cellSizes.lastIndex) },
-                        onZoomOut = { cellIndex = (cellIndex - 1).coerceAtLeast(0) },
-                    ),
-                ) {
-                items(
-                    count = photos.itemCount,
-                    key = { index -> photos.peek(index)?.id ?: index },
-                ) { index ->
-                    val photo = photos[index] ?: return@items
-                    val selected = photo.id in selection
-                    Box(
-                        Modifier
-                            .aspectRatio(1f)
-                            .combinedClickable(
-                                onClick = {
-                                    if (selectionMode) viewModel.toggleSelection(photo.id)
-                                    else onPhotoClick(photo.id)
-                                },
-                                onLongClick = {
-                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    viewModel.toggleSelection(photo.id)
-                                },
-                            ),
+                    LazyVerticalGrid(
+                        state = gridState,
+                        columns = GridCells.Adaptive(minSize = cellSizes[cellIndex]),
+                        modifier = Modifier.fillMaxSize().pinchToStep(
+                            onZoomIn = { cellIndex = (cellIndex + 1).coerceAtMost(cellSizes.lastIndex) },
+                            onZoomOut = { cellIndex = (cellIndex - 1).coerceAtLeast(0) },
+                        ),
                     ) {
-                        AsyncImage(
-                            model = photo.renderUri,
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                        SyncStateBadge(
-                            state = photo.syncState,
-                            excluded = photo.excluded,
-                            modifier = Modifier.align(Alignment.TopEnd).padding(4.dp),
-                        )
-                        if (selectionMode) {
-                            val accent = MaterialTheme.colorScheme.primary
-                            if (selected) {
-                                Box(Modifier.fillMaxSize().background(accent.copy(alpha = 0.25f)))
+                        items(
+                            count = cells.size,
+                            key = { i -> when (val c = cells[i]) {
+                                is GridCell.Header -> "h:${c.label}"
+                                is GridCell.Item -> c.photo.id
+                            } },
+                            span = { i -> if (cells[i] is GridCell.Header) GridItemSpan(maxLineSpan) else GridItemSpan(1) },
+                        ) { i ->
+                            when (val c = cells[i]) {
+                                is GridCell.Header -> Text(
+                                    c.label,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    modifier = Modifier.fillMaxWidth().padding(start = 12.dp, top = 16.dp, bottom = 6.dp),
+                                )
+                                is GridCell.Item -> PhotoCell(
+                                    photo = c.photo,
+                                    selectionMode = selectionMode,
+                                    selected = c.photo.id in selection,
+                                    onClick = {
+                                        if (selectionMode) viewModel.toggleSelection(c.photo.id)
+                                        else onPhotoClick(c.photo.id)
+                                    },
+                                    onLongClick = {
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        viewModel.toggleSelection(c.photo.id)
+                                    },
+                                )
                             }
-                            Icon(
-                                imageVector = if (selected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
-                                contentDescription = null,
-                                tint = if (selected) accent else Color.White,
-                                modifier = Modifier.align(Alignment.TopStart).padding(4.dp).size(22.dp),
-                            )
                         }
                     }
-                }
-            }
                     FastScroller(
                         state = gridState,
-                        itemCount = photos.itemCount,
-                        labelForIndex = { i -> photos.peek(i)?.dateTaken?.let(::yearMonthLabel) },
+                        itemCount = cells.size,
+                        labelForIndex = { i -> cells.getOrNull(i)?.let(::cellDateLabel) },
                         modifier = Modifier.align(Alignment.TopEnd),
                     )
                 }
@@ -575,10 +562,91 @@ private fun FolderRow(name: String, subtitle: String?, checked: Boolean, onToggl
     )
 }
 
+/** A row in the sectioned timeline grid: a full-width date header or one photo. */
+private sealed interface GridCell {
+    data class Header(val label: String) : GridCell
+    data class Item(val photo: io.github.pnck.gallery.domain.TimelinePhoto) : GridCell
+}
+
+/** Interleave year-section headers between photos when sorted by date (Google-Photos
+ *  style). Size sorts show a flat grid — grouping by year would be meaningless there. */
+private fun buildTimelineCells(
+    photos: List<io.github.pnck.gallery.domain.TimelinePhoto>,
+    sort: TimelineSort,
+): List<GridCell> {
+    val dated = sort == TimelineSort.DATE_DESC || sort == TimelineSort.DATE_ASC
+    if (!dated) return photos.map { GridCell.Item(it) }
+    val out = ArrayList<GridCell>(photos.size + 16)
+    var lastYear = Int.MIN_VALUE
+    for (p in photos) {
+        val year = yearOf(p.dateTaken)
+        if (year != lastYear) {
+            out += GridCell.Header(year.toString())
+            lastYear = year
+        }
+        out += GridCell.Item(p)
+    }
+    return out
+}
+
+/** The fast-scroll bubble label for a cell: its header text, or a photo's year-month. */
+private fun cellDateLabel(cell: GridCell): String = when (cell) {
+    is GridCell.Header -> cell.label
+    is GridCell.Item -> yearMonthLabel(cell.photo.dateTaken)
+}
+
+private val yearCalendar = java.util.Calendar.getInstance()
+
+private fun yearOf(epochMs: Long): Int {
+    yearCalendar.timeInMillis = epochMs
+    return yearCalendar.get(java.util.Calendar.YEAR)
+}
+
 /** Year-month label for the fast-scroll bubble (e.g. "Jul 2026"). */
 private val yearMonthFormat = SimpleDateFormat("MMM yyyy", Locale.getDefault())
 
 private fun yearMonthLabel(epochMs: Long): String = yearMonthFormat.format(java.util.Date(epochMs))
+
+/** One photo cell: thumbnail + sync badge + selection affordance. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun PhotoCell(
+    photo: io.github.pnck.gallery.domain.TimelinePhoto,
+    selectionMode: Boolean,
+    selected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
+    Box(
+        Modifier
+            .aspectRatio(1f)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+    ) {
+        AsyncImage(
+            model = photo.renderUri,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+        )
+        SyncStateBadge(
+            state = photo.syncState,
+            excluded = photo.excluded,
+            modifier = Modifier.align(Alignment.TopEnd).padding(4.dp),
+        )
+        if (selectionMode) {
+            val accent = MaterialTheme.colorScheme.primary
+            if (selected) {
+                Box(Modifier.fillMaxSize().background(accent.copy(alpha = 0.25f)))
+            }
+            Icon(
+                imageVector = if (selected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                contentDescription = null,
+                tint = if (selected) accent else Color.White,
+                modifier = Modifier.align(Alignment.TopStart).padding(4.dp).size(22.dp),
+            )
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

@@ -2,7 +2,6 @@ package io.github.pnck.gallery.ui.timeline
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.paging.cachedIn
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -12,6 +11,7 @@ import io.github.pnck.gallery.domain.MediaBucket
 import io.github.pnck.gallery.domain.PhotoRepository
 import io.github.pnck.gallery.domain.SyncCounts
 import io.github.pnck.gallery.domain.SyncFilter
+import io.github.pnck.gallery.domain.TimelinePhoto
 import io.github.pnck.gallery.domain.TimelineSort
 import io.github.pnck.gallery.ui.util.DeleteConfirm
 import io.github.pnck.gallery.ui.util.DeleteRequest
@@ -97,10 +97,14 @@ class TimelineViewModel @Inject constructor(
     private val _buckets = MutableStateFlow<List<MediaBucket>>(emptyList())
     val buckets: StateFlow<List<MediaBucket>> = _buckets.asStateFlow()
 
-    /** PagingData is collected in the UI, never stored in a state object (PRD §9.2). */
-    val photosFlow = queryHolder.query
-        .flatMapLatest { repo.getPagedTimelinePhotos(it) }
-        .cachedIn(viewModelScope)
+    /**
+     * The whole ordered/filtered timeline (metadata only). The grid groups it into
+     * date sections (year headers) and the side fast-scroller maps a scroll position to
+     * its date — both need the full positional list, so this replaces paging here.
+     */
+    val photos: StateFlow<List<TimelinePhoto>> = queryHolder.query
+        .flatMapLatest { repo.getTimeline(it) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     init {
         // One-time upgrade fix: rows created before the v3 size/bucket columns have
