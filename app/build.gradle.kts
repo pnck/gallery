@@ -52,6 +52,20 @@ android {
             "GOOGLE_OAUTH_CLIENT_SECRET",
             "\"${providers.gradleProperty("GALLERY_GOOGLE_CLIENT_SECRET").getOrElse("")}\"",
         )
+        // A SEPARATE "Desktop app" OAuth client, used ONLY by the "My Drive" browser
+        // (auth-code + loopback, like rclone) for the broad drive.readonly grant that
+        // the device-flow client can't request. Empty until backfilled; the feature
+        // stays disabled without it. Keep OUT of the repo (gradle props / CI secrets).
+        buildConfigField(
+            "String",
+            "GOOGLE_DESKTOP_CLIENT_ID",
+            "\"${providers.gradleProperty("GALLERY_GOOGLE_DESKTOP_CLIENT_ID").getOrElse("")}\"",
+        )
+        buildConfigField(
+            "String",
+            "GOOGLE_DESKTOP_CLIENT_SECRET",
+            "\"${providers.gradleProperty("GALLERY_GOOGLE_DESKTOP_CLIENT_SECRET").getOrElse("")}\"",
+        )
     }
 
     buildTypes {

@@ -95,6 +95,8 @@ jobs:
           -PGALLERY_VERSION_CODE=${{ github.run_number }}
           -PGALLERY_GOOGLE_CLIENT_ID=${{ secrets.GALLERY_GOOGLE_CLIENT_ID }}
           -PGALLERY_GOOGLE_CLIENT_SECRET=${{ secrets.GALLERY_GOOGLE_CLIENT_SECRET }}
+          -PGALLERY_GOOGLE_DESKTOP_CLIENT_ID=${{ secrets.GALLERY_GOOGLE_DESKTOP_CLIENT_ID }}
+          -PGALLERY_GOOGLE_DESKTOP_CLIENT_SECRET=${{ secrets.GALLERY_GOOGLE_DESKTOP_CLIENT_SECRET }}
           --stacktrace
 
       # Fail loudly if the transport core .so didn't make it into the APK — a

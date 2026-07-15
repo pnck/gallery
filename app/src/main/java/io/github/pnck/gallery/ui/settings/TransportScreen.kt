@@ -1,5 +1,7 @@
 package io.github.pnck.gallery.ui.settings
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -38,6 +40,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import io.github.pnck.gallery.network.transport.WgQuickConfig
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import io.github.pnck.gallery.BuildConfig
@@ -115,6 +119,48 @@ fun TransportScreen(
         interfaceAddress = interfaceAddress, dns = dns, keepaliveSecs = keepalive, mtu = mtu,
         socksHost = socksHost, socksPort = socksPort, socksUser = socksUser, socksPass = socksPass,
     )
+
+    // Interop with the official WireGuard app via standard wg-quick .conf files.
+    val context = LocalContext.current
+    var ioMessage by remember { mutableStateOf<String?>(null) }
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream"),
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                val conf = WgQuickConfig(
+                    privateKey = privateKey.trim(),
+                    address = interfaceAddress.trim(),
+                    dns = dns.trim(),
+                    mtu = mtu.trim().toIntOrNull(),
+                    peerPublicKey = peerPublicKey.trim(),
+                    presharedKey = presharedKey.trim().ifBlank { null },
+                    endpoint = endpoint.trim(),
+                    allowedIps = WgQuickConfig.DEFAULT_ALLOWED_IPS,
+                    persistentKeepalive = keepalive.trim().toIntOrNull(),
+                ).serialize()
+                context.contentResolver.openOutputStream(uri)?.use { it.write(conf.toByteArray()) }
+            }.onSuccess { ioMessage = "Exported WireGuard config" }
+                .onFailure { ioMessage = "Export failed: ${it.message}" }
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                val text = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }.orEmpty()
+                WgQuickConfig.parse(text)
+            }.onSuccess { c ->
+                wgEnabled = true; useSrv = false
+                privateKey = c.privateKey; peerPublicKey = c.peerPublicKey
+                presharedKey = c.presharedKey.orEmpty(); endpoint = c.endpoint
+                interfaceAddress = c.address; dns = c.dns
+                mtu = c.mtu?.toString().orEmpty(); keepalive = c.persistentKeepalive?.toString() ?: "25"
+                ioMessage = "Imported — review and Connect"
+            }.onFailure { ioMessage = "Import failed: ${it.message}" }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -203,6 +249,27 @@ fun TransportScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = { exportLauncher.launch("gallery-wg.conf") },
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Export .conf") }
+                    OutlinedButton(
+                        onClick = { importLauncher.launch(arrayOf("*/*")) },
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Import .conf") }
+                }
+                Text(
+                    "Interoperate with the official WireGuard app (its export/import format).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                ioMessage?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                }
             }
 
             toggleRow("Upstream SOCKS5", socksEnabled) { socksEnabled = it }
