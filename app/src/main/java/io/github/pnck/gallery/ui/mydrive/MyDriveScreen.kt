@@ -1,6 +1,5 @@
 package io.github.pnck.gallery.ui.mydrive
 
-import android.content.Intent
 import android.text.format.Formatter
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -66,7 +65,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil3.compose.AsyncImage
 import io.github.pnck.gallery.R
@@ -105,10 +103,11 @@ fun MyDriveScreen(
 
     if (!state.granted) {
         MyDriveGate(
+            configured = state.configured,
             onEnable = viewModel::enableBrowsing,
             onOpenDrawer = onOpenDrawer,
         )
-        ElevateDialogs(state.elevating, context, viewModel::enableBrowsing, viewModel::cancelElevate)
+        ElevateDialogs(state.elevating, viewModel::enableBrowsing, viewModel::cancelElevate)
         return
     }
 
@@ -200,7 +199,7 @@ fun MyDriveScreen(
                             DriveRow(
                                 entry = entry,
                                 selected = entry.id in state.selection,
-                                thumbModel = if (entry.isImage) "g_drive://${entry.id}" else null,
+                                thumbModel = if (entry.isImage) viewModel.thumbModel(entry) else null,
                                 sizeText = entry.sizeBytes?.let { Formatter.formatShortFileSize(context, it) },
                                 onClick = { if (selecting && !entry.isFolder) viewModel.toggleSelect(entry.id) else viewModel.open(entry) },
                                 onLongClick = { if (!entry.isFolder) viewModel.toggleSelect(entry.id) },
@@ -213,13 +212,13 @@ fun MyDriveScreen(
     }
 
     state.preview?.let { entry ->
-        ImagePreview(url = viewModel.originalUrl(entry.id), name = entry.name, onClose = viewModel::closePreview)
+        ImagePreview(model = viewModel.imageModel(entry.id), name = entry.name, onClose = viewModel::closePreview)
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MyDriveGate(onEnable: () -> Unit, onOpenDrawer: () -> Unit) {
+private fun MyDriveGate(configured: Boolean, onEnable: () -> Unit, onOpenDrawer: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -248,7 +247,16 @@ private fun MyDriveGate(onEnable: () -> Unit, onOpenDrawer: () -> Unit) {
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(24.dp))
-            Button(onClick = onEnable) { Text(stringResource(R.string.mydrive_enable)) }
+            Button(onClick = onEnable, enabled = configured) { Text(stringResource(R.string.mydrive_enable)) }
+            if (!configured) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    stringResource(R.string.mydrive_not_configured),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    textAlign = TextAlign.Center,
+                )
+            }
         }
     }
 }
@@ -256,47 +264,23 @@ private fun MyDriveGate(onEnable: () -> Unit, onOpenDrawer: () -> Unit) {
 @Composable
 private fun ElevateDialogs(
     phase: ElevatePhase,
-    context: android.content.Context,
     onRetry: () -> Unit,
     onCancel: () -> Unit,
 ) {
     when (phase) {
         ElevatePhase.Idle -> Unit
-        ElevatePhase.Requesting -> AlertDialog(
+        // The browser opened for consent; we wait for the loopback redirect to return.
+        ElevatePhase.Working -> AlertDialog(
             onDismissRequest = onCancel,
-            title = { Text(stringResource(R.string.auth_requesting_title)) },
+            title = { Text(stringResource(R.string.mydrive_auth_title)) },
             text = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(Modifier.size(20.dp))
                     Spacer(Modifier.size(16.dp))
-                    Text(stringResource(R.string.auth_requesting_body))
+                    Text(stringResource(R.string.mydrive_auth_body))
                 }
             },
             confirmButton = {},
-            dismissButton = { TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) } },
-        )
-        is ElevatePhase.Approve -> AlertDialog(
-            onDismissRequest = onCancel,
-            title = { Text(stringResource(R.string.auth_device_title)) },
-            text = {
-                Text(
-                    stringResource(
-                        R.string.auth_device_body,
-                        phase.challenge.userCode,
-                        phase.challenge.verificationUrl,
-                    ),
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    runCatching {
-                        context.startActivity(
-                            Intent(Intent.ACTION_VIEW, phase.challenge.verificationUrl.toUri())
-                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                        )
-                    }
-                }) { Text(stringResource(R.string.auth_device_open)) }
-            },
             dismissButton = { TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) } },
         )
         is ElevatePhase.Failed -> AlertDialog(
@@ -314,7 +298,7 @@ private fun ElevateDialogs(
 private fun DriveRow(
     entry: DriveEntry,
     selected: Boolean,
-    thumbModel: String?,
+    thumbModel: Any?,
     sizeText: String?,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
@@ -387,11 +371,11 @@ private fun FilterRow(selected: DriveFilter, onSelect: (DriveFilter) -> Unit) {
 }
 
 @Composable
-private fun ImagePreview(url: String, name: String, onClose: () -> Unit) {
+private fun ImagePreview(model: Any, name: String, onClose: () -> Unit) {
     Surface(color = Color.Black, modifier = Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize()) {
             ZoomableAsyncImage(
-                model = url,
+                model = model,
                 contentDescription = name,
                 modifier = Modifier.fillMaxSize(),
             )

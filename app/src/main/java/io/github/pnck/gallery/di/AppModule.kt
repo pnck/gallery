@@ -7,6 +7,8 @@ import coil3.ImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import com.squareup.moshi.Moshi
 import io.github.pnck.gallery.ui.coil.ProviderUriFetcher
+import io.github.pnck.gallery.ui.mydrive.DriveReadAccess
+import io.github.pnck.gallery.ui.mydrive.DriveReadUrlFetcher
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -129,12 +131,16 @@ object AppModule {
     fun provideImageLoader(
         @ApplicationContext context: Context,
         client: OkHttpClient,
+        @AuthClient bareClient: OkHttpClient,
         provider: ICloudStorageProvider,
+        driveReadAccess: DriveReadAccess,
     ): ImageLoader =
         ImageLoader.Builder(context)
             .components {
                 add(OkHttpNetworkFetcherFactory(callFactory = { client }))
                 add(ProviderUriFetcher.Factory(provider, client))
+                // "My Drive" images ride the separate drive.readonly token on the bare client.
+                add(DriveReadUrlFetcher.Factory(driveReadAccess, bareClient))
             }
             .build()
 

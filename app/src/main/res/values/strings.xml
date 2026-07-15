@@ -13,6 +13,9 @@
     <string name="mydrive_gate_title">Browse your whole Drive</string>
     <string name="mydrive_gate_body">See and open every file and folder in your Drive — not just photos. This is separate from backup: it asks for read access to your whole Drive, while backup only ever touches its own folder. Handy for files added outside the app or moved between accounts, and for re-syncing photos by content.</string>
     <string name="mydrive_enable">Enable Drive browsing</string>
+    <string name="mydrive_not_configured">Drive browsing isn\'t set up in this build (no Desktop OAuth client).</string>
+    <string name="mydrive_auth_title">Authorize in your browser</string>
+    <string name="mydrive_auth_body">Approve read access in the browser that just opened, then return here.</string>
     <string name="mydrive_download">Download</string>
     <string name="mydrive_downloaded">Downloaded %1$d file(s), %2$d failed</string>
     <string name="mydrive_error">Couldn\'t load Drive: %1$s</string>

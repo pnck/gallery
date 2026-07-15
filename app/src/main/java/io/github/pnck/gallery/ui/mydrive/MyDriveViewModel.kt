@@ -7,11 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import io.github.pnck.gallery.network.ApiResult
-import io.github.pnck.gallery.provider.AuthManager
-import io.github.pnck.gallery.provider.DeviceAuthChallenge
 import io.github.pnck.gallery.provider.DriveEntry
-import io.github.pnck.gallery.provider.ICloudStorageProvider
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -25,15 +21,17 @@ import kotlinx.coroutines.withContext
 /** A folder in the browse breadcrumb. */
 data class Crumb(val id: String, val name: String)
 
-/** The separate drive.readonly grant + device-flow elevation state. */
+/** The separate drive.readonly grant + browser-consent elevation state. */
 sealed interface ElevatePhase {
     data object Idle : ElevatePhase
-    data object Requesting : ElevatePhase
-    data class Approve(val challenge: DeviceAuthChallenge) : ElevatePhase
+
+    /** Browser opened; waiting for the loopback redirect to complete the grant. */
+    data object Working : ElevatePhase
     data class Failed(val message: String) : ElevatePhase
 }
 
 data class MyDriveState(
+    val configured: Boolean = true,
     val granted: Boolean = false,
     val elevating: ElevatePhase = ElevatePhase.Idle,
     val stack: List<Crumb> = listOf(Crumb(DriveEntry.ROOT_ID, "")),
@@ -52,18 +50,20 @@ sealed interface MyDriveEvent {
 }
 
 /**
- * "My Drive" browser (separate broad-read feature): drive.readonly elevation, folder
- * navigation over ALL file types, image preview, and multi-select download. Kept apart
- * from the backup flow, which stays on least-privilege drive.file.
+ * "My Drive" browser (separate broad-read feature): browser-consent drive.readonly
+ * elevation (via [DriveReadAccess], rclone-style loopback), folder navigation over ALL
+ * file types, image preview, and multi-select download. Fully apart from the backup
+ * flow, which stays on least-privilege drive.file.
  */
 @HiltViewModel
 class MyDriveViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val auth: AuthManager,
-    private val provider: ICloudStorageProvider,
+    private val driveRead: DriveReadAccess,
 ) : ViewModel() {
 
-    private val _state = MutableStateFlow(MyDriveState(granted = auth.hasDriveRead()))
+    private val _state = MutableStateFlow(
+        MyDriveState(configured = driveRead.configured, granted = driveRead.isAuthorized()),
+    )
     val state = _state.asStateFlow()
 
     private val events = Channel<MyDriveEvent>(Channel.BUFFERED)
@@ -75,25 +75,17 @@ class MyDriveViewModel @Inject constructor(
         if (_state.value.granted) loadFolder(DriveEntry.ROOT_ID)
     }
 
-    // ── drive.readonly elevation (device flow, separate from backup sign-in) ──
+    // ── drive.readonly elevation (browser consent, separate from backup sign-in) ──
     fun enableBrowsing() {
         if (elevateJob?.isActive == true) return
         elevateJob = viewModelScope.launch {
-            _state.value = _state.value.copy(elevating = ElevatePhase.Requesting)
-            when (val challenge = auth.requestDeviceAuthorization(readAccess = true)) {
-                is ApiResult.Success -> {
-                    _state.value = _state.value.copy(elevating = ElevatePhase.Approve(challenge.data))
-                    when (val res = auth.pollForToken(challenge.data)) {
-                        is ApiResult.Success -> {
-                            _state.value = _state.value.copy(granted = true, elevating = ElevatePhase.Idle)
-                            loadFolder(DriveEntry.ROOT_ID)
-                        }
-                        is ApiResult.Error ->
-                            _state.value = _state.value.copy(elevating = ElevatePhase.Failed(res.message))
-                    }
-                }
-                is ApiResult.Error ->
-                    _state.value = _state.value.copy(elevating = ElevatePhase.Failed(challenge.message))
+            _state.value = _state.value.copy(elevating = ElevatePhase.Working)
+            val error = driveRead.authorize()
+            if (error == null) {
+                _state.value = _state.value.copy(granted = true, elevating = ElevatePhase.Idle)
+                loadFolder(DriveEntry.ROOT_ID)
+            } else {
+                _state.value = _state.value.copy(elevating = ElevatePhase.Failed(error))
             }
         }
     }
@@ -108,13 +100,16 @@ class MyDriveViewModel @Inject constructor(
     private fun loadFolder(folderId: String, append: Boolean = false) {
         viewModelScope.launch {
             _state.value = _state.value.copy(loading = true, error = null)
-            when (val res = provider.browse(folderId, if (append) _state.value.nextPageToken else null)) {
-                is ApiResult.Success -> _state.value = _state.value.copy(
-                    entries = if (append) _state.value.entries + res.data.entries else res.data.entries,
-                    nextPageToken = res.data.nextPageToken,
+            runCatching {
+                driveRead.browse(folderId, if (append) _state.value.nextPageToken else null)
+            }.onSuccess { listing ->
+                _state.value = _state.value.copy(
+                    entries = if (append) _state.value.entries + listing.entries else listing.entries,
+                    nextPageToken = listing.nextPageToken,
                     loading = false,
                 )
-                is ApiResult.Error -> _state.value = _state.value.copy(loading = false, error = res.message)
+            }.onFailure {
+                _state.value = _state.value.copy(loading = false, error = it.message)
             }
         }
     }
@@ -170,15 +165,13 @@ class MyDriveViewModel @Inject constructor(
         _state.value = _state.value.copy(preview = null)
     }
 
-    /** Full-resolution authenticated URL for the image preview (Bearer added by the shared client). */
-    fun originalUrl(id: String): String = "https://www.googleapis.com/drive/v3/files/$id?alt=media"
+    /** Coil model for a thumbnail / full image, loaded with the drive.readonly token. */
+    fun thumbModel(entry: DriveEntry): DriveReadUrl? = entry.thumbnailUrl?.let { DriveReadUrl(it) }
+
+    fun imageModel(id: String): DriveReadUrl =
+        DriveReadUrl("https://www.googleapis.com/drive/v3/files/$id?alt=media")
 
     // ── Multi-select download to a user-chosen folder (SAF, any location) ────
-    /**
-     * Download the selected files into [treeUri] — a folder the user picked via the
-     * system document-tree picker (works on any volume: Downloads, Documents, SD card…).
-     * Writing goes through SAF, so no storage permission and no useless app-private dir.
-     */
     fun downloadSelectedTo(treeUri: Uri) {
         val ids = _state.value.selection.toList()
         if (ids.isEmpty()) return
@@ -205,16 +198,12 @@ class MyDriveViewModel @Inject constructor(
         }
     }
 
-    private suspend fun saveInto(parentDoc: Uri, entry: DriveEntry): Boolean {
-        val stream = when (val res = provider.downloadOriginal(entry.id)) {
-            is ApiResult.Success -> res.data
-            is ApiResult.Error -> return false
+    private suspend fun saveInto(parentDoc: Uri, entry: DriveEntry): Boolean = runCatching {
+        val resolver = context.contentResolver
+        val doc = DocumentsContract.createDocument(resolver, parentDoc, entry.mimeType, entry.name)
+            ?: return@runCatching false
+        driveRead.download(entry.id).use { input ->
+            resolver.openOutputStream(doc)?.use { out -> input.copyTo(out) } != null
         }
-        return runCatching {
-            val resolver = context.contentResolver
-            val doc = DocumentsContract.createDocument(resolver, parentDoc, entry.mimeType, entry.name)
-                ?: return@runCatching false
-            resolver.openOutputStream(doc)?.use { out -> stream.use { it.copyTo(out) } } != null
-        }.getOrDefault(false)
-    }
+    }.getOrDefault(false)
 }
