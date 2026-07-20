@@ -1109,7 +1109,7 @@ impl Driver {
             }
 
             // 9. Reap fully-closed connections so long sessions don't accumulate
-            //    smoltcp sockets (each holds 128 KiB of buffers).
+            //    smoltcp sockets (each holds 512 KiB of buffers).
             conns.retain(|shared| {
                 let g = shared.inner.lock().unwrap();
                 let drained = g.recv_finished && g.app_write_closed && g.to_socket.is_empty();
@@ -1147,8 +1147,11 @@ impl Driver {
         // Retry on ephemeral-port collision (a wrapped counter can land on a port
         // still held by a live socket).
         for _ in 0..8 {
-            let rx = tcp::SocketBuffer::new(vec![0u8; 64 * 1024]);
-            let tx = tcp::SocketBuffer::new(vec![0u8; 64 * 1024]);
+            // 256 KiB per direction: per-conn throughput ceiling ≈ window/RTT, and
+            // a WG-accelerated path's RTT is easily 100-400 ms — 64 KiB buffers
+            // would cap a single upload at ~160-640 KB/s.
+            let rx = tcp::SocketBuffer::new(vec![0u8; 256 * 1024]);
+            let tx = tcp::SocketBuffer::new(vec![0u8; 256 * 1024]);
             let mut sock = tcp::Socket::new(rx, tx);
             sock.set_nagle_enabled(false);
             // Liveness: without these a SYN to a blackholed address retransmits

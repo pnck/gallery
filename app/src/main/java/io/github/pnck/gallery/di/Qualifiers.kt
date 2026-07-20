@@ -10,3 +10,13 @@ import javax.inject.Qualifier
 @Qualifier
 @Retention(AnnotationRetention.BINARY)
 annotation class AuthClient
+
+/**
+ * The bulk-transfer OkHttpClient for resumable upload chunks — HTTP/1.1 on its
+ * own connection pool so parallel uploads get real parallel tunnel connections
+ * (H2 would coalesce them onto one) and bulk traffic can't starve interactive
+ * requests (SharedHttpClient.buildUploadClient).
+ */
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class UploadClient

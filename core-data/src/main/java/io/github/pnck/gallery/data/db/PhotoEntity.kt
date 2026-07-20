@@ -51,6 +51,12 @@ data class PhotoEntity(
      * sync clears this.
      */
     val excluded: Boolean = false,
+    /** Consecutive upload batch attempts that included this file and failed — a
+     *  poisoned file is skipped after the cap so it can't head-of-line-block the
+     *  queue. Reset on success, on reconcile, and on explicit user sync. */
+    val uploadAttempts: Int = 0,
+    /** Wall ms of the last batch attempt (per-file backoff, diagnostics). */
+    val lastUploadAttemptAt: Long = 0,
 )
 
 /** RemoteMediator cursors (PRD §3.4): initial paging tokens + delta tokens per target. */
@@ -61,4 +67,21 @@ data class SyncKeyEntity(
     val nextPageToken: String?,
     /** Drive startPageToken / Graph deltaLink. */
     val deltaToken: String?,
+)
+
+/**
+ * A persisted Drive resumable-upload session (PRD §4.4). Written at session init,
+ * [bytesConfirmed] advanced after every chunk ack, deleted on completion — so an
+ * interrupted upload (killed process, dead tunnel, reboot) resumes at the
+ * server-confirmed offset instead of restarting from byte 0.
+ */
+@Entity(tableName = "upload_sessions")
+data class UploadSessionEntity(
+    @PrimaryKey val photoId: String,
+    val sessionUri: String,
+    /** Bytes the SERVER has confirmed — the next offset to send. */
+    val bytesConfirmed: Long,
+    val totalBytes: Long,
+    val mimeType: String,
+    val updatedAtEpochMs: Long,
 )

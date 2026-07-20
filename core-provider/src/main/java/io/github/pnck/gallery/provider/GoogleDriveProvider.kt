@@ -7,7 +7,9 @@ import io.github.pnck.gallery.network.ApiResult
 import io.github.pnck.gallery.provider.api.DriveApiService
 import io.github.pnck.gallery.provider.dto.DriveUploadMetadata
 import io.github.pnck.gallery.provider.mapper.DriveMappers
-import io.github.pnck.gallery.provider.upload.ContentUriRequestBody
+import io.github.pnck.gallery.provider.upload.ContentUriRangeRequestBody
+import io.github.pnck.gallery.provider.upload.ResumableUploader
+import io.github.pnck.gallery.provider.upload.UploadSessionStore
 import java.io.IOException
 import java.io.InputStream
 import kotlinx.coroutines.sync.Mutex
@@ -19,12 +21,16 @@ import kotlinx.coroutines.sync.withLock
  * Auth: the shared OkHttpClient injects `Authorization: Bearer` for googleapis
  * hosts via GoogleAuthInterceptor — methods here never touch tokens directly.
  *
- * Upload: resumable session for every size (single-shot PUT). Simpler than the
- * multipart/resumable split and immune to Drive's 5 MB multipart cap; chunked
- * resume across worker wake-ups is a follow-up (PRD §4.4).
+ * Upload: true resumable sessions via [ResumableUploader] (PRD §4.4) — chunked
+ * PUTs with Content-Range, server-confirmed offsets persisted per photo, and
+ * MD5 verification of the final object. The [uploadApi] is a SEPARATE Retrofit
+ * instance on the isolated upload client (HTTP/1.1, own pool) so bulk transfers
+ * get real parallel TCP connections instead of coalescing onto one HTTP/2
+ * stream that interactive requests also depend on.
  */
 class GoogleDriveProvider(
     private val api: DriveApiService,
+    private val uploadApi: DriveApiService,
     private val resolver: ContentResolver,
     /** Current backup-folder name (user-configurable); read fresh so changes apply. */
     private val folderName: suspend () -> String = { DEFAULT_FOLDER_NAME },
@@ -74,39 +80,56 @@ class GoogleDriveProvider(
     }
 
     override suspend fun uploadFile(
+        photoId: String,
         uri: Uri,
         mimeType: String,
+        totalBytes: Long,
+        expectedMd5: String?,
+        sessions: UploadSessionStore,
         onProgress: (Int) -> Unit,
     ): ApiResult<CloudFile> {
         val parents = ensureFolderId()?.let { listOf(it) }
-        val sessionUri = try {
-            val init = api.initResumableUpload(
-                DriveUploadMetadata(name = displayNameOf(uri), mimeType = mimeType, parents = parents),
+        val metadata = DriveUploadMetadata(name = displayNameOf(uri), mimeType = mimeType, parents = parents)
+        return when (
+            val res = ResumableUploader(uploadApi).upload(
+                photoId = photoId,
+                chunkBody = { offset, length -> ContentUriRangeRequestBody(resolver, uri, offset, length, mimeType) },
+                mimeType = mimeType,
+                totalBytes = totalBytes,
+                expectedMd5 = expectedMd5,
+                metadata = metadata,
+                sessions = sessions,
+                onProgress = onProgress,
             )
-            if (!init.isSuccessful) {
-                return ApiResult.Error(
-                    code = init.code(),
-                    message = init.errorBody()?.string()?.take(500) ?: init.message(),
-                    retryable = init.code() == 429 || init.code() in 500..599,
-                )
-            }
-            init.headers()["Location"]
-                ?: return ApiResult.Error(-1, "Resumable init returned no session URI", retryable = true)
-        } catch (e: IOException) {
-            return ApiResult.Error(-1, e.message ?: "Network I/O error", retryable = true)
-        }
-
-        val body = ContentUriRequestBody(resolver, uri, mimeType, onProgress)
-        return safeApiCall({ api.uploadToSession(sessionUri, body) }) {
-            DriveMappers.toCloudFile(it)
+        ) {
+            is ApiResult.Success -> ApiResult.Success(DriveMappers.toCloudFile(res.data))
+            is ApiResult.Error -> res
         }
     }
 
     override suspend fun deleteFile(cloudId: String): ApiResult<Unit> =
         safeApiCall({ api.deleteFile(cloudId) }) { }
 
-    override suspend fun downloadOriginal(cloudId: String): ApiResult<InputStream> =
-        safeApiCall({ api.downloadFile(cloudId) }) { it.byteStream() }
+    override suspend fun downloadOriginal(cloudId: String, offset: Long): ApiResult<InputStream> = try {
+        val resp = api.downloadFile(cloudId, range = if (offset > 0) "bytes=$offset-" else null)
+        when {
+            // A resume MUST come back 206 — a 200 is the whole file, and appending
+            // it at `offset` would corrupt the partial download.
+            resp.isSuccessful && resp.body() != null && (offset == 0L || resp.code() == 206) ->
+                ApiResult.Success(resp.body()!!.byteStream())
+            resp.isSuccessful -> {
+                resp.body()?.close()
+                ApiResult.Error(416, "range request not honored (got ${resp.code()})", retryable = false)
+            }
+            else -> ApiResult.Error(
+                code = resp.code(),
+                message = resp.errorBody()?.string()?.take(500) ?: resp.message(),
+                retryable = resp.code() == 429 || resp.code() in 500..599,
+            )
+        }
+    } catch (e: IOException) {
+        ApiResult.Error(-1, e.message ?: "Network I/O error", retryable = true)
+    }
 
     override suspend fun browse(folderId: String, pageToken: String?): ApiResult<DriveListing> =
         safeApiCall({

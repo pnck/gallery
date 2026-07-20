@@ -9,8 +9,8 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [PhotoEntity::class, SyncKeyEntity::class],
-    version = 4,
+    entities = [PhotoEntity::class, SyncKeyEntity::class, UploadSessionEntity::class],
+    version = 5,
     exportSchema = true,
 )
 @TypeConverters(SyncStateConverter::class)
@@ -18,6 +18,8 @@ abstract class GalleryDatabase : RoomDatabase() {
     abstract fun photoDao(): PhotoDao
 
     abstract fun syncKeyDao(): SyncKeyDao
+
+    abstract fun uploadSessionDao(): UploadSessionDao
 
     companion object {
         const val NAME = "gallery.db"
@@ -46,10 +48,28 @@ abstract class GalleryDatabase : RoomDatabase() {
             }
         }
 
+        /** v5: true resumable uploads — persisted sessions (PRD §4.4) + per-file
+         *  attempt counters so a poisoned file can't head-of-line-block the queue. */
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `upload_sessions` (" +
+                        "`photoId` TEXT NOT NULL PRIMARY KEY, " +
+                        "`sessionUri` TEXT NOT NULL, " +
+                        "`bytesConfirmed` INTEGER NOT NULL, " +
+                        "`totalBytes` INTEGER NOT NULL, " +
+                        "`mimeType` TEXT NOT NULL, " +
+                        "`updatedAtEpochMs` INTEGER NOT NULL)",
+                )
+                db.execSQL("ALTER TABLE photos ADD COLUMN uploadAttempts INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE photos ADD COLUMN lastUploadAttemptAt INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         /** Single construction point so Room stays an implementation detail of :core-data. */
         fun create(context: Context): GalleryDatabase =
             Room.databaseBuilder(context, GalleryDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build()
     }
 }

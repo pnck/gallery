@@ -60,8 +60,29 @@ interface PhotoDao {
     @Query("SELECT * FROM photos WHERE provider = :provider AND contentHashType = :type AND contentHashValue = :value LIMIT 1")
     suspend fun findByContentHash(provider: String, type: String, value: String): PhotoEntity?
 
-    @Query("SELECT * FROM photos WHERE syncState = 0 AND excluded = 0")
+    /**
+     * Pending uploads, small files first (quick wins; a huge/poisoned file never
+     * blocks the queue) and capped at [MAX_UPLOAD_ATTEMPTS] per file — a file past
+     * the cap is revived by reconcile or an explicit user sync, both of which
+     * reset the counter.
+     */
+    @Query(
+        "SELECT * FROM photos WHERE syncState = 0 AND excluded = 0 AND uploadAttempts < 8 " +
+            "ORDER BY sizeBytes ASC, dateTaken ASC",
+    )
     suspend fun getPendingUploads(): List<PhotoEntity>
+
+    /**
+     * Atomically claim a row for upload: bumps the attempt counter ONLY if the row
+     * is still PENDING_UPLOAD. 0 rows changed = another worker/state transition
+     * owns it — the caller must skip (prevents the targeted-vs-bulk double upload).
+     */
+    @Query("UPDATE photos SET uploadAttempts = uploadAttempts + 1, lastUploadAttemptAt = :now WHERE id = :id AND syncState = 0")
+    suspend fun claimUpload(id: String, now: Long): Int
+
+    /** Fresh chances: reconcile re-derived the truth, or the user explicitly syncs. */
+    @Query("UPDATE photos SET uploadAttempts = 0 WHERE id IN (:ids)")
+    suspend fun resetUploadAttempts(ids: List<String>)
 
     /** "Clear queue": drop every waiting photo out of automatic backup (kept visible). */
     @Query("UPDATE photos SET excluded = 1 WHERE syncState = 0")
@@ -75,7 +96,7 @@ interface PhotoDao {
     @Query("SELECT * FROM photos WHERE id IN (:ids) AND syncState = 0")
     suspend fun getPendingByIds(ids: List<String>): List<PhotoEntity>
 
-    @Query("UPDATE photos SET cloudId = :cloudId, provider = :provider, syncState = 1 WHERE id = :id")
+    @Query("UPDATE photos SET cloudId = :cloudId, provider = :provider, syncState = 1, uploadAttempts = 0 WHERE id = :id")
     suspend fun markAsSynced(id: String, cloudId: String, provider: String)
 
     @Query("UPDATE photos SET localUri = NULL, syncState = 2 WHERE id IN (:ids)")

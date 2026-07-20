@@ -3,6 +3,7 @@ package io.github.pnck.gallery.provider
 import android.net.Uri
 import io.github.pnck.gallery.network.ApiResult
 import io.github.pnck.gallery.provider.api.GraphApiService
+import io.github.pnck.gallery.provider.upload.UploadSessionStore
 import java.io.InputStream
 
 /**
@@ -27,8 +28,12 @@ class OneDriveProvider(
     }
 
     override suspend fun uploadFile(
+        photoId: String,
         uri: Uri,
         mimeType: String,
+        totalBytes: Long,
+        expectedMd5: String?,
+        sessions: UploadSessionStore,
         onProgress: (Int) -> Unit,
     ): ApiResult<CloudFile> {
         TODO("T-103: simple PUT (<4MB) / createUploadSession chunked PUT (PRD §4.4)")
@@ -38,7 +43,7 @@ class OneDriveProvider(
         TODO("T-103: DELETE /me/drive/items/{id}")
     }
 
-    override suspend fun downloadOriginal(cloudId: String): ApiResult<InputStream> {
+    override suspend fun downloadOriginal(cloudId: String, offset: Long): ApiResult<InputStream> {
         TODO("T-103: GET /me/drive/items/{id}/content")
     }
 

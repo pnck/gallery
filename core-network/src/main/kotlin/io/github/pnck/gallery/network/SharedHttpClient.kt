@@ -29,15 +29,21 @@ import okhttp3.Protocol
 object SharedHttpClient {
 
     /**
-     * ONE pool shared by every client built here (app client, bare auth client,
-     * upload client): pooled connections all die together when the route flips,
-     * and [evictAll] below covers all of them in one call. A per-client pool let
-     * token calls keep dead tunnel connections across reconnects.
+     * ONE pool shared by every client built here (app client, bare auth client):
+     * pooled connections all die together when the route flips, and [evictAll]
+     * below covers all of them in one call. A per-client pool let token calls
+     * keep dead tunnel connections across reconnects.
      */
     private val sharedPool = ConnectionPool(15, 5, TimeUnit.MINUTES)
 
+    /** Separate pool for bulk transfers — see [buildUploadClient]. */
+    private val uploadPool = ConnectionPool(6, 5, TimeUnit.MINUTES)
+
     /** Drop all pooled connections — call after the transport route rebinds. */
-    fun evictAll() = sharedPool.evictAll()
+    fun evictAll() {
+        sharedPool.evictAll()
+        uploadPool.evictAll()
+    }
 
     fun build(
         router: OutboundRouter = OutboundRouter.IDENTITY,
@@ -53,6 +59,30 @@ object SharedHttpClient {
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
+            .apply(configure)
+            .build()
+
+    /**
+     * The bulk-transfer client for resumable upload chunks (PRD §4.4, §8.1):
+     *  - HTTP/1.1 ONLY: HTTP/2 would coalesce every parallel upload onto ONE TCP
+     *    connection (one tunnel socket, one congestion window); H1.1 gives each
+     *    parallel file its own connection — real multi-connection acceleration.
+     *  - Its own pool, so bulk sockets can't starve interactive API/thumbnail
+     *    requests of pool slots.
+     *  - Longer read/write timeouts: an 8 MiB chunk over a slow tunnel legitimately
+     *    takes tens of seconds; the server is silent while receiving a chunk.
+     */
+    fun buildUploadClient(
+        router: OutboundRouter = OutboundRouter.IDENTITY,
+        configure: OkHttpClient.Builder.() -> Unit = {},
+    ): OkHttpClient =
+        OkHttpClient.Builder()
+            .protocols(listOf(Protocol.HTTP_1_1))
+            .connectionPool(uploadPool)
+            .proxySelector(RouterProxySelector(router))
+            .connectTimeout(20, TimeUnit.SECONDS)
+            .readTimeout(90, TimeUnit.SECONDS)
+            .writeTimeout(90, TimeUnit.SECONDS)
             .apply(configure)
             .build()
 

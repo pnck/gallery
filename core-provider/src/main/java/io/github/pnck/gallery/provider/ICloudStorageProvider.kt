@@ -2,6 +2,7 @@ package io.github.pnck.gallery.provider
 
 import android.net.Uri
 import io.github.pnck.gallery.network.ApiResult
+import io.github.pnck.gallery.provider.upload.UploadSessionStore
 import java.io.InputStream
 
 /**
@@ -30,17 +31,32 @@ interface ICloudStorageProvider {
      */
     suspend fun fetchChanges(deltaToken: String?): ApiResult<CloudChangeSet>
 
-    /** Upload; implementation picks multipart vs resumable/session by size (PRD §4.4). */
+    /**
+     * Upload with a true resumable session (PRD §4.4): the implementation resumes
+     * from the server-confirmed offset persisted in [sessions] after ANY failure
+     * (never restarts from byte 0), and verifies the content hash at the end.
+     * @param photoId local photo id — the session-store key.
+     * @param totalBytes exact file size; the caller fails fast when unknown.
+     * @param expectedMd5 local content hash when known — verified against the
+     *   final cloud object; a mismatch deletes the object and retries.
+     */
     suspend fun uploadFile(
+        photoId: String,
         uri: Uri,
         mimeType: String,
+        totalBytes: Long,
+        expectedMd5: String?,
+        sessions: UploadSessionStore,
         onProgress: (Int) -> Unit,
     ): ApiResult<CloudFile>
 
     suspend fun deleteFile(cloudId: String): ApiResult<Unit>
 
-    /** Original bytes for the detail view — cache to cacheDir, never DCIM (PRD §9.1). */
-    suspend fun downloadOriginal(cloudId: String): ApiResult<InputStream>
+    /**
+     * Original bytes for the detail view — cache to cacheDir, never DCIM (PRD §9.1).
+     * @param offset resume position of a partial download (Range request); 0 = whole file.
+     */
+    suspend fun downloadOriginal(cloudId: String, offset: Long = 0): ApiResult<InputStream>
 
     /**
      * Browse ANY folder in the user's Drive (all file types + subfolders) for the

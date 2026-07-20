@@ -2,44 +2,78 @@ package io.github.pnck.gallery.data.sync
 
 import android.content.ContentResolver
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.util.Log
 import io.github.pnck.gallery.data.db.PhotoDao
+import io.github.pnck.gallery.data.db.PhotoEntity
 import io.github.pnck.gallery.network.ApiResult
 import io.github.pnck.gallery.provider.ContentHash
 import io.github.pnck.gallery.provider.ICloudStorageProvider
+import io.github.pnck.gallery.provider.upload.UploadSessionStore
+import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 
 private const val TAG = "gallery-sync"
+
+/** Files uploaded in parallel (each on its own HTTP/1.1 tunnel connection). */
+private const val PARALLEL_UPLOADS = 2
 
 /**
  * Upload loop shared by workers (T-301 core, PRD §7.1). Framework-free: the
  * @HiltWorker wrappers in :app own WorkManager/Result semantics; this class owns
  * the state machine transition PENDING_UPLOAD → SYNCED.
+ *
+ * Reliability contract (backup-first):
+ *  - TRUE RESUMABLE: the provider resumes from the server-confirmed offset in
+ *    [sessions]; a retry never restarts a file from byte 0.
+ *  - NO HEAD-OF-LINE BLOCKING: a retryable failure marks the file and moves on;
+ *    the batch only asks WorkManager for a retry at the END if anything
+ *    retryable remains. Files past the attempt cap are excluded by the query
+ *    until reconcile / explicit user sync resets their counter.
+ *  - NO DOUBLE UPLOADS: each row is atomically claimed (attempt counter bump
+ *    conditional on still-PENDING), so a targeted run racing the bulk sweep
+ *    can't upload the same file twice. Batches themselves are serialized.
  */
 class UploadBatchProcessor(
     private val photoDao: PhotoDao,
     private val provider: ICloudStorageProvider,
     private val resolver: ContentResolver,
+    private val sessions: UploadSessionStore,
 ) {
 
     sealed interface Outcome {
         /** All pending items processed (some may have failed permanently). */
         data class Done(val uploaded: Int, val failed: Int) : Outcome
 
-        /** Hit a retryable error (429/5xx/IO) — ask WorkManager for backoff retry. */
+        /** Some files hit retryable errors (429/5xx/IO) — WorkManager backs off
+         *  and retries; confirmed chunk progress is persisted either way. */
         data class Retry(val uploadedSoFar: Int) : Outcome
     }
 
     /** Live per-item progress for the backup banner (Google-Photos style). */
     data class Progress(val done: Int, val total: Int, val currentUri: String?, val pct: Int)
 
+    /** One batch at a time process-wide (targeted vs bulk are both idempotent,
+     *  but interleaving them doubles tunnel pressure for zero gain). */
+    private val batchMutex = Mutex()
+
     /**
      * @param targetIds when non-null, only these photo ids are uploaded (multi-select
      *   sync); null uploads every PENDING_UPLOAD row (the full background sweep).
+     *   A targeted run is an explicit user action, so it first resets the attempt
+     *   counters of those ids — reviving files the sweep had given up on.
      */
     suspend fun processPending(
         targetIds: List<String>? = null,
         onProgress: (Progress) -> Unit = {},
-    ): Outcome {
+    ): Outcome = batchMutex.withLock {
+        if (!targetIds.isNullOrEmpty()) photoDao.resetUploadAttempts(targetIds)
         val pending = if (targetIds.isNullOrEmpty()) {
             photoDao.getPendingUploads()
         } else {
@@ -48,59 +82,110 @@ class UploadBatchProcessor(
         if (pending.isEmpty()) return Outcome.Done(0, 0)
         Log.i(TAG, "upload: ${pending.size} pending (targeted=${!targetIds.isNullOrEmpty()})")
 
-        var uploaded = 0
-        var failed = 0
-        pending.forEachIndexed { index, photo ->
-            val localUri = photo.localUri ?: run {
-                Log.w(TAG, "upload: skip ${photo.id} — no localUri")
-                failed++
-                return@forEachIndexed
+        val uploaded = AtomicInteger()
+        val failed = AtomicInteger()
+        val retryable = AtomicInteger()
+        val doneCount = AtomicInteger()
+        val gate = Semaphore(PARALLEL_UPLOADS)
+
+        coroutineScope {
+            pending.map { photo ->
+                async {
+                    gate.withPermit {
+                        when (val r = uploadOne(photo) { pct ->
+                            onProgress(Progress(doneCount.get(), pending.size, photo.localUri, pct))
+                        }) {
+                            FileResult.OK -> uploaded.incrementAndGet()
+                            FileResult.FAILED -> failed.incrementAndGet()
+                            FileResult.RETRYABLE -> retryable.incrementAndGet()
+                            FileResult.SKIPPED -> Unit // claimed elsewhere / gone
+                        }
+                        val done = doneCount.incrementAndGet()
+                        onProgress(Progress(done, pending.size, photo.localUri, 100))
+                    }
+                }
+            }.forEach { it.await() }
+        }
+
+        Log.i(TAG, "upload: done uploaded=$uploaded failed=$failed retryable=$retryable")
+        return if (retryable.get() > 0) Outcome.Retry(uploaded.get()) else Outcome.Done(uploaded.get(), failed.get())
+    }
+
+    private enum class FileResult { OK, FAILED, RETRYABLE, SKIPPED }
+
+    private suspend fun uploadOne(photo: PhotoEntity, onProgress: (Int) -> Unit): FileResult {
+        // Atomic claim: 0 = the row left PENDING_UPLOAD (another worker claimed it,
+        // or a state transition moved it) — never upload it twice.
+        if (photoDao.claimUpload(photo.id, System.currentTimeMillis()) == 0) {
+            Log.i(TAG, "upload: skip ${photo.id} — claimed elsewhere or no longer pending")
+            return FileResult.SKIPPED
+        }
+        val localUri = photo.localUri ?: return FileResult.FAILED.also {
+            Log.w(TAG, "upload: skip ${photo.id} — no localUri")
+        }
+        val uri = Uri.parse(localUri)
+
+        // Media access can be partial/revoked (Android 13/14 "Selected photos"): a
+        // file scanned earlier may now be unreadable. That's a PERMANENT per-file
+        // skip, not a retryable network error — otherwise the queue stalls on it.
+        val readable = runCatching { resolver.openInputStream(uri)?.use { true } ?: false }
+            .getOrDefault(false)
+        if (!readable) {
+            Log.w(TAG, "upload: skip ${photo.id} — no read access to $localUri (grant \"All photos\"?)")
+            return FileResult.FAILED
+        }
+
+        // The resumable protocol needs the exact total for every Content-Range.
+        // Unknown size → fail fast BEFORE any bytes go out (never stream with an
+        // unknown length — Drive would 400/411 after the whole body).
+        val totalBytes = photo.sizeBytes.takeIf { it > 0 } ?: sizeOf(uri) ?: run {
+            Log.w(TAG, "upload: skip ${photo.id} — unknown file size")
+            return FileResult.FAILED
+        }
+        val mime = resolver.getType(uri) ?: "image/jpeg"
+
+        // Content identity: reuse the stored MD5; compute + persist it if missing
+        // (hashes are lazy, computed here at upload time — invariant #3). The
+        // provider verifies the final cloud object against it.
+        val md5 = photo.contentHashValue.takeIf { photo.contentHashType == "MD5" && !it.isNullOrEmpty() }
+            ?: computeMd5(uri)?.also { photoDao.setContentHash(photo.id, "MD5", it) }
+
+        return when (
+            val result = provider.uploadFile(photo.id, uri, mime, totalBytes, md5, sessions, onProgress)
+        ) {
+            is ApiResult.Success -> {
+                photoDao.markAsSynced(photo.id, result.data.id, result.data.provider.name)
+                // Persist the content hash so local/cloud identity is recoverable
+                // even if the state machine later breaks (PRD §3.5).
+                val hash = (result.data.contentHash as? ContentHash.Md5)?.value
+                    ?: (provider.getFileMetadata(result.data.id) as? ApiResult.Success)
+                        ?.data?.contentHash?.let { it as? ContentHash.Md5 }?.value
+                if (hash != null) photoDao.setContentHash(photo.id, "MD5", hash)
+                Log.i(TAG, "upload: OK ${photo.id} -> ${result.data.id}")
+                FileResult.OK
             }
-            val uri = Uri.parse(localUri)
-
-            // Media access can be partial/revoked (Android 13/14 "Selected photos"): a
-            // file scanned earlier may now be unreadable. That's a PERMANENT per-file
-            // skip, not a retryable network error — otherwise the whole queue stalls on
-            // it forever. Fail fast and move on; it uploads automatically once the user
-            // grants access (the next sweep reads it fine). It stays PENDING_UPLOAD.
-            val readable = runCatching { resolver.openInputStream(uri)?.use { true } ?: false }
-                .getOrDefault(false)
-            if (!readable) {
-                Log.w(TAG, "upload: skip ${photo.id} — no read access to $localUri (grant \"All photos\"?)")
-                failed++
-                return@forEachIndexed
-            }
-
-            val mime = resolver.getType(uri) ?: "image/jpeg"
-            onProgress(Progress(done = index, total = pending.size, currentUri = localUri, pct = 0))
-
-            when (
-                val result = provider.uploadFile(uri, mime) { pct ->
-                    onProgress(Progress(index, pending.size, localUri, pct))
-                }
-            ) {
-                is ApiResult.Success -> {
-                    photoDao.markAsSynced(photo.id, result.data.id, result.data.provider.name)
-                    // Persist the content hash so local/cloud identity is recoverable
-                    // even if the state machine later breaks (PRD §3.5). If the upload
-                    // response didn't include a hash (Drive resumable quirk), fetch the
-                    // file metadata so downstream sync can dedup by MD5 (no phantom rows).
-                    val md5 = (result.data.contentHash as? ContentHash.Md5)?.value
-                        ?: (provider.getFileMetadata(result.data.id) as? ApiResult.Success)
-                            ?.data?.contentHash?.let { it as? ContentHash.Md5 }?.value
-                    if (md5 != null) photoDao.setContentHash(photo.id, "MD5", md5)
-                    uploaded++
-                    Log.i(TAG, "upload: OK ${photo.id} -> ${result.data.id}")
-                    onProgress(Progress(index + 1, pending.size, localUri, 100))
-                }
-                is ApiResult.Error -> {
-                    Log.w(TAG, "upload: FAILED ${photo.id} code=${result.code} retryable=${result.retryable} — ${result.message}")
-                    if (result.retryable) return Outcome.Retry(uploaded)
-                    else failed++ // permanent failure: stays PENDING_UPLOAD, next batch retries
-                }
+            is ApiResult.Error -> {
+                Log.w(TAG, "upload: FAILED ${photo.id} code=${result.code} retryable=${result.retryable} — ${result.message}")
+                if (result.retryable) FileResult.RETRYABLE else FileResult.FAILED
             }
         }
-        Log.i(TAG, "upload: done uploaded=$uploaded failed=$failed")
-        return Outcome.Done(uploaded, failed)
     }
+
+    private fun sizeOf(uri: Uri): Long? =
+        resolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { c ->
+            if (c.moveToFirst() && !c.isNull(0)) c.getLong(0).takeIf { it > 0 } else null
+        }
+
+    private fun computeMd5(uri: Uri): String? = runCatching {
+        val digest = MessageDigest.getInstance("MD5")
+        resolver.openInputStream(uri)?.use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                digest.update(buffer, 0, read)
+            }
+        } ?: return null
+        digest.digest().joinToString("") { "%02x".format(it) }
+    }.getOrNull()
 }

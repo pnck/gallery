@@ -18,12 +18,14 @@ import io.github.pnck.gallery.BuildConfig
 import io.github.pnck.gallery.data.db.GalleryDatabase
 import io.github.pnck.gallery.data.db.PhotoDao
 import io.github.pnck.gallery.data.db.SyncKeyDao
+import io.github.pnck.gallery.data.db.UploadSessionDao
 import io.github.pnck.gallery.data.repo.PhotoRepositoryImpl
 import io.github.pnck.gallery.data.scanner.LocalMediaScanner
 import io.github.pnck.gallery.data.settings.AppSettingsStore
 import io.github.pnck.gallery.data.sync.DownstreamSyncProcessor
 import io.github.pnck.gallery.data.sync.MediaReconciler
 import io.github.pnck.gallery.data.sync.ReconcileProcessor
+import io.github.pnck.gallery.data.sync.RoomUploadSessionStore
 import io.github.pnck.gallery.data.sync.UploadBatchProcessor
 import io.github.pnck.gallery.domain.PhotoRepository
 import io.github.pnck.gallery.network.SharedHttpClient
@@ -42,6 +44,7 @@ import io.github.pnck.gallery.provider.auth.DeviceFlowAuthManager
 import io.github.pnck.gallery.provider.auth.EncryptedTokenStore
 import io.github.pnck.gallery.provider.auth.GoogleAuthInterceptor
 import io.github.pnck.gallery.provider.auth.TokenStore
+import io.github.pnck.gallery.provider.upload.UploadSessionStore
 import javax.inject.Singleton
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
@@ -66,6 +69,14 @@ object AppModule {
 
     @Provides
     fun provideSyncKeyDao(db: GalleryDatabase): SyncKeyDao = db.syncKeyDao()
+
+    @Provides
+    fun provideUploadSessionDao(db: GalleryDatabase): UploadSessionDao = db.uploadSessionDao()
+
+    @Provides
+    @Singleton
+    fun provideUploadSessionStore(dao: UploadSessionDao): UploadSessionStore =
+        RoomUploadSessionStore(dao)
 
     @Provides
     @Singleton
@@ -126,6 +137,18 @@ object AppModule {
         }
 
     /**
+     * The bulk-transfer client for upload chunks: same Bearer injection, but
+     * HTTP/1.1 + its own pool so parallel uploads use parallel tunnel connections.
+     */
+    @UploadClient
+    @Provides
+    @Singleton
+    fun provideUploadHttpClient(router: OutboundRouter, authManager: AuthManager): OkHttpClient =
+        SharedHttpClient.buildUploadClient(router) {
+            addInterceptor(GoogleAuthInterceptor(authManager))
+        }
+
+    /**
      * The app-wide Coil loader (PRD §8.1, T-401). Rides the ONE shared client so
      * thumbnails honour the tunnel and Bearer injection; the ProviderUriFetcher
      * resolves `{provider}://{cloudId}` CLOUD_ONLY thumbnails. Installed as the
@@ -170,6 +193,18 @@ object AppModule {
             .build()
             .create(DriveApiService::class.java)
 
+    /** Drive API on the bulk-transfer client — upload init/chunks/status only. */
+    @UploadClient
+    @Provides
+    @Singleton
+    fun provideDriveUploadApiService(@UploadClient client: OkHttpClient, moshi: Moshi): DriveApiService =
+        Retrofit.Builder()
+            .baseUrl("https://www.googleapis.com/")
+            .client(client)
+            .addConverterFactory(MoshiConverterFactory.create(moshi))
+            .build()
+            .create(DriveApiService::class.java)
+
     // ── Auth & provider (the virtual backend, PRD §4/§5, ADR-0001) ─────────
 
     @Provides
@@ -198,10 +233,11 @@ object AppModule {
     @Singleton
     fun provideCloudStorageProvider(
         api: DriveApiService,
+        @UploadClient uploadApi: DriveApiService,
         resolver: ContentResolver,
         settings: AppSettingsStore,
     ): ICloudStorageProvider =
-        GoogleDriveProvider(api, resolver, folderName = { settings.remoteFolderName.first() })
+        GoogleDriveProvider(api, uploadApi, resolver, folderName = { settings.remoteFolderName.first() })
 
     // ── Sync machinery (PRD §6/§7) ─────────────────────────────────────────
 
@@ -247,7 +283,8 @@ object AppModule {
         photoDao: PhotoDao,
         provider: ICloudStorageProvider,
         resolver: ContentResolver,
-    ): UploadBatchProcessor = UploadBatchProcessor(photoDao, provider, resolver)
+        sessions: UploadSessionStore,
+    ): UploadBatchProcessor = UploadBatchProcessor(photoDao, provider, resolver, sessions)
 
     @Provides
     @Singleton

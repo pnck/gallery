@@ -31,6 +31,7 @@ import io.github.pnck.gallery.network.ApiResult
 import io.github.pnck.gallery.provider.ContentHash
 import io.github.pnck.gallery.provider.ICloudStorageProvider
 import java.io.File
+import java.io.FileOutputStream
 import java.io.InputStream
 import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
@@ -114,21 +115,59 @@ class PhotoRepositoryImpl(
      * content uri. Cache files are app-private, so MediaStore never rescans them —
      * no duplicate rows (PRD §9.1). Returns the existing cache file immediately if
      * already downloaded.
+     *
+     * Resumable + atomic: bytes land in a `.part` file; an interrupted download
+     * resumes with a Range request from the on-disk length, and the finished file
+     * is renamed into place — a killed process can never leave a truncated file
+     * that later gets served as complete.
      */
     override suspend fun cacheOriginal(id: String): String? = withContext(Dispatchers.IO) {
         val row = photoDao.getById(id) ?: return@withContext null
         val cloudId = row.cloudId ?: return@withContext null
 
         val dir = File(context.cacheDir, "originals").apply { mkdirs() }
-        val file = File(dir, "$id.jpg")
-        if (!file.exists() || file.length() == 0L) {
-            val stream = when (val res = provider.downloadOriginal(cloudId)) {
-                is ApiResult.Success -> res.data
-                is ApiResult.Error -> return@withContext null
-            }
-            if (!writeStreamToFile(stream, file)) return@withContext null
+        val final = File(dir, "$id.jpg")
+        if (final.exists() && final.length() > 0) return@withContext fileProviderUri(final).toString()
+
+        val tmp = File(dir, "$id.part")
+        val expected = row.sizeBytes.takeIf { it > 0 }
+        // A previous attempt may have completed the bytes but died before rename.
+        if (expected != null && tmp.length() == expected && tmp.renameTo(final)) {
+            return@withContext fileProviderUri(final).toString()
         }
-        fileProviderUri(file).toString()
+
+        repeat(MAX_DOWNLOAD_ATTEMPTS) {
+            val offset = if (tmp.exists()) tmp.length() else 0L
+            when (val res = provider.downloadOriginal(cloudId, offset)) {
+                is ApiResult.Success -> {
+                    val complete = runCatching {
+                        res.data.use { input ->
+                            FileOutputStream(tmp, /* append = */ offset > 0).use { out -> input.copyTo(out) }
+                        }
+                        // OkHttp enforces Content-Length, so a clean return means the
+                        // full (remaining) body landed; the size check is the belt.
+                        expected == null || tmp.length() == expected
+                    }.getOrDefault(false)
+                    if (complete && tmp.renameTo(final)) {
+                        return@withContext fileProviderUri(final).toString()
+                    }
+                    // Incomplete/corrupt state we can't resume sanely → start over.
+                    if (expected != null && tmp.length() > expected) tmp.delete()
+                }
+                is ApiResult.Error -> when {
+                    // Range refused / offset beyond EOF: the partial is unusable →
+                    // drop it and retry once from byte 0.
+                    res.code == 416 -> tmp.delete()
+                    res.retryable -> Unit // loop resumes from the new on-disk length
+                    else -> {
+                        tmp.delete()
+                        return@withContext null
+                    }
+                }
+            }
+        }
+        tmp.delete()
+        return@withContext null
     }
 
     /**
@@ -258,6 +297,11 @@ class PhotoRepositoryImpl(
     }.getOrElse {
         file.delete()
         false
+    }
+
+    private companion object {
+        /** Bounded resume loop for cacheOriginal (each round resumes from disk). */
+        const val MAX_DOWNLOAD_ATTEMPTS = 4
     }
 
     private fun fileProviderUri(file: File): Uri =
