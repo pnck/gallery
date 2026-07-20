@@ -51,9 +51,6 @@ const DEFAULT_MTU: usize = 1280;
 const SCRATCH: usize = 2048;
 /// Per-connection app↔socket buffer high-water mark (backpressure).
 const CONN_BUF_CAP: usize = 256 * 1024;
-/// Driver tick: bounds how quickly app writes/timers are serviced. WireGuard
-/// timers need servicing a few times per second; this also caps write latency.
-const TICK: Duration = Duration::from_millis(5);
 /// Fallback DNS resolvers when the WG config specifies none (design semantic).
 const DEFAULT_DNS: [&str; 2] = ["1.1.1.1", "8.8.8.8"];
 /// Bound on `wait_connected` — a SYN to a blackholed in-tunnel address must not
@@ -66,6 +63,9 @@ const WRITE_WAIT_TIMEOUT: Duration = Duration::from_secs(60);
 /// a dead peer/session errors the connection instead of retransmitting forever.
 const TCP_KEEPALIVE: Duration = Duration::from_secs(30);
 const TCP_TIMEOUT: Duration = Duration::from_secs(75);
+/// Max idle sleep when smoltcp reports NO pending deadline — WG timers (keepalive,
+/// rekey) and health refresh still need a few wake-ups per second.
+const IDLE_WAIT_CAP: Duration = Duration::from_millis(250);
 
 /// Parsed, validated WireGuard parameters (from CoreConfig::WgThenSocks).
 #[derive(Clone)]
@@ -294,9 +294,15 @@ impl ConnShared {
     }
 }
 
-// ── Commands from application threads to the driver ──────────────────────────
+// ── The driver's single mailbox (actor model) ────────────────────────────────
+//
+// The driver thread blocks on ONE primitive — this channel — matching smoltcp's
+// cooperative scheduling: it sleeps until an event arrives or the smoltcp-computed
+// deadline (poll_delay) expires. Producers: app threads (Dial/Resolve/Shutdown),
+// the dedicated UDP reader thread (Datagram), and TunnelStream writes (Kick).
+// No fixed poll tick, no signal bytes smuggled through the network socket.
 
-enum Command {
+enum Event {
     Dial {
         addr: IpEndpoint,
         reply: Sender<io::Result<Arc<ConnShared>>>,
@@ -306,13 +312,19 @@ enum Command {
         host: String,
         reply: Sender<io::Result<IpAddr>>,
     },
+    /// A WireGuard datagram from the peer (the connected socket guarantees the
+    /// source — the kernel does the filtering, not us).
+    Datagram(Vec<u8>),
+    /// Pure wake-up: app bytes were queued / a write half was closed. Carries no
+    /// data — the driver re-derives everything from the authoritative state.
+    Kick,
     Shutdown,
 }
 
 /// Handle to the running tunnel. Shared via `Arc`; call [`WgTunnel::shutdown`] (or
 /// drop the last reference) to stop the driver.
 pub struct WgTunnel {
-    cmd: Sender<Command>,
+    events: Sender<Event>,
     /// Effective DNS servers: the WG-configured ones, or our defaults if none were
     /// given (design semantic). Used by both the UDP and TCP in-tunnel resolvers.
     dns_servers: Vec<IpAddr>,
@@ -328,15 +340,19 @@ pub struct WgTunnel {
     /// when an in-flight tunnel connection still holds an `Arc<WgTunnel>` (otherwise a
     /// leaked driver keeps racing the peer — two tunnels for one session).
     join: Mutex<Option<JoinHandle<()>>>,
+    /// The UDP reader thread (feeds Event::Datagram into the mailbox).
+    reader_join: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl WgTunnel {
     /// Build the tunnel and spawn its driver thread. Returns once the netstack is
     /// up; the WireGuard handshake completes asynchronously on first traffic.
     pub fn start(mut params: WgParams) -> io::Result<WgTunnel> {
-        let udp = UdpSocket::bind(("0.0.0.0", 0))?;
+        // CONNECTED socket: the kernel accepts only datagrams from the WG peer
+        // (source filtering is not our job). Shared between the reader thread
+        // (recv) and the driver (send).
+        let udp = Arc::new(UdpSocket::bind(("0.0.0.0", 0))?);
         udp.connect(params.endpoint)?;
-        udp.set_read_timeout(Some(TICK))?;
 
         // Design semantic: use the configured [Interface] DNS if given, else our
         // defaults. Both the UDP (smoltcp) and TCP resolvers query these.
@@ -348,7 +364,7 @@ impl WgTunnel {
         }
         let dns_servers: Vec<IpAddr> = params.dns_servers.iter().map(|a| IpAddr::from(*a)).collect();
 
-        let (cmd_tx, cmd_rx) = mpsc::channel::<Command>();
+        let (events_tx, events_rx) = mpsc::channel::<Event>();
         let handshake_ok = Arc::new(AtomicBool::new(false));
         let last_handshake_epoch = Arc::new(AtomicI64::new(0));
         let tx_bytes = Arc::new(AtomicU64::new(0));
@@ -356,8 +372,21 @@ impl WgTunnel {
         let stopped = Arc::new(AtomicBool::new(false));
         let driver_dead = Arc::new(AtomicBool::new(false));
 
+        // Dedicated reader: the driver's only blocking primitive is the mailbox,
+        // so peer datagrams are forwarded into it as plain events. The connected
+        // socket means the kernel filters non-peer sources for us.
+        let reader = {
+            let udp = Arc::clone(&udp);
+            let events = events_tx.clone();
+            let stopped = Arc::clone(&stopped);
+            std::thread::Builder::new()
+                .name("gallery-wg-reader".into())
+                .spawn(move || read_datagrams(udp, events, stopped))
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?
+        };
+
         let driver = Driver {
-            cmd_rx,
+            events: events_rx,
             handshake_ok: Arc::clone(&handshake_ok),
             last_handshake_epoch: Arc::clone(&last_handshake_epoch),
             tx_bytes: Arc::clone(&tx_bytes),
@@ -383,7 +412,7 @@ impl WgTunnel {
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
 
         Ok(WgTunnel {
-            cmd: cmd_tx,
+            events: events_tx,
             dns_servers,
             handshake_ok,
             last_handshake_epoch,
@@ -392,17 +421,21 @@ impl WgTunnel {
             stopped,
             driver_dead,
             join: Mutex::new(Some(handle)),
+            reader_join: Mutex::new(Some(reader)),
         })
     }
 
     /// Deterministically stop the driver and wait for its thread to exit. Safe to
     /// call more than once. Unlike relying on `Drop`, this does NOT depend on every
-    /// `Arc<WgTunnel>` having been released — the driver loop polls `stopped` each
-    /// ~5 ms tick and exits, so a stuck in-flight connection can't keep it alive.
+    /// `Arc<WgTunnel>` having been released — the driver wakes on the Shutdown
+    /// event, so a stuck in-flight connection can't keep it alive.
     pub fn shutdown(&self) {
         self.stopped.store(true, Ordering::SeqCst);
-        let _ = self.cmd.send(Command::Shutdown);
+        let _ = self.events.send(Event::Shutdown);
         if let Some(handle) = self.join.lock().unwrap().take() {
+            let _ = handle.join();
+        }
+        if let Some(handle) = self.reader_join.lock().unwrap().take() {
             let _ = handle.join();
         }
     }
@@ -418,8 +451,8 @@ impl WgTunnel {
         })?;
         let addr = IpEndpoint::new(IpAddress::from(ip), port);
         let (tx, rx) = mpsc::channel();
-        self.cmd
-            .send(Command::Dial { addr, reply: tx })
+        self.events
+            .send(Event::Dial { addr, reply: tx })
             .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "tunnel driver stopped"))?;
         let shared = rx
             .recv()
@@ -427,7 +460,7 @@ impl WgTunnel {
 
         let stream = TunnelStream {
             shared,
-            cmd: self.cmd.clone(),
+            events: self.events.clone(),
         };
         stream.wait_connected()?;
         Ok(stream)
@@ -441,8 +474,8 @@ impl WgTunnel {
     /// Resolve `host` to an IP using the effective DNS servers, over UDP (smoltcp).
     pub fn resolve(&self, host: &str) -> io::Result<IpAddr> {
         let (tx, rx) = mpsc::channel();
-        self.cmd
-            .send(Command::Resolve { host: host.to_string(), reply: tx })
+        self.events
+            .send(Event::Resolve { host: host.to_string(), reply: tx })
             .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "tunnel driver stopped"))?;
         rx.recv_timeout(Duration::from_secs(6))
             .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "in-tunnel UDP DNS timed out"))?
@@ -667,7 +700,7 @@ fn publish_conn(sock: &tcp::Socket, g: &mut ConnInner) -> bool {
 /// A blocking, TcpStream-like handle to one tunnelled TCP connection.
 pub struct TunnelStream {
     shared: Arc<ConnShared>,
-    cmd: Sender<Command>,
+    events: Sender<Event>,
 }
 
 impl TunnelStream {
@@ -739,6 +772,8 @@ impl Write for TunnelStream {
             if g.to_socket.len() < CONN_BUF_CAP {
                 g.to_socket.extend(buf.iter().copied());
                 self.shared.cv.notify_all();
+                drop(g);
+                let _ = self.events.send(Event::Kick);
                 return Ok(buf.len());
             }
             // Backpressure: wait for the driver to drain into the socket. Bounded —
@@ -773,6 +808,8 @@ impl Drop for TunnelStream {
             let mut g = self.shared.inner.lock().unwrap();
             g.app_write_closed = true;
             self.shared.cv.notify_all();
+            drop(g);
+            let _ = self.events.send(Event::Kick);
         }
     }
 }
@@ -781,7 +818,7 @@ impl Clone for TunnelStream {
     fn clone(&self) -> Self {
         TunnelStream {
             shared: Arc::clone(&self.shared),
-            cmd: self.cmd.clone(),
+            events: self.events.clone(),
         }
     }
 }
@@ -794,13 +831,42 @@ impl Conn for TunnelStream {
         let mut g = self.shared.inner.lock().unwrap();
         g.app_write_closed = true;
         self.shared.cv.notify_all();
+        drop(g);
+        let _ = self.events.send(Event::Kick);
+    }
+}
+
+/// The dedicated UDP reader: forwards peer datagrams into the driver's mailbox.
+/// The socket is connected, so every recv is guaranteed to be from the WG peer.
+/// Its 250 ms timeout only paces the `stopped` check — it's the ONE idle waker,
+/// letting the driver itself sleep fully event-driven.
+fn read_datagrams(udp: Arc<UdpSocket>, events: Sender<Event>, stopped: Arc<AtomicBool>) {
+    udp.set_read_timeout(Some(IDLE_WAIT_CAP)).ok();
+    let mut buf = [0u8; SCRATCH];
+    while !stopped.load(Ordering::SeqCst) {
+        match udp.recv(&mut buf) {
+            Ok(n) => {
+                if events.send(Event::Datagram(buf[..n].to_vec())).is_err() {
+                    break; // driver gone
+                }
+            }
+            Err(ref e)
+                if matches!(
+                    e.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut | io::ErrorKind::Interrupted
+                ) => {}
+            Err(e) => {
+                log::warn!("wg: udp recv error: {e}");
+                break;
+            }
+        }
     }
 }
 
 // ── The single-threaded driver ───────────────────────────────────────────────
 
 struct Driver {
-    cmd_rx: Receiver<Command>,
+    events: Receiver<Event>,
     handshake_ok: Arc<AtomicBool>,
     last_handshake_epoch: Arc<AtomicI64>,
     tx_bytes: Arc<AtomicU64>,
@@ -809,7 +875,7 @@ struct Driver {
 }
 
 impl Driver {
-    fn run(self, params: WgParams, udp: UdpSocket) {
+    fn run(self, params: WgParams, udp: Arc<UdpSocket>) {
         let mut tunn = Tunn::new(
             params.private_key.clone(),
             params.peer_public_key,
@@ -880,51 +946,21 @@ impl Driver {
                 break;
             }
 
-            // 1. Drain commands (non-blocking).
-            while let Ok(cmd) = self.cmd_rx.try_recv() {
-                match cmd {
-                    Command::Shutdown => break 'drive,
-                    Command::Dial { addr, reply } => {
-                        let res = self.open_socket(
-                            &mut sockets,
-                            &mut iface,
-                            addr,
-                            &mut next_local_port,
-                        );
-                        match res {
-                            Ok(handle) => {
-                                let shared = ConnShared::new(handle);
-                                conns.push(Arc::clone(&shared));
-                                let _ = reply.send(Ok(shared));
-                            }
-                            Err(e) => {
-                                let _ = reply.send(Err(e));
-                            }
-                        }
+            // 1. Drain the mailbox (non-blocking): apply every pending event.
+            while let Ok(event) = self.events.try_recv() {
+                match event {
+                    Event::Shutdown => break 'drive,
+                    Event::Kick => {} // wake-only; state is re-derived below
+                    Event::Datagram(data) => {
+                        log::debug!("wg: <- udp {} B from peer", data.len());
+                        self.handle_incoming(&mut tunn, &udp, &data, &mut device, &mut scratch);
                     }
-                    Command::Resolve { host, reply } => match dns_handle {
-                        Some(h) => {
-                            let sock = sockets.get_mut::<dns::Socket>(h);
-                            match sock.start_query(iface.context(), &host, DnsQueryType::A) {
-                                Ok(q) => {
-                                    log::debug!("wg: in-tunnel DNS query for {host}");
-                                    dns_pending.push((q, StdInstant::now(), reply));
-                                }
-                                Err(e) => {
-                                    let _ = reply.send(Err(io::Error::new(
-                                        io::ErrorKind::Other,
-                                        format!("DNS query failed: {e:?}"),
-                                    )));
-                                }
-                            }
-                        }
-                        None => {
-                            let _ = reply.send(Err(io::Error::new(
-                                io::ErrorKind::Unsupported,
-                                "no WG DNS servers configured",
-                            )));
-                        }
-                    },
+                    Event::Dial { addr, reply } => {
+                        self.exec_dial(addr, reply, &mut sockets, &mut iface, &mut conns, &mut next_local_port);
+                    }
+                    Event::Resolve { host, reply } => {
+                        self.exec_resolve(host, reply, &mut sockets, &mut iface, dns_handle, &mut dns_pending);
+                    }
                 }
             }
 
@@ -1052,37 +1088,43 @@ impl Driver {
                 }
             }
 
-            // 6. Read any WG datagrams from the peer, decapsulate into IP packets.
-            let mut recv_buf = [0u8; SCRATCH];
-            loop {
-                match udp.recv(&mut recv_buf) {
-                    Ok(n) => {
-                        log::debug!("wg: <- udp {n} B from peer");
-                        self.handle_incoming(&mut tunn, &udp, &recv_buf[..n], &mut device, &mut scratch);
-                    }
-                    // WouldBlock/TimedOut: drain done for this tick. Interrupted
-                    // (EINTR, e.g. a signal during recv) is transient — just stop
-                    // draining; the next driver tick re-reads. None are fatal.
-                    Err(ref e)
-                        if matches!(
-                            e.kind(),
-                            io::ErrorKind::WouldBlock
-                                | io::ErrorKind::TimedOut
-                                | io::ErrorKind::Interrupted
-                        ) =>
-                    {
-                        break
-                    }
-                    Err(e) => {
-                        log::warn!("wg udp recv error: {e}");
-                        break;
-                    }
+            // 6. EVENT-DRIVEN WAIT (smoltcp's cooperative scheduling model): block
+            //    on the mailbox until an event arrives or the smoltcp-computed
+            //    deadline (poll_delay: retransmit/keepalive/timeout timers)
+            //    expires. No fixed poll tick — idle costs ~4 wake-ups/sec (the WG
+            //    timers below), not 200; app events wake instantly via Kick.
+            let busy = !dns_pending.is_empty()
+                || conns.iter().any(|c| !c.inner.lock().unwrap().to_socket.is_empty());
+            let wait = if busy {
+                Duration::from_millis(1)
+            } else {
+                let now = SmolInstant::from_micros(smol_start.elapsed().as_micros() as i64);
+                iface
+                    .poll_delay(now, &sockets)
+                    .map(|d| Duration::from_micros(d.total_micros()))
+                    .unwrap_or(IDLE_WAIT_CAP)
+                    .clamp(Duration::from_millis(1), IDLE_WAIT_CAP)
+            };
+            match self.events.recv_timeout(wait) {
+                Ok(Event::Shutdown) => break 'drive,
+                Ok(Event::Kick) => {}
+                Ok(Event::Datagram(data)) => {
+                    log::debug!("wg: <- udp {} B from peer", data.len());
+                    self.handle_incoming(&mut tunn, &udp, &data, &mut device, &mut scratch);
                 }
+                Ok(Event::Dial { addr, reply }) => {
+                    self.exec_dial(addr, reply, &mut sockets, &mut iface, &mut conns, &mut next_local_port);
+                }
+                Ok(Event::Resolve { host, reply }) => {
+                    self.exec_resolve(host, reply, &mut sockets, &mut iface, dns_handle, &mut dns_pending);
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => break 'drive,
             }
 
             // 7. WireGuard timers (handshake init, keepalive, rekey). boringtun's
-            //    timers are second-granular; throttle to ~250 ms instead of every
-            //    ~5 ms tick (it also resets the rate limiter on every call).
+            //    timers are second-granular; throttle to ~250 ms (it also resets
+            //    the rate limiter on every call).
             if last_timers.elapsed() >= Duration::from_millis(250) {
                 last_timers = StdInstant::now();
                 match tunn.update_timers(&mut scratch) {
@@ -1152,6 +1194,63 @@ impl Driver {
             g.recv_finished = true;
             g.to_socket.clear();
             shared.cv.notify_all();
+        }
+    }
+
+    /// Apply a Dial event (shared by the step-1 drain and the step-6 wait).
+    fn exec_dial(
+        &self,
+        addr: IpEndpoint,
+        reply: Sender<io::Result<Arc<ConnShared>>>,
+        sockets: &mut SocketSet,
+        iface: &mut Interface,
+        conns: &mut Vec<Arc<ConnShared>>,
+        next_local_port: &mut u16,
+    ) {
+        match self.open_socket(sockets, iface, addr, next_local_port) {
+            Ok(handle) => {
+                let shared = ConnShared::new(handle);
+                conns.push(Arc::clone(&shared));
+                let _ = reply.send(Ok(shared));
+            }
+            Err(e) => {
+                let _ = reply.send(Err(e));
+            }
+        }
+    }
+
+    /// Apply a Resolve event (shared by the step-1 drain and the step-6 wait).
+    fn exec_resolve(
+        &self,
+        host: String,
+        reply: Sender<io::Result<IpAddr>>,
+        sockets: &mut SocketSet,
+        iface: &mut Interface,
+        dns_handle: Option<SocketHandle>,
+        dns_pending: &mut Vec<(dns::QueryHandle, StdInstant, Sender<io::Result<IpAddr>>)>,
+    ) {
+        match dns_handle {
+            Some(h) => {
+                let sock = sockets.get_mut::<dns::Socket>(h);
+                match sock.start_query(iface.context(), &host, DnsQueryType::A) {
+                    Ok(q) => {
+                        log::debug!("wg: in-tunnel DNS query for {host}");
+                        dns_pending.push((q, StdInstant::now(), reply));
+                    }
+                    Err(e) => {
+                        let _ = reply.send(Err(io::Error::new(
+                            io::ErrorKind::Other,
+                            format!("DNS query failed: {e:?}"),
+                        )));
+                    }
+                }
+            }
+            None => {
+                let _ = reply.send(Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "no WG DNS servers configured",
+                )));
+            }
         }
     }
 

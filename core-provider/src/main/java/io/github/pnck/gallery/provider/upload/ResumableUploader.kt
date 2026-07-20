@@ -158,8 +158,10 @@ class ResumableUploader(
                     if (++chainedErrors > MAX_CHAINED_ERRORS) {
                         return ApiResult.Error(response.code(), response.message(), retryable = true)
                     }
-                    // Brief linear backoff before re-trying the same chunk.
-                    delay(1_000L * chainedErrors)
+                    // Drive's quota model: Retry-After is authoritative when present
+                    // (seconds); only fall back to linear backoff when absent.
+                    val retryAfterSec = response.headers()["Retry-After"]?.toLongOrNull()
+                    delay((retryAfterSec ?: chainedErrors.toLong()).coerceAtMost(MAX_BACKOFF_SEC) * 1000)
                 }
                 else ->
                     return ApiResult.Error(
@@ -272,6 +274,7 @@ class ResumableUploader(
         const val CHUNK_SIZE = 8L * 1024 * 1024
         private const val HTTP_RESUME_INCOMPLETE = 308
         private const val MAX_CHAINED_ERRORS = 5
+        private const val MAX_BACKOFF_SEC = 60L
 
         /** `Range: bytes=0-1048575` → the NEXT offset to send (1048576). */
         internal fun parseConfirmedOffset(range: String?): Long? =
