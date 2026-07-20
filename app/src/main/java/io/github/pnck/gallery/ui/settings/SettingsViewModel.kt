@@ -79,6 +79,11 @@ class SettingsViewModel @Inject constructor(
 
     init {
         refreshAuthState()
+        // Live auth state: a server-rejected grant (401 / invalid_grant) flips this
+        // even while the user is sitting on the Settings screen.
+        viewModelScope.launch {
+            googleAuthManager.authorized.collect { refreshAuthState() }
+        }
     }
 
     /** Keystore-backed read is synchronous + can jank the main thread — do it off-main. */

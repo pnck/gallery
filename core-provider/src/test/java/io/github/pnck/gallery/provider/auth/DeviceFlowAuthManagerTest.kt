@@ -138,4 +138,66 @@ class DeviceFlowAuthManagerTest {
         mgr.signOut()
         assertFalse(mgr.isAuthorized())
     }
+
+    @Test
+    fun `invalid_grant on refresh invalidates the grant locally`() = runTest {
+        val store = FakeTokenStore().apply {
+            write(ProviderType.G_DRIVE, StoredTokens("stale", clock - 1000, "RT"))
+        }
+        val api = FakeDeviceAuthApi(refresh = tokenError("invalid_grant"))
+        val mgr = manager(api, store)
+        assertTrue(mgr.authorized.value)
+
+        try {
+            mgr.getValidAccessToken()
+            error("expected AuthNotAuthorizedException")
+        } catch (_: AuthNotAuthorizedException) {
+        }
+
+        // A dead grant must not keep reporting "connected".
+        assertFalse(mgr.isAuthorized())
+        assertFalse(mgr.authorized.value)
+        assertEquals(null, store.read(ProviderType.G_DRIVE))
+    }
+
+    @Test
+    fun `transient refresh failure keeps the grant`() = runTest {
+        val store = FakeTokenStore().apply {
+            write(ProviderType.G_DRIVE, StoredTokens("stale", clock - 1000, "RT"))
+        }
+        val api = FakeDeviceAuthApi(refresh = tokenError("temporarily_unavailable", httpCode = 503))
+        val mgr = manager(api, store)
+
+        try {
+            mgr.getValidAccessToken()
+            error("expected AuthNotAuthorizedException")
+        } catch (_: AuthNotAuthorizedException) {
+        }
+
+        // Network/5xx is retryable: tokens stay, next attempt may succeed.
+        assertTrue(mgr.isAuthorized())
+        assertTrue(mgr.authorized.value)
+    }
+
+    @Test
+    fun `authorized flow tracks persist and invalidate`() = runTest {
+        val store = FakeTokenStore()
+        val mgr = manager(FakeDeviceAuthApi(), store)
+        assertFalse(mgr.authorized.value)
+
+        val api = FakeDeviceAuthApi(
+            exchangeQueue = ArrayDeque(
+                listOf(Response.success(TokenResponse(accessToken = "AT", refreshToken = "RT", expiresIn = 3600))),
+            ),
+        )
+        val mgr2 = manager(api, store)
+        mgr2.pollForToken(
+            io.github.pnck.gallery.provider.DeviceAuthChallenge("dc", "WXYZ", "u", 900, 0),
+        )
+        assertTrue(mgr2.authorized.value)
+
+        mgr2.invalidateAuth()
+        assertFalse(mgr2.authorized.value)
+        assertFalse(mgr2.isAuthorized())
+    }
 }

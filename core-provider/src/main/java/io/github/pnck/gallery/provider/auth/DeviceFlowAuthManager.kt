@@ -8,6 +8,8 @@ import io.github.pnck.gallery.provider.OAuthConfig
 import io.github.pnck.gallery.provider.ProviderType
 import io.github.pnck.gallery.provider.safeApiCall
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -33,6 +35,14 @@ class DeviceFlowAuthManager(
 ) : AuthManager {
 
     private val refreshMutex = Mutex()
+
+    /**
+     * Kept in sync with the token store: set on persist, cleared on sign-out and on
+     * server-side rejection (401 / invalid_grant). One EncryptedSharedPreferences
+     * read at construction — the store itself is already a DI singleton.
+     */
+    private val _authorized = MutableStateFlow(tokenStore.read(providerType) != null)
+    override val authorized: StateFlow<Boolean> = _authorized
 
     /** The scope of the in-flight authorization, persisted with the resulting token. */
     @Volatile
@@ -109,6 +119,12 @@ class DeviceFlowAuthManager(
                 persist(body.accessToken, body.refreshToken ?: fresh.refreshToken, body.expiresIn, fresh.scope)
                 body.accessToken
             } else {
+                // invalid_grant = the refresh token is dead (revoked, expired, or the
+                // client changed): the grant can never recover, so drop it locally and
+                // let the UI flip to "disconnected". Any other failure (network, 5xx)
+                // is transient — keep the tokens and try again next time.
+                val error = body?.error ?: response.errorBody()?.let { parseError(it.string()) }
+                if (error == "invalid_grant") invalidateAuth()
                 throw AuthNotAuthorizedException(providerType)
             }
         }
@@ -116,11 +132,17 @@ class DeviceFlowAuthManager(
 
     override fun isAuthorized(): Boolean = tokenStore.read(providerType) != null
 
-    override suspend fun signOut() = tokenStore.clear(providerType)
+    override fun invalidateAuth() {
+        tokenStore.clear(providerType)
+        _authorized.value = false
+    }
+
+    override suspend fun signOut() = invalidateAuth()
 
     private fun persist(accessToken: String, refreshToken: String, expiresInSec: Int?, scope: String) {
         val expiry = now() + (expiresInSec ?: DEFAULT_EXPIRY_SEC) * 1000L
         tokenStore.write(providerType, StoredTokens(accessToken, expiry, refreshToken, scope))
+        _authorized.value = true
     }
 
     private fun parseError(raw: String): String? =

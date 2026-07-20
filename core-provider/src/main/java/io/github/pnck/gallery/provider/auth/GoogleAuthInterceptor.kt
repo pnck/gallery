@@ -16,6 +16,11 @@ import okhttp3.Response
  *
  * Unauthorized state: the request proceeds without a header and the API answers
  * 401, which providers surface as a non-retryable ApiResult.Error.
+ *
+ * Server-side rejection: if a request WITH a Bearer token still comes back 401,
+ * the grant is dead (revoked / remotely expired) even though the local token
+ * looked valid — tell the AuthManager to invalidate so the UI flips to
+ * "disconnected" instead of showing a phantom "connected".
  */
 class GoogleAuthInterceptor(
     private val authManager: AuthManager,
@@ -37,10 +42,14 @@ class GoogleAuthInterceptor(
         } catch (_: Exception) {
             null
         }
-        return if (token == null) {
+        val response = if (token == null) {
             chain.proceed(request)
         } else {
             chain.proceed(request.newBuilder().header("Authorization", "Bearer $token").build())
         }
+        if (token != null && response.code == 401) {
+            authManager.invalidateAuth()
+        }
+        return response
     }
 }

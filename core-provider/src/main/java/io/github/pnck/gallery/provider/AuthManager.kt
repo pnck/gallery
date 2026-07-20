@@ -1,6 +1,7 @@
 package io.github.pnck.gallery.provider
 
 import io.github.pnck.gallery.network.ApiResult
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Per-provider auth contract — OAuth 2.0 Device Authorization Grant (ADR-0001,
@@ -37,6 +38,21 @@ interface AuthManager {
     suspend fun getValidAccessToken(): String
 
     fun isAuthorized(): Boolean
+
+    /**
+     * Live view of [isAuthorized] for the UI: true while tokens are held, flips to
+     * false on sign-out AND when the server rejects the grant (see [invalidateAuth])
+     * — a revoked/expired-remotely grant must not keep showing "connected".
+     */
+    val authorized: StateFlow<Boolean>
+
+    /**
+     * Locally invalidate the grant because the SERVER rejected it (401 with a Bearer
+     * token attached, or `invalid_grant` on refresh). Clears stored tokens so
+     * [isAuthorized] turns false and the UI can prompt re-authorization. Distinct
+     * from [signOut]: not user-initiated, and safe to call from any thread.
+     */
+    fun invalidateAuth()
 
     suspend fun signOut()
 }
