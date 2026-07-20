@@ -1006,7 +1006,10 @@ impl Driver {
                 // Fully dead (RST, smoltcp timeout/keepalive abort): writers must
                 // get BrokenPipe, not a condvar sleep that nothing can end — a
                 // post-connect RST otherwise strands the splice thread forever.
-                if !sock.may_recv() && !sock.may_send() && g.status != ConnStatus::Failed {
+                // CRITICAL: only judge connections that were ESTABLISHED — in
+                // SynSent/SynReceived smoltcp reports may_send=may_recv=false on a
+                // perfectly healthy socket that's still connecting.
+                if g.status == ConnStatus::Connected && !sock.may_recv() && !sock.may_send() {
                     g.status = ConnStatus::Failed;
                     g.recv_finished = true;
                     changed = true;
@@ -1398,6 +1401,155 @@ mod tests {
     #[test]
     fn parse_rejects_bad_key() {
         assert!(WgParams::parse("not-base64!!", "AAAA", None, "1.2.3.4:51820", &["10.0.0.2/32".into()], &[], 25, 0).is_err());
+    }
+
+    /// Full end-to-end smoke test: a REAL WgTunnel (driver thread, smoltcp,
+    /// boringtun, UDP loopback) against a scripted in-memory WG server (a second
+    /// Tunn + a server-side smoltcp stack running a TCP echo listener).
+    /// Guards the whole data path — dial, connect-state transitions, write,
+    /// read-back — the class of bug where every connection fails instantly.
+    #[test]
+    fn end_to_end_tcp_echo_through_live_tunnel() {
+        let (c_sk, c_pk) = keypair();
+        let (s_sk, s_pk) = keypair();
+
+        // The scripted server: UDP socket + Tunn + smoltcp with an echo listener.
+        let server_udp = UdpSocket::bind(("127.0.0.1", 0)).unwrap();
+        server_udp.set_read_timeout(Some(Duration::from_millis(2))).unwrap();
+        let server_port = server_udp.local_addr().unwrap().port();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop2 = Arc::clone(&stop);
+        let server = std::thread::spawn(move || {
+            run_echo_server(server_udp, s_sk, c_pk, stop2);
+        });
+
+        // The real client tunnel, aimed at the scripted server.
+        let params = WgParams::parse(
+            &base64::engine::general_purpose::STANDARD.encode(c_sk.to_bytes()),
+            &base64::engine::general_purpose::STANDARD.encode(s_pk.to_bytes()),
+            None,
+            &format!("127.0.0.1:{server_port}"),
+            &["10.99.0.2/32".into()],
+            &[],
+            25,
+            0,
+        )
+        .unwrap();
+        let tunnel = WgTunnel::start(params).unwrap();
+
+        // Dial the echo listener THROUGH the tunnel (10.99.0.1 = server interface).
+        let deadline = StdInstant::now() + Duration::from_secs(20);
+        let mut stream = loop {
+            match tunnel.dial("10.99.0.1", 4321) {
+                Ok(s) => break s,
+                Err(e) => {
+                    assert!(StdInstant::now() < deadline, "dial never succeeded: {e}");
+                    std::thread::sleep(Duration::from_millis(500));
+                }
+            }
+        };
+        stream.write_all(b"ping").unwrap();
+        let mut buf = [0u8; 4];
+        stream.read_exact(&mut buf).unwrap();
+        assert_eq!(&buf, b"ping", "echo must round-trip through the live tunnel");
+
+        tunnel.shutdown();
+        stop.store(true, Ordering::SeqCst);
+        let _ = server.join();
+    }
+
+    /// The scripted server: decapsulate client datagrams, feed IP into a
+    /// server-side smoltcp stack, echo TCP payloads on port 4321, encapsulate
+    /// replies back. Runs until `stop` is set.
+    fn run_echo_server(udp: UdpSocket, sk: StaticSecret, client_pk: PublicKey, stop: Arc<AtomicBool>) {
+        let mut tunn = Tunn::new(sk, client_pk, None, None, 1, None);
+
+        let mut device = TunDevice::new(DEFAULT_MTU);
+        let mut config = Config::new(HardwareAddress::Ip);
+        config.random_seed = 42;
+        let mut iface = Interface::new(config, &mut device, SmolInstant::from_millis(0));
+        iface.update_ip_addrs(|a| {
+            let _ = a.push(IpCidr::new(IpAddress::from(smoltcp::wire::Ipv4Address::new(10, 99, 0, 1)), 32));
+        });
+        let _ = iface
+            .routes_mut()
+            .add_default_ipv4_route(smoltcp::wire::Ipv4Address::new(10, 99, 0, 1).into());
+
+        let mut sockets = SocketSet::new(Vec::new());
+        let rx = tcp::SocketBuffer::new(vec![0u8; 4096]);
+        let tx = tcp::SocketBuffer::new(vec![0u8; 4096]);
+        let mut listener = tcp::Socket::new(rx, tx);
+        listener.listen(4321).unwrap();
+        let echo_handle = sockets.add(listener);
+
+        let smol_start = StdInstant::now();
+        let mut scratch = [0u8; SCRATCH];
+        let mut peer_addr: Option<SocketAddr> = None;
+
+        while !stop.load(Ordering::SeqCst) {
+            // WG datagrams in.
+            let mut buf = [0u8; SCRATCH];
+            match udp.recv_from(&mut buf) {
+                Ok((n, from)) => {
+                    peer_addr = Some(from);
+                    let mut tmp = [0u8; SCRATCH];
+                    match tunn.decapsulate(None, &buf[..n], &mut tmp) {
+                        TunnResult::WriteToNetwork(out) => {
+                            let _ = udp.send_to(out, from);
+                            loop {
+                                match tunn.decapsulate(None, &[], &mut tmp) {
+                                    TunnResult::WriteToNetwork(more) => {
+                                        let _ = udp.send_to(more, from);
+                                    }
+                                    _ => break,
+                                }
+                            }
+                        }
+                        TunnResult::WriteToTunnelV4(pkt, _) | TunnResult::WriteToTunnelV6(pkt, _) => {
+                            device.inbound.push_back(pkt.to_vec());
+                        }
+                        _ => {}
+                    }
+                }
+                Err(ref e)
+                    if matches!(
+                        e.kind(),
+                        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut | io::ErrorKind::Interrupted
+                    ) => {}
+                Err(_) => break,
+            }
+
+            // Drive the server TCP stack; echo anything received.
+            let now = SmolInstant::from_micros(smol_start.elapsed().as_micros() as i64);
+            iface.poll(now, &mut device, &mut sockets);
+            {
+                let sock = sockets.get_mut::<tcp::Socket>(echo_handle);
+                if sock.can_recv() && sock.can_send() {
+                    let mut data = [0u8; 4096];
+                    if let Ok(n) = sock.recv_slice(&mut data) {
+                        if n > 0 {
+                            let _ = sock.send_slice(&data[..n]);
+                        }
+                    }
+                }
+            }
+
+            // Server packets out: encapsulate → client.
+            while let Some(pkt) = device.outbound.pop_front() {
+                if let TunnResult::WriteToNetwork(out) = tunn.encapsulate(&pkt, &mut scratch) {
+                    if let Some(to) = peer_addr {
+                        let _ = udp.send_to(out, to);
+                    }
+                }
+            }
+
+            // WG timers (rekey/keepalive responses).
+            if let TunnResult::WriteToNetwork(out) = tunn.update_timers(&mut scratch) {
+                if let Some(to) = peer_addr {
+                    let _ = udp.send_to(out, to);
+                }
+            }
+        }
     }
 
     #[test]
