@@ -125,7 +125,21 @@ impl Dialer {
             } => {
                 // Dial the upstream SOCKS5's IP:port *inside* the tunnel, then run
                 // the identical SOCKS5 client handshake over the tunnel stream.
-                let mut up = tunnel.dial(host, *port)?;
+                // A hostname upstream (e.g. "nas.home") is resolved via in-tunnel
+                // DNS first — WgTunnel::dial only accepts IP literals, so without
+                // this every single request failed with an opaque "general failure".
+                let ip = match host.parse::<std::net::IpAddr>() {
+                    Ok(ip) => ip.to_string(),
+                    Err(_) => dual_resolve_via_tunnel(tunnel, host)
+                        .map_err(|e| {
+                            io::Error::new(
+                                io::ErrorKind::NotFound,
+                                format!("in-tunnel DNS for upstream '{host}' failed: {e}"),
+                            )
+                        })?
+                        .to_string(),
+                };
+                let mut up = tunnel.dial(&ip, *port)?;
                 socks5_client_handshake(&mut up, auth.as_ref(), target)?;
                 Ok(Box::new(up))
             }
@@ -264,9 +278,25 @@ fn handle_client(mut client: TcpStream, dialer: &Dialer) -> io::Result<()> {
             splice(Box::new(client), upstream)
         }
         Err(e) => {
-            let _ = reply(&mut client, REP_GENERAL_FAIL);
+            // Map the failure to a SPECIFIC reply code so the client (OkHttp)
+            // surfaces "host unreachable" / "connection refused" instead of the
+            // opaque "SOCKS server general failure" — and log it at warn: dial
+            // failures are exactly what users report, keep them visible.
+            log::warn!("socks5: dial {target:?} failed: {e}");
+            let _ = reply(&mut client, rep_for(&e));
             Err(e)
         }
+    }
+}
+
+/// RFC 1928 reply codes for a failed CONNECT — precise beats generic.
+fn rep_for(e: &io::Error) -> u8 {
+    match e.kind() {
+        io::ErrorKind::NotFound => 0x04,           // host unreachable (DNS failed)
+        io::ErrorKind::ConnectionRefused => 0x05,  // connection refused
+        io::ErrorKind::PermissionDenied => 0x02,   // not allowed by ruleset (auth)
+        io::ErrorKind::TimedOut => 0x03,           // network unreachable
+        _ => REP_GENERAL_FAIL,
     }
 }
 
