@@ -53,4 +53,6 @@ env_filter = "0.1"
 opt-level = "z"
 lto = true
 strip = true
-panic = "abort"
+# NO panic = "abort": the WG driver's panic guard (catch_unwind in wg.rs) must be
+# able to catch a driver-thread panic so it can zero the health atoms and fail
+# connections instead of taking down the whole app process.

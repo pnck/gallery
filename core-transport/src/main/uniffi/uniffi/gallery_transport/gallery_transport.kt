@@ -1580,6 +1580,12 @@ data class TransportHealth (
      * Direct/SocksUpstream it means the local SOCKS5 listener is up.
      */
     var `handshakeOk`: kotlin.Boolean, 
+    /**
+     * The WG driver thread has exited (shutdown or unexpected death). Kotlin
+     * must treat this as Failed(retryable) even if no handshake ever completed —
+     * otherwise a pre-handshake driver death wedges the state machine forever.
+     */
+    var `driverDead`: kotlin.Boolean, 
     var `localSocksPort`: kotlin.UShort?, 
     /**
      * Unix epoch seconds of the last completed WG handshake (WG modes only).
@@ -1603,6 +1609,7 @@ public object FfiConverterTypeTransportHealth: FfiConverterRustBuffer<TransportH
     override fun read(buf: ByteBuffer): TransportHealth {
         return TransportHealth(
             FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
             FfiConverterOptionalUShort.read(buf),
             FfiConverterOptionalLong.read(buf),
             FfiConverterOptionalULong.read(buf),
@@ -1613,6 +1620,7 @@ public object FfiConverterTypeTransportHealth: FfiConverterRustBuffer<TransportH
 
     override fun allocationSize(value: TransportHealth) = (
             FfiConverterBoolean.allocationSize(value.`handshakeOk`) +
+            FfiConverterBoolean.allocationSize(value.`driverDead`) +
             FfiConverterOptionalUShort.allocationSize(value.`localSocksPort`) +
             FfiConverterOptionalLong.allocationSize(value.`lastHandshakeEpoch`) +
             FfiConverterOptionalULong.allocationSize(value.`txBytes`) +
@@ -1622,6 +1630,7 @@ public object FfiConverterTypeTransportHealth: FfiConverterRustBuffer<TransportH
 
     override fun write(value: TransportHealth, buf: ByteBuffer) {
             FfiConverterBoolean.write(value.`handshakeOk`, buf)
+            FfiConverterBoolean.write(value.`driverDead`, buf)
             FfiConverterOptionalUShort.write(value.`localSocksPort`, buf)
             FfiConverterOptionalLong.write(value.`lastHandshakeEpoch`, buf)
             FfiConverterOptionalULong.write(value.`txBytes`, buf)

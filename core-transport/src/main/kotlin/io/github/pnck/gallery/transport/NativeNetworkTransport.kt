@@ -1,5 +1,6 @@
 package io.github.pnck.gallery.transport
 
+import android.os.SystemClock
 import io.github.pnck.gallery.network.transport.NetworkTransport
 import io.github.pnck.gallery.network.transport.ProxyKind
 import io.github.pnck.gallery.network.transport.ProxySpec
@@ -88,6 +89,13 @@ class NativeNetworkTransport(
             localSocksPort = 0
             _state.value = TransportState.Failed(e.message ?: "transport start failed", retryable = true)
             throw e
+        } catch (t: Throwable) {
+            // UniFFI runtime errors, config-mapping IllegalArgumentException, etc.:
+            // without this the state would wedge at Connecting with traffic silently
+            // going direct, and the supervisor (which only acts on Failed) never fires.
+            localSocksPort = 0
+            _state.value = TransportState.Failed(t.message ?: "transport start crashed", retryable = true)
+            throw t
         }
     }
 
@@ -99,13 +107,25 @@ class NativeNetworkTransport(
         _state.value = TransportState.Connecting
         handshakeJob?.cancel()
         handshakeJob = scope.launch {
-            val startMs = System.currentTimeMillis()
+            // Monotonic clock: wall-clock jumps (NTP/user) must not fabricate a
+            // 20 s "handshake lost" gap and trigger a spurious reconnect.
+            val startMs = SystemClock.elapsedRealtime()
             var everConnected = false
             var lastOkMs = 0L
             while (isActive) {
                 val h = withContext(Dispatchers.IO) { core.health() }
-                val now = System.currentTimeMillis()
+                val now = SystemClock.elapsedRealtime()
                 when {
+                    // The Rust driver thread EXITED (panic caught, or unexpected
+                    // return): the tunnel can never recover on its own — fail fast
+                    // even if no handshake ever completed.
+                    h.driverDead -> {
+                        _state.value = TransportState.Failed(
+                            "transport driver died — reconnecting with a fresh driver.",
+                            retryable = true,
+                        )
+                        return@launch
+                    }
                     h.handshakeOk -> {
                         everConnected = true
                         lastOkMs = now

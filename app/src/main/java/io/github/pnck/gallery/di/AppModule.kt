@@ -87,7 +87,12 @@ object AppModule {
     @Provides
     @Singleton
     fun provideTransportController(): TransportController =
-        TransportController(CoroutineScope(SupervisorJob() + Dispatchers.Default))
+        TransportController(CoroutineScope(SupervisorJob() + Dispatchers.Default)).apply {
+            // Every route rebind (manual connect/disconnect AND supervisor
+            // auto-reconnect) must drop pooled connections — a pooled socket keeps
+            // pointing at the dead tunnel's old loopback port otherwise.
+            onRouteRebind = { SharedHttpClient.evictAll() }
+        }
 
     @Provides
     @Singleton

@@ -56,6 +56,16 @@ const CONN_BUF_CAP: usize = 256 * 1024;
 const TICK: Duration = Duration::from_millis(5);
 /// Fallback DNS resolvers when the WG config specifies none (design semantic).
 const DEFAULT_DNS: [&str; 2] = ["1.1.1.1", "8.8.8.8"];
+/// Bound on `wait_connected` — a SYN to a blackholed in-tunnel address must not
+/// park the SOCKS handler thread forever (OkHttp's own connect timeout is 20 s).
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(25);
+/// Safety net for backpressured writers: the driver notifies on every drain, so
+/// this should never fire — but a missed wake-up must error, not deadlock.
+const WRITE_WAIT_TIMEOUT: Duration = Duration::from_secs(60);
+/// smoltcp socket liveness: probes after 30 s idle, abort after 75 s silent —
+/// a dead peer/session errors the connection instead of retransmitting forever.
+const TCP_KEEPALIVE: Duration = Duration::from_secs(30);
+const TCP_TIMEOUT: Duration = Duration::from_secs(75);
 
 /// Parsed, validated WireGuard parameters (from CoreConfig::WgThenSocks).
 #[derive(Clone)]
@@ -305,6 +315,9 @@ pub struct WgTunnel {
     tx_bytes: Arc<AtomicU64>,
     rx_bytes: Arc<AtomicU64>,
     stopped: Arc<AtomicBool>,
+    /// Set when the driver thread has EXITED (any reason). health() surfaces this
+    /// so Kotlin can declare Failed even if no handshake ever completed.
+    driver_dead: Arc<AtomicBool>,
     /// Driver thread handle, joined by [`shutdown`] so teardown is deterministic even
     /// when an in-flight tunnel connection still holds an `Arc<WgTunnel>` (otherwise a
     /// leaked driver keeps racing the peer — two tunnels for one session).
@@ -335,6 +348,7 @@ impl WgTunnel {
         let tx_bytes = Arc::new(AtomicU64::new(0));
         let rx_bytes = Arc::new(AtomicU64::new(0));
         let stopped = Arc::new(AtomicBool::new(false));
+        let driver_dead = Arc::new(AtomicBool::new(false));
 
         let driver = Driver {
             cmd_rx,
@@ -346,15 +360,19 @@ impl WgTunnel {
         };
         // Panic-safety: if the driver ever unwinds (or exits), zero the health atoms
         // so `health()` reports the tunnel DOWN instead of freezing at its last-good
-        // values — otherwise diag lies "OK" while all traffic is dead.
+        // values — otherwise diag lies "OK" while all traffic is dead. driver_dead
+        // lets the Kotlin monitor declare Failed even before any handshake.
+        // (Requires panic=unwind — do NOT set panic="abort" in Cargo.toml.)
         let hs_ok = Arc::clone(&handshake_ok);
         let hs_epoch = Arc::clone(&last_handshake_epoch);
+        let dead = Arc::clone(&driver_dead);
         let handle = std::thread::Builder::new()
             .name("gallery-wg-driver".into())
             .spawn(move || {
                 let _ = catch_unwind(AssertUnwindSafe(|| driver.run(params, udp)));
                 hs_ok.store(false, Ordering::SeqCst);
                 hs_epoch.store(0, Ordering::SeqCst);
+                dead.store(true, Ordering::SeqCst);
             })
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
 
@@ -366,6 +384,7 @@ impl WgTunnel {
             tx_bytes,
             rx_bytes,
             stopped,
+            driver_dead,
             join: Mutex::new(Some(handle)),
         })
     }
@@ -435,6 +454,11 @@ impl WgTunnel {
 
     pub fn handshake_ok(&self) -> bool {
         self.handshake_ok.load(Ordering::SeqCst)
+    }
+
+    /// True once the driver thread has exited (shutdown OR unexpected death).
+    pub fn driver_dead(&self) -> bool {
+        self.driver_dead.load(Ordering::SeqCst)
     }
 
     /// WireGuard data bytes sent / received through the tunnel (boringtun stats).
@@ -616,6 +640,7 @@ pub struct TunnelStream {
 
 impl TunnelStream {
     fn wait_connected(&self) -> io::Result<()> {
+        let deadline = StdInstant::now() + CONNECT_TIMEOUT;
         let mut g = self.shared.inner.lock().unwrap();
         loop {
             match g.status {
@@ -626,7 +651,26 @@ impl TunnelStream {
                         "tunnel TCP connect failed",
                     ))
                 }
-                ConnStatus::Connecting => g = self.shared.cv.wait(g).unwrap(),
+                ConnStatus::Connecting => {
+                    let remain = deadline.saturating_duration_since(StdInstant::now());
+                    if remain.is_zero() {
+                        // Blackholed target (peer not routing, dead exit): fail the
+                        // conn so the reaper can collect it, don't park forever.
+                        g.status = ConnStatus::Failed;
+                        g.recv_finished = true;
+                        self.shared.cv.notify_all();
+                        return Err(io::Error::new(
+                            io::ErrorKind::TimedOut,
+                            "tunnel TCP connect timed out",
+                        ));
+                    }
+                    let (guard, _) = self
+                        .shared
+                        .cv
+                        .wait_timeout(g, remain.min(Duration::from_secs(1)))
+                        .unwrap();
+                    g = guard;
+                }
             }
         }
     }
@@ -638,9 +682,13 @@ impl Read for TunnelStream {
         loop {
             if !g.from_socket.is_empty() {
                 let n = g.from_socket.len().min(buf.len());
-                for b in buf.iter_mut().take(n) {
-                    *b = g.from_socket.pop_front().unwrap();
+                let (a, b) = g.from_socket.as_slices();
+                let na = a.len().min(n);
+                buf[..na].copy_from_slice(&a[..na]);
+                if n > na {
+                    buf[na..n].copy_from_slice(&b[..n - na]);
                 }
+                g.from_socket.drain(..n);
                 return Ok(n);
             }
             if g.recv_finished || g.status == ConnStatus::Failed {
@@ -663,13 +711,39 @@ impl Write for TunnelStream {
                 self.shared.cv.notify_all();
                 return Ok(buf.len());
             }
-            // Backpressure: wait for the driver to drain into the socket.
-            g = self.shared.cv.wait(g).unwrap();
+            // Backpressure: wait for the driver to drain into the socket. Bounded —
+            // the driver notifies on every drain, so a timeout here means the driver
+            // is gone; error instead of deadlocking the splice thread.
+            let (guard, elapsed) = self.shared.cv.wait_timeout(g, WRITE_WAIT_TIMEOUT).unwrap();
+            g = guard;
+            if elapsed.timed_out() && g.to_socket.len() >= CONN_BUF_CAP {
+                g.status = ConnStatus::Failed;
+                g.recv_finished = true;
+                self.shared.cv.notify_all();
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "tunnel write stalled (driver not draining)",
+                ));
+            }
         }
     }
 
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
+    }
+}
+
+/// Dropping the last app handle closes the write half (graceful FIN once drained),
+/// so paths that drop a stream without an explicit `shutdown_write` (DNS queries,
+/// failed upstream handshakes) don't leak the smoltcp socket forever.
+impl Drop for TunnelStream {
+    fn drop(&mut self) {
+        if Arc::strong_count(&self.shared) <= 2 {
+            // Only this handle + the driver's conns entry remain.
+            let mut g = self.shared.inner.lock().unwrap();
+            g.app_write_closed = true;
+            self.shared.cv.notify_all();
+        }
     }
 }
 
@@ -771,7 +845,7 @@ impl Driver {
         let mut last_timers = StdInstant::now();
         let mut established = false;
 
-        loop {
+        'drive: loop {
             if self.stopped.load(Ordering::SeqCst) {
                 break;
             }
@@ -779,7 +853,7 @@ impl Driver {
             // 1. Drain commands (non-blocking).
             while let Ok(cmd) = self.cmd_rx.try_recv() {
                 match cmd {
-                    Command::Shutdown => return,
+                    Command::Shutdown => break 'drive,
                     Command::Dial { addr, reply } => {
                         let res = self.open_socket(
                             &mut sockets,
@@ -825,19 +899,39 @@ impl Driver {
             }
 
             // 2. App → socket: move queued app bytes into smoltcp send buffers,
-            //    and close sockets whose app write half is done.
+            //    and close sockets whose app write half is done. CRITICAL: notify
+            //    after draining — a backpressured writer parks on the condvar and
+            //    inbound events (step 4) are the only other wake source, but during
+            //    an upload the server sends nothing until the body completes, so
+            //    without this notify the writer sleeps forever at ~one buffer.
             for shared in &conns {
                 let sock = sockets.get_mut::<tcp::Socket>(shared.handle);
                 let mut g = shared.inner.lock().unwrap();
-                while sock.can_send() && !g.to_socket.is_empty() {
-                    let chunk: Vec<u8> = g.to_socket.iter().copied().collect();
-                    match sock.send_slice(&chunk) {
-                        Ok(0) => break,
-                        Ok(n) => {
-                            g.to_socket.drain(..n);
-                        }
-                        Err(_) => break,
+                if g.status == ConnStatus::Failed || sock.state() == tcp::State::Closed {
+                    // Undeliverable bytes would block the reaper forever — drop them.
+                    if !g.to_socket.is_empty() {
+                        g.to_socket.clear();
+                        shared.cv.notify_all();
                     }
+                    continue;
+                }
+                let mut drained = false;
+                while sock.can_send() && !g.to_socket.is_empty() {
+                    // Copy out only the contiguous head slice (non-empty for a
+                    // non-empty deque) — no whole-queue copy per tick.
+                    let n = {
+                        let (a, _) = g.to_socket.as_slices();
+                        match sock.send_slice(a) {
+                            Ok(0) => break,
+                            Ok(n) => n,
+                            Err(_) => break,
+                        }
+                    };
+                    g.to_socket.drain(..n);
+                    drained = true;
+                }
+                if drained {
+                    shared.cv.notify_all();
                 }
                 if g.app_write_closed && g.to_socket.is_empty() && sock.may_send() {
                     sock.close();
@@ -906,6 +1000,14 @@ impl Driver {
                     if sock.state() == tcp::State::Closed && g.status == ConnStatus::Connecting {
                         g.status = ConnStatus::Failed;
                     }
+                    g.recv_finished = true;
+                    changed = true;
+                }
+                // Fully dead (RST, smoltcp timeout/keepalive abort): writers must
+                // get BrokenPipe, not a condvar sleep that nothing can end — a
+                // post-connect RST otherwise strands the splice thread forever.
+                if !sock.may_recv() && !sock.may_send() && g.status != ConnStatus::Failed {
+                    g.status = ConnStatus::Failed;
                     g.recv_finished = true;
                     changed = true;
                 }
@@ -1020,6 +1122,18 @@ impl Driver {
                 }
             });
         }
+
+        // Driver exit (stop, Shutdown command, or the stopped flag): nothing will
+        // ever service these conns again. Fail them ALL and broadcast — any thread
+        // parked in read/write/wait_connected must get an error, not sleep forever
+        // (each stranded waiter leaks a thread + loopback fds per reconnect).
+        for shared in &conns {
+            let mut g = shared.inner.lock().unwrap();
+            g.status = ConnStatus::Failed;
+            g.recv_finished = true;
+            g.to_socket.clear();
+            shared.cv.notify_all();
+        }
     }
 
     fn open_socket(
@@ -1029,15 +1143,30 @@ impl Driver {
         addr: IpEndpoint,
         next_local_port: &mut u16,
     ) -> io::Result<SocketHandle> {
-        let rx = tcp::SocketBuffer::new(vec![0u8; 64 * 1024]);
-        let tx = tcp::SocketBuffer::new(vec![0u8; 64 * 1024]);
-        let mut sock = tcp::Socket::new(rx, tx);
-        sock.set_nagle_enabled(false);
-        let local_port = *next_local_port;
-        *next_local_port = next_local_port.checked_add(1).unwrap_or(49152);
-        sock.connect(iface.context(), addr, local_port)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("connect: {e:?}")))?;
-        Ok(sockets.add(sock))
+        let mut last_err = None;
+        // Retry on ephemeral-port collision (a wrapped counter can land on a port
+        // still held by a live socket).
+        for _ in 0..8 {
+            let rx = tcp::SocketBuffer::new(vec![0u8; 64 * 1024]);
+            let tx = tcp::SocketBuffer::new(vec![0u8; 64 * 1024]);
+            let mut sock = tcp::Socket::new(rx, tx);
+            sock.set_nagle_enabled(false);
+            // Liveness: without these a SYN to a blackholed address retransmits
+            // forever and a silently-dead session never errors — the socket (128
+            // KiB of buffers) and its handler thread leak.
+            sock.set_keep_alive(Some(smoltcp::time::Duration::from_secs(TCP_KEEPALIVE.as_secs())));
+            sock.set_timeout(Some(smoltcp::time::Duration::from_secs(TCP_TIMEOUT.as_secs())));
+            let local_port = *next_local_port;
+            *next_local_port = if local_port == 65535 { 49152 } else { local_port + 1 };
+            match sock.connect(iface.context(), addr, local_port) {
+                Ok(()) => return Ok(sockets.add(sock)),
+                Err(e) => last_err = Some(format!("{e:?}")),
+            }
+        }
+        Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("connect: {}", last_err.unwrap_or_else(|| "no local port".into())),
+        ))
     }
 
     /// decapsulate a WG datagram; flush any queued packets; feed IP to smoltcp.

@@ -56,6 +56,16 @@ class TransportController(
     /** Stable insertion-point router. Safe to build the OkHttpClient from this once. */
     val router: OutboundRouter = OutboundRouter { host -> active?.proxyFor(host) }
 
+    /**
+     * Invoked on EVERY route rebind — connect (a fresh tunnel gets a fresh loopback
+     * port) and disconnect — including the supervisor's automatic reconnects. The
+     * app wires this to evict the OkHttp connection pool: without it, pooled
+     * connections keep pointing at the dead old port and requests vanish into a
+     * dead tunnel for up to the 5-min keepalive ("restart the app fixes it").
+     */
+    @Volatile
+    var onRouteRebind: (() -> Unit)? = null
+
     /** Start (or restart) the transport for [config]. Direct mode is a no-op router. */
     suspend fun connect(config: TransportConfig) = lifecycleLock.withLock {
         desiredConfig = config
@@ -67,6 +77,7 @@ class TransportController(
         active = transport
         ensureSupervisor()
         transport.start()
+        onRouteRebind?.invoke()
     }
 
     suspend fun disconnect() = lifecycleLock.withLock {
@@ -74,6 +85,7 @@ class TransportController(
         supervisorJob?.cancel()
         supervisorJob = null
         teardownLocked()
+        onRouteRebind?.invoke()
     }
 
     /**

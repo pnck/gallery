@@ -128,6 +128,10 @@ pub struct TransportHealth {
     /// In WgThenSocks mode this is the real WireGuard handshake state; in
     /// Direct/SocksUpstream it means the local SOCKS5 listener is up.
     pub handshake_ok: bool,
+    /// The WG driver thread has exited (shutdown or unexpected death). Kotlin
+    /// must treat this as Failed(retryable) even if no handshake ever completed —
+    /// otherwise a pre-handshake driver death wedges the state machine forever.
+    pub driver_dead: bool,
     pub local_socks_port: Option<u16>,
     /// Unix epoch seconds of the last completed WG handshake (WG modes only).
     pub last_handshake_epoch: Option<i64>,
@@ -199,60 +203,41 @@ impl WgCore {
     /// Build the outbound chain and start the local SOCKS5 inbound.
     /// Returns the bound loopback port (Transport Design §2.1 `start`+`localSocksPort`).
     pub fn start(&self, config: CoreConfig) -> Result<u16, TransportError> {
-        let mut inner = self.inner.lock().unwrap();
-        if inner.running {
-            return Err(TransportError::AlreadyRunning);
+        {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.running {
+                return Err(TransportError::AlreadyRunning);
+            }
+            inner.config_summary = Some(summarize_config(&config));
         }
+        // Emitted WITHOUT holding `inner`: the callback runs on this thread and any
+        // re-entrant call into the core (health(), etc.) would deadlock otherwise.
         self.emit(CoreState::Starting);
         self.shutdown.store(false, Ordering::SeqCst);
-        inner.config_summary = Some(summarize_config(&config));
 
-        // WG modes need the live tunnel woven into the dialer; the tunnel-less
-        // modes map straight from the config.
-        let dialer = match &config {
-            CoreConfig::WgOnly { wg } => {
-                let tunnel = start_tunnel(wg)?;
-                inner.tunnel = Some(Arc::clone(&tunnel));
-                socks::Dialer::WgDirect { tunnel }
+        match self.start_inner(config) {
+            Ok(port) => {
+                self.emit(CoreState::Running);
+                Ok(port)
             }
-            CoreConfig::WgThenSocks {
-                wg,
-                upstream_host,
-                upstream_port,
-                upstream_username,
-                upstream_password,
-            } => {
-                let tunnel = start_tunnel(wg)?;
-                inner.tunnel = Some(Arc::clone(&tunnel));
-                socks::Dialer::WgThenSocks {
-                    tunnel,
-                    host: upstream_host.clone(),
-                    port: *upstream_port,
-                    auth: match (upstream_username, upstream_password) {
-                        (Some(u), Some(p)) => Some((u.clone(), p.clone())),
-                        _ => None,
-                    },
+            Err(e) => {
+                // Roll back a partially-started core (e.g. tunnel up but listener
+                // bind/spawn failed): a leaked WG driver would keep handshaking the
+                // peer and race the NEXT start's driver — two tunnels, one session.
+                let mut inner = self.inner.lock().unwrap();
+                if let Some(t) = inner.tunnel.take() {
+                    t.shutdown();
                 }
+                inner.listener_thread = None;
+                inner.running = false;
+                self.port.store(0, Ordering::SeqCst);
+                drop(inner);
+                self.emit(CoreState::Failed);
+                Err(e)
             }
-            _ => socks::Dialer::from_config(&config),
-        };
-
-        let listener = socks::bind_loopback().map_err(|e| TransportError::Bind { msg: e.to_string() })?;
-        let bound_port = listener.local_addr().map(|a| a.port()).unwrap_or(0);
-        self.port.store(bound_port, Ordering::SeqCst);
-
-        let shutdown = Arc::clone(&self.shutdown);
-        let handle = std::thread::Builder::new()
-            .name("gallery-socks5".into())
-            .spawn(move || socks::serve(listener, dialer, shutdown))
-            .map_err(|e| TransportError::Bind { msg: e.to_string() })?;
-
-        inner.listener_thread = Some(handle);
-        inner.running = true;
-        drop(inner);
-        self.emit(CoreState::Running);
-        Ok(bound_port)
+        }
     }
+
 
     pub fn local_socks_port(&self) -> Option<u16> {
         let p = self.port.load(Ordering::SeqCst);
@@ -286,17 +271,19 @@ impl WgCore {
         let inner = self.inner.lock().unwrap();
         // In WgThenSocks mode "handshake_ok" reflects the real WireGuard handshake;
         // in Direct/SocksUpstream it means the local listener is up.
-        let (handshake_ok, last_handshake_epoch, tx_bytes, rx_bytes) = match &inner.tunnel {
+        let (handshake_ok, driver_dead, last_handshake_epoch, tx_bytes, rx_bytes) = match &inner.tunnel {
             Some(t) => (
                 t.handshake_ok(),
+                t.driver_dead(),
                 t.last_handshake_epoch(),
                 Some(t.tx_bytes()),
                 Some(t.rx_bytes()),
             ),
-            None => (inner.running, None, None, None),
+            None => (inner.running, false, None, None, None),
         };
         TransportHealth {
             handshake_ok,
+            driver_dead,
             local_socks_port: self.local_socks_port(),
             last_handshake_epoch,
             tx_bytes,
@@ -335,6 +322,52 @@ impl WgCore {
 }
 
 impl WgCore {
+    fn start_inner(&self, config: CoreConfig) -> Result<u16, TransportError> {
+        // WG modes need the live tunnel woven into the dialer; the tunnel-less
+        // modes map straight from the config.
+        let dialer = match &config {
+            CoreConfig::WgOnly { wg } => {
+                let tunnel = start_tunnel(wg)?;
+                self.inner.lock().unwrap().tunnel = Some(Arc::clone(&tunnel));
+                socks::Dialer::WgDirect { tunnel }
+            }
+            CoreConfig::WgThenSocks {
+                wg,
+                upstream_host,
+                upstream_port,
+                upstream_username,
+                upstream_password,
+            } => {
+                let tunnel = start_tunnel(wg)?;
+                self.inner.lock().unwrap().tunnel = Some(Arc::clone(&tunnel));
+                socks::Dialer::WgThenSocks {
+                    tunnel,
+                    host: upstream_host.clone(),
+                    port: *upstream_port,
+                    auth: match (upstream_username, upstream_password) {
+                        (Some(u), Some(p)) => Some((u.clone(), p.clone())),
+                        _ => None,
+                    },
+                }
+            }
+            _ => socks::Dialer::from_config(&config),
+        };
+
+        let listener = socks::bind_loopback().map_err(|e| TransportError::Bind { msg: e.to_string() })?;
+        let bound_port = listener.local_addr().map(|a| a.port()).unwrap_or(0);
+
+        let shutdown = Arc::clone(&self.shutdown);
+        let handle = std::thread::Builder::new()
+            .name("gallery-socks5".into())
+            .spawn(move || socks::serve(listener, dialer, shutdown))
+            .map_err(|e| TransportError::Bind { msg: e.to_string() })?;
+
+        let mut inner = self.inner.lock().unwrap();
+        inner.listener_thread = Some(handle);
+        inner.running = true;
+        self.port.store(bound_port, Ordering::SeqCst);
+        Ok(bound_port)
+    }
     fn emit(&self, state: CoreState) {
         if let Some(cb) = self.callback.lock().unwrap().as_ref() {
             cb.on_state(state);

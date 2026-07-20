@@ -28,13 +28,24 @@ import okhttp3.Protocol
  */
 object SharedHttpClient {
 
+    /**
+     * ONE pool shared by every client built here (app client, bare auth client,
+     * upload client): pooled connections all die together when the route flips,
+     * and [evictAll] below covers all of them in one call. A per-client pool let
+     * token calls keep dead tunnel connections across reconnects.
+     */
+    private val sharedPool = ConnectionPool(15, 5, TimeUnit.MINUTES)
+
+    /** Drop all pooled connections — call after the transport route rebinds. */
+    fun evictAll() = sharedPool.evictAll()
+
     fun build(
         router: OutboundRouter = OutboundRouter.IDENTITY,
         configure: OkHttpClient.Builder.() -> Unit = {},
     ): OkHttpClient =
         OkHttpClient.Builder()
             .protocols(listOf(Protocol.HTTP_2, Protocol.HTTP_1_1))
-            .connectionPool(ConnectionPool(15, 5, TimeUnit.MINUTES))
+            .connectionPool(sharedPool)
             .proxySelector(RouterProxySelector(router))
             // Bounded timeouts so an unreachable host (e.g. first login before the
             // tunnel is up) fails in predictable time instead of hanging the UI.
