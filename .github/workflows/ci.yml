@@ -3,7 +3,11 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
   pull_request:
+
+permissions:
+  contents: write # create/update GitHub Releases
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -18,6 +22,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # full history + tags, needed to derive alpha versions
 
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@v6
@@ -84,6 +90,32 @@ jobs:
             echo "OAuth client id present (length ${#CID})."
           fi
 
+      # Release versioning:
+      #  - main push  → rolling pre-release vA.B.(C+1)-alpha.N, derived from the
+      #    newest stable vA.B.C tag (N = commits since that tag). Semantic and
+      #    monotonic; falls back to v0.1.0-alpha.<total commits> before any tag.
+      #  - tag push   → official release named after the tag (vA.B.C).
+      - name: Compute release version
+        id: ver
+        if: github.event_name == 'push'
+        run: |
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            v="$GITHUB_REF_NAME"
+          else
+            latest=$(git tag -l 'v*' --sort=-v:refname \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)
+            if [ -n "$latest" ]; then
+              IFS=. read -r a b c <<< "${latest#v}"
+              n=$(git rev-list "$latest"..HEAD --count)
+              v="v$a.$b.$((c+1))-alpha.$n"
+            else
+              v="v0.1.0-alpha.$(git rev-list HEAD --count)"
+            fi
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "version_name=${v#v}" >> "$GITHUB_OUTPUT"
+          echo "Release version: $v"
+
       # `build` = assemble + check: unit tests for all modules + Android Lint.
       # -Pgallery.buildRust=true wires cargo-ndk into the Android build so the
       # transport .so is cross-compiled and packaged per ABI. The OAuth client id/
@@ -93,6 +125,7 @@ jobs:
         run: >-
           ./gradlew build -Pgallery.buildRust=true
           -PGALLERY_VERSION_CODE=${{ github.run_number }}
+          -PGALLERY_VERSION_NAME=${{ steps.ver.outputs.version_name }}
           -PGALLERY_GOOGLE_CLIENT_ID=${{ secrets.GALLERY_GOOGLE_CLIENT_ID }}
           -PGALLERY_GOOGLE_CLIENT_SECRET=${{ secrets.GALLERY_GOOGLE_CLIENT_SECRET }}
           -PGALLERY_GOOGLE_DESKTOP_CLIENT_ID=${{ secrets.GALLERY_GOOGLE_DESKTOP_CLIENT_ID }}
@@ -123,3 +156,51 @@ jobs:
           name: app-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 14
+
+      # ── Releases (push events only; PRs stop at the artifact above) ──────────
+      # The published APK is the DEBUG build: it's signed with the committed,
+      # stable debug key, so any CI/local build installs and upgrades cleanly.
+      # Release-build signing is intentionally unconfigured (app/build.gradle.kts).
+
+      # Rolling pre-release on every main push. Idempotent: a re-run of the same
+      # commit recomputes the same version, so drop a stale same-named release
+      # first (gh release create refuses an existing tag).
+      - name: Publish rolling pre-release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          v="${{ steps.ver.outputs.version }}"
+          cp app/build/outputs/apk/debug/app-debug.apk "gallery-$v.apk"
+          gh release delete "$v" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$v" "gallery-$v.apk" \
+            --title "$v" --prerelease --generate-notes \
+            || gh release create "$v" "gallery-$v.apk" \
+                 --title "$v" --prerelease --notes "Rolling pre-release $v"
+
+      # Official release from a manually pushed vA.B.C tag.
+      - name: Publish official release
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          v="${{ steps.ver.outputs.version }}"
+          cp app/build/outputs/apk/debug/app-debug.apk "gallery-$v.apk"
+          gh release create "$v" "gallery-$v.apk" \
+            --title "$v" --verify-tag --generate-notes \
+            || gh release create "$v" "gallery-$v.apk" \
+                 --title "$v" --verify-tag --notes "Release $v"
+
+      # Keep the release list bounded: retain the 5 newest alpha pre-releases,
+      # delete the rest (and their tags). Official releases are never pruned.
+      - name: Prune old alpha pre-releases
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release list --limit 100 --json tagName,isPrerelease \
+            --jq '[.[] | select(.isPrerelease and (.tagName | test("-alpha\\.[0-9]+$"))) | .tagName] | .[5:][]' \
+          | while read -r t; do
+              echo "Pruning $t"
+              gh release delete "$t" --yes --cleanup-tag || true
+            done

@@ -35,8 +35,14 @@ android {
         // Rolling version: CI passes -PGALLERY_VERSION_CODE=<github.run_number> so
         // each artifact has a monotonically increasing code (installs upgrade cleanly
         // now that the signature is stable); local builds default to 1.
-        versionCode = (providers.gradleProperty("GALLERY_VERSION_CODE").orNull ?: "1").toInt()
-        versionName = "0.1.0.${(providers.gradleProperty("GALLERY_VERSION_CODE").orNull ?: "1")}"
+        // CI release builds also pass -PGALLERY_VERSION_NAME=<tag without leading v>
+        // so the APK's versionName matches the release tag; otherwise it stays a
+        // rolling 0.1.0.<code>.
+        val galleryVersionCode = providers.gradleProperty("GALLERY_VERSION_CODE").orNull ?: "1"
+        versionCode = galleryVersionCode.toInt()
+        versionName = providers.gradleProperty("GALLERY_VERSION_NAME").orNull
+            ?.takeIf { it.isNotBlank() }
+            ?: "0.1.0.$galleryVersionCode"
 
         // Device-flow OAuth (ADR-0001). Create a Google OAuth client of type
         // "TVs and Limited Input devices"; it has a client_secret (not a true
