@@ -2,6 +2,7 @@ package io.github.pnck.gallery.data.sync
 
 import android.content.ContentResolver
 import android.net.Uri
+import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
 import android.util.Log
 import io.github.pnck.gallery.data.db.PhotoDao
@@ -125,13 +126,18 @@ class UploadBatchProcessor(
         }
         val uri = Uri.parse(localUri)
 
-        // Media access can be partial/revoked (Android 13/14 "Selected photos"): a
-        // file scanned earlier may now be unreadable. That's a PERMANENT per-file
-        // skip, not a retryable network error — otherwise the queue stalls on it.
-        val readable = runCatching { resolver.openInputStream(uri)?.use { true } ?: false }
-            .getOrDefault(false)
-        if (!readable) {
-            Log.w(TAG, "upload: skip ${photo.id} — no read access to $localUri (grant \"All photos\"?)")
+        // Media access can be partial/revoked (Android 13/14 "Selected photos"),
+        // and the resumable protocol needs an lseek-capable fd (chunk bodies
+        // position by FileChannel; an unseekable provider would otherwise burn
+        // all retries in quadratic read-and-discard). Both are PERMANENT
+        // per-file skips, not retryable network errors — fail fast and move on.
+        val seekable = runCatching {
+            resolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                ParcelFileDescriptor.AutoCloseInputStream(pfd).use { it.channel.position(0L) }
+            } != null
+        }.getOrDefault(false)
+        if (!seekable) {
+            Log.w(TAG, "upload: skip ${photo.id} — unreadable or unseekable $localUri")
             return FileResult.FAILED
         }
 
