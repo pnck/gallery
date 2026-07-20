@@ -60,6 +60,15 @@ interface PhotoDao {
     @Query("SELECT * FROM photos WHERE provider = :provider AND contentHashType = :type AND contentHashValue = :value LIMIT 1")
     suspend fun findByContentHash(provider: String, type: String, value: String): PhotoEntity?
 
+    /** Thumbnail fetcher: read the persisted URL for a cloud photo (avoids a
+     *  metadata round-trip per grid cell, PRD §8.3). */
+    @Query("SELECT * FROM photos WHERE cloudId = :cloudId LIMIT 1")
+    suspend fun findByCloudId(cloudId: String): PhotoEntity?
+
+    /** Persist a refreshed thumbnail URL after the stored one expired. */
+    @Query("UPDATE photos SET cloudThumbnailUrl = :url WHERE cloudId = :cloudId")
+    suspend fun updateCloudThumbnailUrl(cloudId: String, url: String)
+
     /**
      * Pending uploads, small files first (quick wins; a huge/poisoned file never
      * blocks the queue) and capped at [MAX_UPLOAD_ATTEMPTS] per file — a file past

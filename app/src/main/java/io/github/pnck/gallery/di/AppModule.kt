@@ -161,12 +161,13 @@ object AppModule {
         client: OkHttpClient,
         @AuthClient bareClient: OkHttpClient,
         provider: ICloudStorageProvider,
+        photoDao: PhotoDao,
         driveReadAccess: DriveReadAccess,
     ): ImageLoader =
         ImageLoader.Builder(context)
             .components {
                 add(OkHttpNetworkFetcherFactory(callFactory = { client }))
-                add(ProviderUriFetcher.Factory(provider, client))
+                add(ProviderUriFetcher.Factory(provider, photoDao, client))
                 // "My Drive" images ride the separate drive.readonly token on the bare client.
                 add(DriveReadUrlFetcher.Factory(driveReadAccess, bareClient))
             }
