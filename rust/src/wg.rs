@@ -246,13 +246,13 @@ impl Device for TunDevice {
 }
 
 // ── Per-connection shared state (driver ↔ application thread) ────────────────
-
-#[derive(PartialEq)]
-enum ConnStatus {
-    Connecting,
-    Connected,
-    Failed,
-}
+//
+// DESIGN RULE (hard-won): these flags are NOT a state machine. They are
+// stateless PROJECTIONS of the smoltcp socket state, recomputed from scratch by
+// the driver on every tick (`Driver::publish_conn`) — never "transitioned" by
+// hand at event edges. Edge-triggered transitions are where the F1 deadlock and
+// the SynSent misjudgment lived: an enum with N states has N² edges to remember;
+// a recomputed projection has zero.
 
 struct ConnShared {
     handle: SocketHandle,
@@ -261,7 +261,12 @@ struct ConnShared {
 }
 
 struct ConnInner {
-    status: ConnStatus,
+    /// Projection: the socket reached Established (smoltcp may_send).
+    connected: bool,
+    /// Projection: the socket is in a terminal state (Closed/TimeWait) or the
+    /// driver is exiting. Set-and-never-cleared by recomputation; terminal by
+    /// definition, so no resurrection edge exists.
+    failed: bool,
     /// app → socket (driver drains into smoltcp send buffer)
     to_socket: VecDeque<u8>,
     /// socket → app (driver fills from smoltcp recv buffer)
@@ -277,7 +282,8 @@ impl ConnShared {
         Arc::new(ConnShared {
             handle,
             inner: Mutex::new(ConnInner {
-                status: ConnStatus::Connecting,
+                connected: false,
+                failed: false,
                 to_socket: VecDeque::new(),
                 from_socket: VecDeque::new(),
                 app_write_closed: false,
@@ -630,6 +636,32 @@ fn initiate_handshake(tunn: &mut Tunn, udp: &UdpSocket, scratch: &mut [u8]) {
     }
 }
 
+/// Recompute the published views from the AUTHORITATIVE smoltcp socket state.
+/// This is the ONLY place the driver ever sets `connected`/`failed` — a pure
+/// projection with no transition rules to get wrong:
+///
+///   connected = may_send()  (Established | CloseWait — SynSent is simply false)
+///   failed    = state ∈ {Closed, TimeWait}  (RST / timeout / abort, mid- or
+///              post-connect alike — Closed has no outgoing edges, so `failed`
+///              is sticky by absorption, not by a remembered transition)
+///
+/// Returns true when a published value changed (→ wake the waiters).
+fn publish_conn(sock: &tcp::Socket, g: &mut ConnInner) -> bool {
+    let mut changed = false;
+    let connected = sock.may_send();
+    if g.connected != connected {
+        g.connected = connected;
+        changed = true;
+    }
+    let terminal = matches!(sock.state(), tcp::State::Closed | tcp::State::TimeWait);
+    if terminal && !g.failed {
+        g.failed = true;
+        g.recv_finished = true; // readers drain buffered bytes, then see EOF
+        changed = true;
+    }
+    changed
+}
+
 // ── The application-facing blocking stream ───────────────────────────────────
 
 /// A blocking, TcpStream-like handle to one tunnelled TCP connection.
@@ -643,35 +675,33 @@ impl TunnelStream {
         let deadline = StdInstant::now() + CONNECT_TIMEOUT;
         let mut g = self.shared.inner.lock().unwrap();
         loop {
-            match g.status {
-                ConnStatus::Connected => return Ok(()),
-                ConnStatus::Failed => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::ConnectionRefused,
-                        "tunnel TCP connect failed",
-                    ))
-                }
-                ConnStatus::Connecting => {
-                    let remain = deadline.saturating_duration_since(StdInstant::now());
-                    if remain.is_zero() {
-                        // Blackholed target (peer not routing, dead exit): fail the
-                        // conn so the reaper can collect it, don't park forever.
-                        g.status = ConnStatus::Failed;
-                        g.recv_finished = true;
-                        self.shared.cv.notify_all();
-                        return Err(io::Error::new(
-                            io::ErrorKind::TimedOut,
-                            "tunnel TCP connect timed out",
-                        ));
-                    }
-                    let (guard, _) = self
-                        .shared
-                        .cv
-                        .wait_timeout(g, remain.min(Duration::from_secs(1)))
-                        .unwrap();
-                    g = guard;
-                }
+            if g.connected {
+                return Ok(());
             }
+            if g.failed {
+                return Err(io::Error::new(
+                    io::ErrorKind::ConnectionRefused,
+                    "tunnel TCP connect failed",
+                ));
+            }
+            let remain = deadline.saturating_duration_since(StdInstant::now());
+            if remain.is_zero() {
+                // Blackholed target (peer not routing, dead exit): fail the
+                // conn so the reaper can collect it, don't park forever.
+                g.failed = true;
+                g.recv_finished = true;
+                self.shared.cv.notify_all();
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "tunnel TCP connect timed out",
+                ));
+            }
+            let (guard, _) = self
+                .shared
+                .cv
+                .wait_timeout(g, remain.min(Duration::from_secs(1)))
+                .unwrap();
+            g = guard;
         }
     }
 }
@@ -691,7 +721,7 @@ impl Read for TunnelStream {
                 g.from_socket.drain(..n);
                 return Ok(n);
             }
-            if g.recv_finished || g.status == ConnStatus::Failed {
+            if g.recv_finished || g.failed {
                 return Ok(0); // EOF
             }
             g = self.shared.cv.wait(g).unwrap();
@@ -703,7 +733,7 @@ impl Write for TunnelStream {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let mut g = self.shared.inner.lock().unwrap();
         loop {
-            if g.status == ConnStatus::Failed {
+            if g.failed {
                 return Err(io::Error::new(io::ErrorKind::BrokenPipe, "tunnel connection failed"));
             }
             if g.to_socket.len() < CONN_BUF_CAP {
@@ -717,7 +747,7 @@ impl Write for TunnelStream {
             let (guard, elapsed) = self.shared.cv.wait_timeout(g, WRITE_WAIT_TIMEOUT).unwrap();
             g = guard;
             if elapsed.timed_out() && g.to_socket.len() >= CONN_BUF_CAP {
-                g.status = ConnStatus::Failed;
+                g.failed = true;
                 g.recv_finished = true;
                 self.shared.cv.notify_all();
                 return Err(io::Error::new(
@@ -907,7 +937,7 @@ impl Driver {
             for shared in &conns {
                 let sock = sockets.get_mut::<tcp::Socket>(shared.handle);
                 let mut g = shared.inner.lock().unwrap();
-                if g.status == ConnStatus::Failed || sock.state() == tcp::State::Closed {
+                if g.failed || sock.state() == tcp::State::Closed {
                     // Undeliverable bytes would block the reaper forever — drop them.
                     if !g.to_socket.is_empty() {
                         g.to_socket.clear();
@@ -975,15 +1005,12 @@ impl Driver {
                 });
             }
 
-            // 4. Socket → app: pull decoded bytes out to app read buffers; update state.
+            // 4. Socket → app: pull decoded bytes out to app read buffers; then
+            //    republish the derived views from the AUTHORITATIVE smoltcp state.
             for shared in &conns {
                 let sock = sockets.get_mut::<tcp::Socket>(shared.handle);
                 let mut g = shared.inner.lock().unwrap();
                 let mut changed = false;
-                if sock.is_active() && sock.may_recv() && g.status == ConnStatus::Connecting {
-                    g.status = ConnStatus::Connected;
-                    changed = true;
-                }
                 while sock.can_recv() && g.from_socket.len() < CONN_BUF_CAP {
                     let mut tmp = [0u8; 4096];
                     match sock.recv_slice(&mut tmp) {
@@ -996,22 +1023,11 @@ impl Driver {
                     }
                 }
                 if !sock.may_recv() && sock.state() != tcp::State::SynSent && !g.recv_finished {
-                    // Peer FIN or connection gone.
-                    if sock.state() == tcp::State::Closed && g.status == ConnStatus::Connecting {
-                        g.status = ConnStatus::Failed;
-                    }
+                    // Peer FIN or connection gone: reads drain, then EOF.
                     g.recv_finished = true;
                     changed = true;
                 }
-                // Fully dead (RST, smoltcp timeout/keepalive abort): writers must
-                // get BrokenPipe, not a condvar sleep that nothing can end — a
-                // post-connect RST otherwise strands the splice thread forever.
-                // CRITICAL: only judge connections that were ESTABLISHED — in
-                // SynSent/SynReceived smoltcp reports may_send=may_recv=false on a
-                // perfectly healthy socket that's still connecting.
-                if g.status == ConnStatus::Connected && !sock.may_recv() && !sock.may_send() {
-                    g.status = ConnStatus::Failed;
-                    g.recv_finished = true;
+                if publish_conn(sock, &mut g) {
                     changed = true;
                 }
                 if changed {
@@ -1132,7 +1148,7 @@ impl Driver {
         // (each stranded waiter leaks a thread + loopback fds per reconnect).
         for shared in &conns {
             let mut g = shared.inner.lock().unwrap();
-            g.status = ConnStatus::Failed;
+            g.failed = true;
             g.recv_finished = true;
             g.to_socket.clear();
             shared.cv.notify_all();
