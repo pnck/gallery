@@ -152,16 +152,18 @@ impl Dialer {
 /// Resolve `host` through the tunnel with **redundant DNS-over-TCP + DNS-over-UDP**
 /// queries fired concurrently — the first success wins. TCP (public resolvers)
 /// survives a transparent-SOCKS exit; UDP (the WG-configured server via smoltcp)
-/// works where UDP DNS is reachable. Bounded by an 8s timeout on scratch threads
+/// works where UDP DNS is reachable. Bounded by a timeout on scratch threads
 /// so the caller never hangs.
 fn dual_resolve_via_tunnel(tunnel: &Arc<WgTunnel>, host: &str) -> io::Result<std::net::IpAddr> {
+    // Each racer tags its result with its name so the winner is LOGGABLE — the
+    // "which resolver answered what" step was a blind spot at every log level.
     let (tx, rx) = std::sync::mpsc::channel();
 
     // DNS-over-TCP to public resolvers, through the tunnel.
     {
         let (t, h, tx) = (Arc::clone(tunnel), host.to_string(), tx.clone());
         std::thread::spawn(move || {
-            let _ = tx.send(crate::wg::tcp_dns_resolve(&t, &h));
+            let _ = tx.send(("tcp", crate::wg::tcp_dns_resolve(&t, &h)));
         });
     }
     // DNS-over-UDP to the WG-configured server (smoltcp DNS socket).
@@ -171,7 +173,7 @@ fn dual_resolve_via_tunnel(tunnel: &Arc<WgTunnel>, host: &str) -> io::Result<std
             let r = t
                 .resolve_or(&h)
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "udp dns: no answer/not configured"));
-            let _ = tx.send(r);
+            let _ = tx.send(("udp", r));
         });
     }
 
@@ -186,8 +188,14 @@ fn dual_resolve_via_tunnel(tunnel: &Arc<WgTunnel>, host: &str) -> io::Result<std
             return Err(last);
         }
         match rx.recv_timeout(budget - elapsed) {
-            Ok(Ok(ip)) => return Ok(ip),
-            Ok(Err(e)) => last = e, // one path failed; keep waiting for the other
+            Ok((via, Ok(ip))) => {
+                log::info!("wg: dns race {host} -> {ip} (won by {via}-dns)");
+                return Ok(ip);
+            }
+            Ok((via, Err(e))) => {
+                log::debug!("wg: {via}-dns for {host} failed: {e}");
+                last = e; // one path failed; keep waiting for the other
+            }
             Err(_) => return Err(last), // timeout or both disconnected
         }
     }
