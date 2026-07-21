@@ -18,6 +18,11 @@ path = "uniffi-bindgen.rs"
 
 [dependencies]
 uniffi = { version = "0.28", features = ["cli"] }
+# NOTE on level clamping: all levels are compiled in because alpha builds must
+# keep full diagnostics. When stable releases ship, enable the log crate's
+# "release_max_level_warn" feature to COMPILE OUT info/debug/trace from release
+# .so builds (zero-cost clamp) — the runtime UniFFI level control stays for
+# debug/alpha. Do NOT enable it while alphas ride release-profile .so builds.
 log = "0.4"
 thiserror = "1"
 

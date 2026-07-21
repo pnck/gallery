@@ -573,7 +573,7 @@ pub fn tcp_dns_resolve(tunnel: &WgTunnel, host: &str) -> io::Result<IpAddr> {
         match tunnel.dial(&resolver.to_string(), 53) {
             Ok(mut stream) => match tcp_dns_query(&mut stream, host) {
                 Ok(ip) => {
-                    log::debug!("wg: tcp-dns {host} -> {ip} via {resolver}");
+                    log::info!("wg: tcp-dns {host} -> {ip} via {resolver}");
                     return Ok(ip);
                 }
                 Err(e) => last = e,

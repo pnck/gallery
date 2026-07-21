@@ -106,7 +106,9 @@ impl Dialer {
                         (ip, *port)
                     }
                 };
-                Ok(Box::new(tunnel.dial(&ip.to_string(), port)?))
+                let target_ip = ip.to_string();
+                log::info!("wg: dial {ip}:{port} via tunnel");
+                Ok(Box::new(tunnel.dial(&target_ip, port)?))
             }
             Dialer::Socks { host, port, auth } => {
                 let mut up = TcpStream::connect((host.as_str(), *port))?;

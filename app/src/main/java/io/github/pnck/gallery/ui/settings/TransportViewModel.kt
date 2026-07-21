@@ -4,7 +4,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.pnck.gallery.network.transport.TransportState
-import io.github.pnck.gallery.discovery.NetworkDiagnostics
 import io.github.pnck.gallery.transport.TransportController
 import io.github.pnck.gallery.network.transport.TransportHealth
 import io.github.pnck.gallery.transport.WgKeypair
@@ -55,8 +54,7 @@ class TransportViewModel @Inject constructor(
     private val controller: TransportController,
     private val connector: TransportConnector,
     private val configStore: TransportConfigStore,
-    private val diagnostics: NetworkDiagnostics,
-) : ViewModel() {
+    ) : ViewModel() {
 
     val transportState: StateFlow<TransportState> =
         controller.state.stateIn(viewModelScope, SharingStarted.Eagerly, controller.state.value)
@@ -72,12 +70,6 @@ class TransportViewModel @Inject constructor(
     private val _savedForm = MutableStateFlow<SavedTransport?>(null)
     val savedForm: StateFlow<SavedTransport?> = _savedForm.asStateFlow()
 
-    /** Streaming diagnostics output (debug tool). */
-    private val _diagOutput = MutableStateFlow("")
-    val diagOutput: StateFlow<String> = _diagOutput.asStateFlow()
-    private val _diagRunning = MutableStateFlow(false)
-    val diagRunning: StateFlow<Boolean> = _diagRunning.asStateFlow()
-    private var diagJob: Job? = null
 
     private var pollJob: Job? = null
 
@@ -135,30 +127,6 @@ class TransportViewModel @Inject constructor(
         viewModelScope.launch {
             runCatching { connector.disconnect() }
             _error.value = null
-        }
-    }
-
-    /** Dump the config the core is ACTUALLY running with (ground truth vs the form). */
-    fun dumpConfig() {
-        viewModelScope.launch {
-            val info = controller.diagnosticInfo() ?: "(transport not connected — connect first)"
-            _diagOutput.value = "=== effective core config ===\n$info\n"
-        }
-    }
-
-    /** Run the network diagnostic suite against [target], streaming to [diagOutput]. */
-    fun runDiagnostics(target: String) {
-        if (diagJob?.isActive == true) return
-        _diagOutput.value = ""
-        diagJob = viewModelScope.launch {
-            _diagRunning.value = true
-            try {
-                diagnostics.run(target) { line -> _diagOutput.value += line + "\n" }
-            } catch (e: Exception) {
-                _diagOutput.value += "✗ diagnostics error: ${e.message}\n"
-            } finally {
-                _diagRunning.value = false
-            }
         }
     }
 

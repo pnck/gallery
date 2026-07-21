@@ -311,58 +311,6 @@ fun TransportScreen(
                 ) { Text("Disconnect") }
             }
 
-            if (BuildConfig.DEBUG) {
-                DiagnosticsSection(viewModel)
-            }
-        }
-    }
-}
-
-/** Debug-only reachability probe: DNS → TCP → HTTP, direct vs via tunnel. */
-@Composable
-private fun DiagnosticsSection(viewModel: TransportViewModel) {
-    val output by viewModel.diagOutput.collectAsState()
-    val running by viewModel.diagRunning.collectAsState()
-    var target by rememberSaveable { mutableStateOf("https://www.google.com/generate_204") }
-
-    Text(
-        "Network diagnostics",
-        style = MaterialTheme.typography.titleMedium,
-        modifier = Modifier.padding(top = 16.dp),
-    )
-    Text(
-        "Staged reachability (DNS/TCP/HTTP), direct vs through the tunnel. " +
-            "ICMP ping/mtr aren't possible over a SOCKS/TCP tunnel; TCP-connect RTT is the equivalent.",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    field(target, { target = it }, "Target (URL or host[:port])")
-    Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Button(
-            onClick = { viewModel.runDiagnostics(target) },
-            enabled = !running,
-            modifier = Modifier.weight(1f),
-        ) {
-            if (running) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text("Run diagnostics")
-        }
-        OutlinedButton(
-            onClick = viewModel::dumpConfig,
-            modifier = Modifier.weight(1f),
-        ) { Text("Dump config") }
-    }
-    if (output.isNotBlank()) {
-        val clipboard = LocalClipboardManager.current
-        OutlinedButton(
-            onClick = { clipboard.setText(AnnotatedString(output)) },
-            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-        ) { Text("Copy output") }
-        Card(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-            Text(
-                output,
-                modifier = Modifier.padding(12.dp),
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
-            )
         }
     }
 }

@@ -187,7 +187,11 @@ class NativeNetworkTransport(
         const val LOOPBACK = "127.0.0.1"
         const val HANDSHAKE_WARN_MS = 12_000L
 
-        /** Grace window for a lost handshake to self-recover before we force a reconnect. */
-        const val RECONNECT_AFTER_MS = 20_000L
+        /** Grace window for a lost handshake to self-recover before we force a
+         *  full reconnect. Deliberately long: WG is UDP, session loss is routine
+         *  (roam, server restart, idle expiry), and boringtun re-initiates and
+         *  re-keys ON ITS OWN — full re-init is the last resort, not the first
+         *  response. Instant escalation happens only on driverDead. */
+        const val RECONNECT_AFTER_MS = 120_000L
     }
 }
