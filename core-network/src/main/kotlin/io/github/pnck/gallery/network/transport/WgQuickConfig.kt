@@ -1,5 +1,11 @@
 package io.github.pnck.gallery.network.transport
 
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
+
 /**
  * A parsed `wg-quick` `.conf` — the standard WireGuard config format that the official
  * WireGuard app imports/exports (its "export to zip" bundles these). This lets our
@@ -84,6 +90,48 @@ data class WgQuickConfig(
                 allowedIps = peer["allowedips"].orEmpty().ifBlank { DEFAULT_ALLOWED_IPS },
                 persistentKeepalive = peer["persistentkeepalive"]?.trim()?.toIntOrNull(),
             )
+        }
+
+        /** Detect a ZIP archive by its magic bytes. */
+        fun isZip(bytes: ByteArray): Boolean =
+            bytes.size >= 4 && bytes[0] == 'P'.code.toByte() && bytes[1] == 'K'.code.toByte() &&
+                bytes[2] == 3.toByte() && bytes[3] == 4.toByte()
+
+        /**
+         * The official app's "export tunnels to zip": one `.conf` per entry.
+         * We have a single tunnel, so the zip holds one entry named after it.
+         */
+        fun toZipBytes(entryName: String, config: WgQuickConfig): ByteArray {
+            val name = entryName.removeSuffix(".conf") + ".conf"
+            val out = ByteArrayOutputStream()
+            ZipOutputStream(out).use { zip ->
+                zip.putNextEntry(ZipEntry(name))
+                zip.write(config.serialize().toByteArray(Charsets.UTF_8))
+                zip.closeEntry()
+            }
+            return out.toByteArray()
+        }
+
+        /**
+         * Parse EITHER a bare `.conf` text OR an official-app zip (first `.conf`
+         * entry wins — our client manages a single tunnel). Returns the config
+         * and, for zips, the entry name it came from (null for bare conf).
+         * Throws [IllegalArgumentException] on malformed input.
+         */
+        fun parseAny(bytes: ByteArray): Pair<WgQuickConfig, String?> {
+            if (isZip(bytes)) {
+                ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
+                    while (true) {
+                        val entry = zip.nextEntry ?: break
+                        if (!entry.isDirectory && entry.name.endsWith(".conf", ignoreCase = true)) {
+                            val text = zip.readBytes().toString(Charsets.UTF_8)
+                            return parse(text) to entry.name
+                        }
+                    }
+                }
+                throw IllegalArgumentException("Zip contains no .conf entry")
+            }
+            return parse(bytes.toString(Charsets.UTF_8)) to null
         }
     }
 }

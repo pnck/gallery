@@ -123,24 +123,38 @@ fun TransportScreen(
     // Interop with the official WireGuard app via standard wg-quick .conf files.
     val context = LocalContext.current
     var ioMessage by remember { mutableStateOf<String?>(null) }
-    val exportLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/octet-stream"),
+    fun currentConf(): WgQuickConfig = WgQuickConfig(
+        privateKey = privateKey.trim(),
+        address = interfaceAddress.trim(),
+        dns = dns.trim(),
+        mtu = mtu.trim().toIntOrNull(),
+        peerPublicKey = peerPublicKey.trim(),
+        presharedKey = presharedKey.trim().ifBlank { null },
+        endpoint = endpoint.trim(),
+        allowedIps = WgQuickConfig.DEFAULT_ALLOWED_IPS,
+        persistentKeepalive = keepalive.trim().toIntOrNull(),
+    )
+    // */* keeps the title's extension verbatim — a typed MIME (e.g. octet-stream)
+    // makes SAF append its own (.bin), which the official app won't recognize.
+    val exportConfLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("*/*"),
     ) { uri ->
         if (uri != null) {
             runCatching {
-                val conf = WgQuickConfig(
-                    privateKey = privateKey.trim(),
-                    address = interfaceAddress.trim(),
-                    dns = dns.trim(),
-                    mtu = mtu.trim().toIntOrNull(),
-                    peerPublicKey = peerPublicKey.trim(),
-                    presharedKey = presharedKey.trim().ifBlank { null },
-                    endpoint = endpoint.trim(),
-                    allowedIps = WgQuickConfig.DEFAULT_ALLOWED_IPS,
-                    persistentKeepalive = keepalive.trim().toIntOrNull(),
-                ).serialize()
-                context.contentResolver.openOutputStream(uri)?.use { it.write(conf.toByteArray()) }
-            }.onSuccess { ioMessage = "Exported WireGuard config" }
+                context.contentResolver.openOutputStream(uri)?.use { it.write(currentConf().serialize().toByteArray()) }
+            }.onSuccess { ioMessage = "Exported WireGuard config (.conf)" }
+                .onFailure { ioMessage = "Export failed: ${it.message}" }
+        }
+    }
+    // Official-app style: a zip holding the tunnel's .conf (its own export format).
+    val exportZipLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip"),
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                val bytes = WgQuickConfig.toZipBytes("gallery-wg", currentConf())
+                context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+            }.onSuccess { ioMessage = "Exported WireGuard tunnels (.zip)" }
                 .onFailure { ioMessage = "Export failed: ${it.message}" }
         }
     }
@@ -149,15 +163,20 @@ fun TransportScreen(
     ) { uri ->
         if (uri != null) {
             runCatching {
-                val text = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }.orEmpty()
-                WgQuickConfig.parse(text)
-            }.onSuccess { c ->
+                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: error("cannot read file")
+                WgQuickConfig.parseAny(bytes)
+            }.onSuccess { (c, entryName) ->
                 wgEnabled = true; useSrv = false
                 privateKey = c.privateKey; peerPublicKey = c.peerPublicKey
                 presharedKey = c.presharedKey.orEmpty(); endpoint = c.endpoint
                 interfaceAddress = c.address; dns = c.dns
                 mtu = c.mtu?.toString().orEmpty(); keepalive = c.persistentKeepalive?.toString() ?: "25"
-                ioMessage = "Imported — review and Connect"
+                ioMessage = if (entryName != null) {
+                    "Imported '$entryName' from zip (first tunnel) — review and Connect"
+                } else {
+                    "Imported — review and Connect"
+                }
             }.onFailure { ioMessage = "Import failed: ${it.message}" }
         }
     }
@@ -254,16 +273,21 @@ fun TransportScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     OutlinedButton(
-                        onClick = { exportLauncher.launch("gallery-wg.conf") },
+                        onClick = { exportConfLauncher.launch("gallery-wg.conf") },
                         modifier = Modifier.weight(1f),
                     ) { Text("Export .conf") }
                     OutlinedButton(
+                        onClick = { exportZipLauncher.launch("gallery-wg.zip") },
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Export .zip") }
+                    OutlinedButton(
                         onClick = { importLauncher.launch(arrayOf("*/*")) },
                         modifier = Modifier.weight(1f),
-                    ) { Text("Import .conf") }
+                    ) { Text("Import") }
                 }
                 Text(
-                    "Interoperate with the official WireGuard app (its export/import format).",
+                    "Interoperate with the official WireGuard app: bare .conf and its " +
+                        "\"export tunnels to zip\" format both work for import and export.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
