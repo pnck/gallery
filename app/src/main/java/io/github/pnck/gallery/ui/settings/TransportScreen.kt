@@ -136,6 +136,8 @@ fun TransportScreen(
     )
     // */* keeps the title's extension verbatim — a typed MIME (e.g. octet-stream)
     // makes SAF append its own (.bin), which the official app won't recognize.
+    // ONE export format: a bare .conf (we manage a single tunnel — the official
+    // app imports it fine). Import accepts every official format (.conf + zip).
     val exportConfLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("*/*"),
     ) { uri ->
@@ -143,18 +145,6 @@ fun TransportScreen(
             runCatching {
                 context.contentResolver.openOutputStream(uri)?.use { it.write(currentConf().serialize().toByteArray()) }
             }.onSuccess { ioMessage = "Exported WireGuard config (.conf)" }
-                .onFailure { ioMessage = "Export failed: ${it.message}" }
-        }
-    }
-    // Official-app style: a zip holding the tunnel's .conf (its own export format).
-    val exportZipLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/zip"),
-    ) { uri ->
-        if (uri != null) {
-            runCatching {
-                val bytes = WgQuickConfig.toZipBytes("gallery-wg", currentConf())
-                context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
-            }.onSuccess { ioMessage = "Exported WireGuard tunnels (.zip)" }
                 .onFailure { ioMessage = "Export failed: ${it.message}" }
         }
     }
@@ -275,19 +265,15 @@ fun TransportScreen(
                     OutlinedButton(
                         onClick = { exportConfLauncher.launch("gallery-wg.conf") },
                         modifier = Modifier.weight(1f),
-                    ) { Text("Export .conf") }
-                    OutlinedButton(
-                        onClick = { exportZipLauncher.launch("gallery-wg.zip") },
-                        modifier = Modifier.weight(1f),
-                    ) { Text("Export .zip") }
+                    ) { Text("Export") }
                     OutlinedButton(
                         onClick = { importLauncher.launch(arrayOf("*/*")) },
                         modifier = Modifier.weight(1f),
                     ) { Text("Import") }
                 }
                 Text(
-                    "Interoperate with the official WireGuard app: bare .conf and its " +
-                        "\"export tunnels to zip\" format both work for import and export.",
+                    "Export: a single wg-quick .conf the official app imports. " +
+                        "Import: every official format — bare .conf or its \"export tunnels to zip\".",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
