@@ -4,8 +4,12 @@ import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.lifecycle.Lifecycle
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -42,8 +46,19 @@ fun GalleryNavHost() {
     val scope = rememberCoroutineScope()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val route = backStackEntry?.destination?.route
-    // The swipe-out drawer only lives on the top-level tabs (My Photos / My Drive).
-    val topLevel = route == Routes.TIMELINE || route == Routes.MY_DRIVE
+    // Drawer gestures must track the SETTLED top-level tab, not the route alone:
+    // the route flips the instant popBackStack is called, while the previous
+    // screen is still animating out — enabling the drawer mid-transition lets it
+    // hijack an in-flight multi-touch gesture (its drag detector joins the
+    // stream without the down events) and exposes its items under the fingers,
+    // so a stray two-finger touch could "tap" My Drive. The top entry only
+    // reaches RESUMED when the transition completes — a pure projection, no
+    // transition tracking of our own.
+    val entryLifecycle by backStackEntry?.lifecycle?.currentStateFlow
+        ?.collectAsState()
+        ?: remember { mutableStateOf(Lifecycle.State.INITIALIZED) }
+    val topLevel = (route == Routes.TIMELINE || route == Routes.MY_DRIVE) &&
+        entryLifecycle == Lifecycle.State.RESUMED
 
     val openDrawer: () -> Unit = { scope.launch { drawerState.open() } }
 
