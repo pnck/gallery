@@ -1236,7 +1236,7 @@ impl Driver {
                 let sock = sockets.get_mut::<dns::Socket>(h);
                 match sock.start_query(iface.context(), &host, DnsQueryType::A) {
                     Ok(q) => {
-                        log::debug!("wg: in-tunnel DNS query for {host}");
+                        log::info!("wg: in-tunnel DNS query for {host}");
                         dns_pending.push((q, StdInstant::now(), reply));
                     }
                     Err(e) => {

@@ -55,6 +55,7 @@ fun DiagnosticsScreen(
     val output by viewModel.output.collectAsState()
     val running by viewModel.running.collectAsState()
     val transportState by viewModel.transportState.collectAsState()
+    val health by viewModel.health.collectAsState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var target by remember { mutableStateOf("https://www.google.com/generate_204") }
@@ -94,6 +95,18 @@ fun DiagnosticsScreen(
         ) {
             Text(viewModel.buildInfo, style = MaterialTheme.typography.bodySmall)
             Text("Transport: $transportState", style = MaterialTheme.typography.bodySmall)
+            health?.let { h ->
+                Text(
+                    buildString {
+                        append("handshake=${if (h.handshakeOk) "OK" else "✗"}")
+                        h.txBytes?.let { append("  tx=${formatBytes(it)}") }
+                        h.rxBytes?.let { append("  rx=${formatBytes(it)}") }
+                        h.lastHandshakeEpoch?.let { append("  lastHs=$it") }
+                        h.localSocksPort?.let { append("  socks=127.0.0.1:$it") }
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
 
             Text("Transport log level (gallery-wg)", style = MaterialTheme.typography.titleSmall)
             Row(
@@ -140,4 +153,11 @@ fun DiagnosticsScreen(
             }
         }
     }
+}
+
+private fun formatBytes(bytes: Long): String = when {
+    bytes >= 1L shl 30 -> "%.1f GB".format(bytes / (1L shl 30).toDouble())
+    bytes >= 1L shl 20 -> "%.1f MB".format(bytes / (1L shl 20).toDouble())
+    bytes >= 1L shl 10 -> "%.1f KB".format(bytes / (1L shl 10).toDouble())
+    else -> "$bytes B"
 }

@@ -6,6 +6,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.pnck.gallery.BuildConfig
 import io.github.pnck.gallery.data.settings.AppSettingsStore
 import io.github.pnck.gallery.discovery.NetworkDiagnostics
+import io.github.pnck.gallery.network.transport.TransportHealth
 import io.github.pnck.gallery.network.transport.TransportState
 import io.github.pnck.gallery.transport.TransportController
 import javax.inject.Inject
@@ -33,6 +34,19 @@ class DiagnosticsViewModel @Inject constructor(
 
     val transportState: StateFlow<TransportState> =
         controller.state.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TransportState.Disconnected)
+
+    /** Live tunnel counters (tx/rx bytes, handshake), refreshed ~1 Hz while subscribed. */
+    private val _health = MutableStateFlow<TransportHealth?>(null)
+    val health: StateFlow<TransportHealth?> = _health.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            while (true) {
+                _health.value = runCatching { controller.health() }.getOrNull()
+                kotlinx.coroutines.delay(1_000)
+            }
+        }
+    }
 
     val logLevel: StateFlow<String> = settings.transportLogLevel
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "warn")
