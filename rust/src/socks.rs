@@ -174,8 +174,9 @@ fn dual_resolve_via_tunnel(tunnel: &Arc<WgTunnel>, host: &str) -> io::Result<std
     }
 
     // First Ok wins; tolerate one path failing while the other is still running.
+    // Budget MUST keep DNS + CONNECT_TIMEOUT under OkHttp's 20 s connect timeout.
     let start = Instant::now();
-    let budget = Duration::from_secs(8);
+    let budget = Duration::from_secs(5);
     let mut last = io::Error::new(io::ErrorKind::TimedOut, "in-tunnel DNS timed out");
     loop {
         let elapsed = start.elapsed();

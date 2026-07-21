@@ -1,5 +1,7 @@
 package io.github.pnck.gallery.ui.settings
 
+import io.github.pnck.gallery.BuildConfig
+
 import android.content.Intent
 import androidx.core.net.toUri
 import androidx.compose.foundation.clickable
@@ -63,6 +65,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onTransportClick: () -> Unit,
     onStorageClick: () -> Unit,
+    onDiagnosticsClick: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
@@ -188,6 +191,14 @@ fun SettingsScreen(
                 headlineContent = { Text(stringResource(R.string.settings_storage)) },
                 supportingContent = { Text(stringResource(R.string.settings_storage_hint)) },
             )
+            if (BuildConfig.DIAGNOSTICS_ENABLED) {
+                HorizontalDivider()
+                ListItem(
+                    modifier = Modifier.clickable(onClick = onDiagnosticsClick),
+                    headlineContent = { Text("Diagnostics") },
+                    supportingContent = { Text("Log level, reachability probe, transport dump") },
+                )
+            }
             HorizontalDivider()
             val transportState by viewModel.transportState.collectAsState()
             val transportConnected = transportState is io.github.pnck.gallery.network.transport.TransportState.Connected

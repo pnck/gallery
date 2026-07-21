@@ -54,8 +54,10 @@ const CONN_BUF_CAP: usize = 256 * 1024;
 /// Fallback DNS resolvers when the WG config specifies none (design semantic).
 const DEFAULT_DNS: [&str; 2] = ["1.1.1.1", "8.8.8.8"];
 /// Bound on `wait_connected` — a SYN to a blackholed in-tunnel address must not
-/// park the SOCKS handler thread forever (OkHttp's own connect timeout is 20 s).
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(25);
+/// park the SOCKS handler thread forever. MUST stay well under OkHttp's 20 s
+/// connect timeout together with the DNS budget (5 s + 12 s < 20 s), or every
+/// slow in-tunnel resolve surfaces as a client timeout while we keep dialing.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(12);
 /// Safety net for backpressured writers: the driver notifies on every drain, so
 /// this should never fire — but a missed wake-up must error, not deadlock.
 const WRITE_WAIT_TIMEOUT: Duration = Duration::from_secs(60);

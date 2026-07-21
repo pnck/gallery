@@ -75,7 +75,14 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Diagnostics hub (log-level control, diag runner, dump/export) is a
+            // dev/alpha tool: published builds are debug builds, so it's available
+            // in pre-releases and stripped from stable releases.
+            buildConfigField("boolean", "DIAGNOSTICS_ENABLED", "true")
+        }
         release {
+            buildConfigField("boolean", "DIAGNOSTICS_ENABLED", "false")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(

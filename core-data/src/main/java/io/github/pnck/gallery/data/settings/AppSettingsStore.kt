@@ -23,6 +23,7 @@ class AppSettingsStore(private val context: Context) {
     private val scanBucketsKey = stringSetPreferencesKey("scan_bucket_ids")
     private val sortKey = stringPreferencesKey("timeline_sort")
     private val sizeBackfilledKey = booleanPreferencesKey("size_backfilled_v3")
+    private val logLevelKey = stringPreferencesKey("transport_log_level")
 
     /** Name of the app's cloud folder that uploads are pinned to. */
     val remoteFolderName: Flow<String> = context.appSettingsStore.data.map { prefs ->
@@ -66,6 +67,14 @@ class AppSettingsStore(private val context: Context) {
 
     suspend fun setSizeBackfilled() {
         context.appSettingsStore.edit { it[sizeBackfilledKey] = true }
+    }
+
+    /** Transport core (`gallery-wg`) verbosity: off/error/warn/info/debug/trace.
+     *  Default warn — quiet by design (throughput is observed via diagnostics). */
+    val transportLogLevel: Flow<String> = context.appSettingsStore.data.map { it[logLevelKey] ?: "warn" }
+
+    suspend fun setTransportLogLevel(level: String) {
+        context.appSettingsStore.edit { it[logLevelKey] = level }
     }
 
     companion object {

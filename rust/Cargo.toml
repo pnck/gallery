@@ -45,9 +45,11 @@ rand = "0.8"
 
 # Bridge `log` to Android logcat so the transport core is debuggable on-device
 # (`adb logcat -s gallery-wg`). Android-only; host/CI builds don't need it.
+# android_log-sys is used directly (own logger) so the level is RUNTIME-tunable
+# via UniFFI — android_logger's filter is fixed at init, and process env vars
+# (the old GALLERY_WG_LOG hatch) can't be set on Android at all.
 [target.'cfg(target_os = "android")'.dependencies]
-android_logger = "0.14"
-env_filter = "0.1"
+android_log-sys = "0.3"
 
 [profile.release]
 opt-level = "z"

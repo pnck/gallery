@@ -12,6 +12,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import io.github.pnck.gallery.BuildConfig
+import io.github.pnck.gallery.diagnostics.DiagnosticsScreen
 import io.github.pnck.gallery.ui.detail.PhotoDetailScreen
 import io.github.pnck.gallery.ui.mydrive.MyDriveScreen
 import io.github.pnck.gallery.ui.settings.SettingsScreen
@@ -27,6 +29,7 @@ object Routes {
     const val SETTINGS = "settings"
     const val TRANSPORT = "transport"
     const val STORAGE = "storage"
+    const val DIAGNOSTICS = "diagnostics"
     const val PHOTO_DETAIL = "photo/{photoId}"
 
     fun photoDetail(photoId: String) = "photo/$photoId"
@@ -89,6 +92,7 @@ fun GalleryNavHost() {
                     onBack = { navController.popBackStack() },
                     onTransportClick = { navController.navigate(Routes.TRANSPORT) },
                     onStorageClick = { navController.navigate(Routes.STORAGE) },
+                    onDiagnosticsClick = { navController.navigate(Routes.DIAGNOSTICS) },
                 )
             }
             composable(Routes.TRANSPORT) {
@@ -96,6 +100,9 @@ fun GalleryNavHost() {
             }
             composable(Routes.STORAGE) {
                 SpaceManagementScreen(onBack = { navController.popBackStack() })
+            }
+            composable(Routes.DIAGNOSTICS) {
+                DiagnosticsScreen(onBack = { navController.popBackStack() })
             }
         }
     }

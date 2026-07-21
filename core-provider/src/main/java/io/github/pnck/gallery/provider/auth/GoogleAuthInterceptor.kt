@@ -1,10 +1,13 @@
 package io.github.pnck.gallery.provider.auth
 
+import android.util.Log
 import io.github.pnck.gallery.provider.AuthManager
 import io.github.pnck.gallery.provider.AuthNotAuthorizedException
 import kotlinx.coroutines.runBlocking
 import okhttp3.Interceptor
 import okhttp3.Response
+
+private const val TAG = "gallery-auth"
 
 /**
  * Bearer injection on the shared OkHttpClient (PRD §8.3, provider split):
@@ -48,6 +51,7 @@ class GoogleAuthInterceptor(
             chain.proceed(request.newBuilder().header("Authorization", "Bearer $token").build())
         }
         if (token != null && response.code == 401) {
+            Log.w(TAG, "401 with Bearer token for ${request.url.host} — grant rejected server-side, invalidating")
             authManager.invalidateAuth()
         }
         return response

@@ -85,33 +85,103 @@ pub fn derive_wireguard_public_key(private_key: String) -> String {
     wg::derive_public_key(&private_key).unwrap_or_default()
 }
 
-/// Route `log` records to Android logcat under the `gallery-wg` tag, once.
-/// `adb logcat -s gallery-wg` shows the transport core's handshake progress.
-fn init_logging() {
-    #[cfg(target_os = "android")]
-    {
-        use std::sync::Once;
-        static INIT: Once = Once::new();
-        INIT.call_once(|| {
-            // Transport is quiet by default (warn+) so logcat stays focused on the app
-            // layer (gallery-sync). Throughput is observable via the in-app diagnostics
-            // screen's tx/rx, not the log. Flip GALLERY_WG_LOG=debug/info for traces.
-            let spec = std::env::var("GALLERY_WG_LOG")
-                .ok()
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| "warn".to_string());
-            let filter = env_filter::Builder::new().parse(&spec).build();
-            android_logger::init_once(
-                android_logger::Config::default()
-                    .with_tag("gallery-wg")
-                    // BOTH are required: with_max_level sets the log crate's GLOBAL
-                    // max (without it android_logger never calls log::set_max_level,
-                    // so it stays Off and nothing prints); with_filter refines on top.
-                    .with_max_level(log::LevelFilter::Debug)
-                    .with_filter(filter),
-            );
-        });
+/// Logging for the transport core. Custom minimal logger (not android_logger)
+/// so the level is RUNTIME-tunable from Kotlin via [`set_transport_log_level`]
+/// — android_logger's filter is frozen at init, and process env vars can't be
+/// set on Android at all (the old GALLERY_WG_LOG hatch was dead on device).
+/// Default warn: transport stays quiet (memory: throughput is observed via the
+/// diagnostics screen, not the log).
+mod alog {
+    use log::{LevelFilter, Metadata, Record};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static LEVEL: AtomicUsize = AtomicUsize::new(LevelFilter::Warn as usize);
+
+    pub fn set_level(level: LevelFilter) {
+        LEVEL.store(level as usize, Ordering::Relaxed);
+        log::set_max_level(level);
     }
+
+    fn current() -> LevelFilter {
+        match LEVEL.load(Ordering::Relaxed) {
+            0 => LevelFilter::Off,
+            1 => LevelFilter::Error,
+            2 => LevelFilter::Warn,
+            3 => LevelFilter::Info,
+            4 => LevelFilter::Debug,
+            _ => LevelFilter::Trace,
+        }
+    }
+
+    struct Logger;
+
+    impl log::Log for Logger {
+        fn enabled(&self, metadata: &Metadata) -> bool {
+            metadata.level().to_level_filter() <= current()
+        }
+
+        #[cfg(target_os = "android")]
+        fn log(&self, record: &Record) {
+            if !self.enabled(record.metadata()) {
+                return;
+            }
+            use android_log_sys::{LogPriority, __android_log_write};
+            use std::ffi::CString;
+            let prio = match record.level() {
+                log::Level::Error => LogPriority::ERROR,
+                log::Level::Warn => LogPriority::WARN,
+                log::Level::Info => LogPriority::INFO,
+                log::Level::Debug => LogPriority::DEBUG,
+                log::Level::Trace => LogPriority::VERBOSE,
+            };
+            let tag = CString::new("gallery-wg").unwrap();
+            let msg = CString::new(format!("{}", record.args()))
+                .unwrap_or_else(|_| CString::new("(unprintable log message)").unwrap());
+            unsafe {
+                __android_log_write(prio as _, tag.as_ptr(), msg.as_ptr());
+            }
+        }
+
+        #[cfg(not(target_os = "android"))]
+        fn log(&self, record: &Record) {
+            if self.enabled(record.metadata()) {
+                eprintln!("gallery-wg {}: {}", record.level(), record.args());
+            }
+        }
+
+        fn flush(&self) {}
+    }
+
+    pub fn init() {
+        static LOGGER: Logger = Logger;
+        let _ = log::set_logger(&LOGGER);
+        // Keep the persisted/default level; first init defaults to warn.
+        log::set_max_level(current());
+    }
+}
+
+fn init_logging() {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(alog::init);
+}
+
+/// Runtime log-level control for the transport core (`gallery-wg` tag), driven
+/// from the Diagnostics settings screen. Accepts: off, error, warn, info,
+/// debug, trace (case-insensitive). Unknown values are ignored.
+#[uniffi::export]
+pub fn set_transport_log_level(level: String) {
+    init_logging();
+    let parsed = match level.trim().to_ascii_lowercase().as_str() {
+        "off" => log::LevelFilter::Off,
+        "error" => log::LevelFilter::Error,
+        "warn" => log::LevelFilter::Warn,
+        "info" => log::LevelFilter::Info,
+        "debug" => log::LevelFilter::Debug,
+        "trace" => log::LevelFilter::Trace,
+        _ => return,
+    };
+    alog::set_level(parsed);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
