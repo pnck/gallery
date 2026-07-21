@@ -91,9 +91,11 @@ jobs:
           fi
 
       # Release versioning:
-      #  - main push  → rolling pre-release vA.B.(C+1)-alpha.N, derived from the
-      #    newest stable vA.B.C tag (N = commits since that tag). Semantic and
-      #    monotonic; falls back to v0.1.0-alpha.<total commits> before any tag.
+      #  - main push  → rolling pre-release vA.B.(C+1)-alpha.N, where the base
+      #    A.B.(C+1) comes from the newest stable vA.B.C tag and N counts ROLLING
+      #    RELEASES, not commits: highest existing alpha number for that base + 1
+      #    (one push = one roll, consecutive even for multi-commit pushes; pruned
+      #    old alphas don't break monotonicity). No stable tag yet → v0.1.0-alpha.N.
       #  - tag push   → official release named after the tag (vA.B.C).
       - name: Compute release version
         id: ver
@@ -106,11 +108,13 @@ jobs:
               | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)
             if [ -n "$latest" ]; then
               IFS=. read -r a b c <<< "${latest#v}"
-              n=$(git rev-list "$latest"..HEAD --count)
-              v="v$a.$b.$((c+1))-alpha.$n"
+              base="v$a.$b.$((c+1))"
             else
-              v="v0.1.0-alpha.$(git rev-list HEAD --count)"
+              base="v0.1.0"
             fi
+            last=$(git tag -l "$base-alpha.*" --sort=-v:refname | head -1 || true)
+            n=$(( ${last##*-alpha.} + 1 )) 2>/dev/null || n=1
+            v="$base-alpha.$n"
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "version_name=${v#v}" >> "$GITHUB_OUTPUT"
