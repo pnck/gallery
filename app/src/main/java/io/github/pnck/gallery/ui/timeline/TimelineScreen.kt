@@ -104,6 +104,7 @@ import io.github.pnck.gallery.domain.SyncFilter
 import io.github.pnck.gallery.domain.SyncState
 import io.github.pnck.gallery.domain.TimelineSort
 import io.github.pnck.gallery.ui.util.FastScroller
+import io.github.pnck.gallery.ui.util.TimeMarker
 import io.github.pnck.gallery.ui.util.pinchToStep
 import io.github.pnck.gallery.ui.util.rememberSystemDelete
 import androidx.compose.ui.unit.Dp
@@ -353,6 +354,7 @@ fun TimelineScreen(
                         state = gridState,
                         itemCount = cells.size,
                         labelForIndex = { i -> cells.getOrNull(i)?.let(::cellDateLabel) },
+                        markers = remember(cells) { buildTimeMarkers(cells) },
                         modifier = Modifier.align(Alignment.TopEnd),
                     )
                 }
@@ -595,11 +597,44 @@ private fun cellDateLabel(cell: GridCell): String = when (cell) {
     is GridCell.Item -> yearMonthLabel(cell.photo.dateTaken)
 }
 
+/**
+ * Year-month notches for the fast-scroll axis, built from the sectioned cells in
+ * display order (null for non-date sorts — a time axis is meaningless there).
+ * Over-long axes collapse to year-only so ticks never overlap.
+ */
+private fun buildTimeMarkers(cells: List<GridCell>): List<TimeMarker>? {
+    if (cells.none { it is GridCell.Header }) return null
+    val out = ArrayList<TimeMarker>()
+    var lastYm = Long.MIN_VALUE
+    cells.forEachIndexed { index, cell ->
+        if (cell is GridCell.Item) {
+            val epochMs = cell.photo.dateTaken
+            val ym = yearOf(epochMs) * 100L + monthOf(epochMs)
+            if (ym != lastYm) {
+                lastYm = ym
+                out += TimeMarker(
+                    year = yearOf(epochMs),
+                    month = monthOf(epochMs),
+                    label = yearMonthLabel(epochMs),
+                    firstCellIndex = index,
+                )
+            }
+        }
+    }
+    if (out.size <= 48) return out
+    return out.filter { it.month == 1 }.map { it.copy(month = 0, label = it.year.toString()) }
+}
+
 private val yearCalendar = java.util.Calendar.getInstance()
 
 private fun yearOf(epochMs: Long): Int {
     yearCalendar.timeInMillis = epochMs
     return yearCalendar.get(java.util.Calendar.YEAR)
+}
+
+private fun monthOf(epochMs: Long): Int {
+    yearCalendar.timeInMillis = epochMs
+    return yearCalendar.get(java.util.Calendar.MONTH) + 1
 }
 
 /** Year-month label for the fast-scroll bubble (e.g. "Jul 2026"). */
