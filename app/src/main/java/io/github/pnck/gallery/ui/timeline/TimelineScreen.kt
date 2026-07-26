@@ -38,6 +38,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Checklist
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudOff
@@ -151,7 +152,13 @@ fun TimelineScreen(
     val haptics = LocalHapticFeedback.current
     val snackbarHost = remember { SnackbarHostState() }
     val systemDelete = rememberSystemDelete()
-    val gridState = rememberLazyGridState()
+    // rememberSaveable (not plain remember): the grid leaves composition while the
+    // detail viewer is open, and users expect to land back at the same scroll
+    // position (Google-Photos behavior) — the nav back-stack entry's registry
+    // carries it across the round trip.
+    val gridState = androidx.compose.runtime.saveable.rememberSaveable(
+        saver = androidx.compose.foundation.lazy.grid.LazyGridState.Saver,
+    ) { androidx.compose.foundation.lazy.grid.LazyGridState() }
 
     var showStatus by remember { mutableStateOf(false) }
     var showClearConfirm by remember { mutableStateOf(false) }
@@ -239,6 +246,7 @@ fun TimelineScreen(
                 SelectionAppBar(
                     count = selection.size,
                     onClear = viewModel::exitSelectionMode,
+                    onSelectAll = viewModel::selectAllVisible,
                     onSync = viewModel::syncSelected,
                     onSave = viewModel::saveSelected,
                     onFreeSpace = viewModel::freeSpaceSelected,
@@ -688,6 +696,7 @@ private fun PhotoCell(
 private fun SelectionAppBar(
     count: Int,
     onClear: () -> Unit,
+    onSelectAll: () -> Unit,
     onSync: () -> Unit,
     onSave: () -> Unit,
     onFreeSpace: () -> Unit,
@@ -703,6 +712,9 @@ private fun SelectionAppBar(
         actions = {
             // Primary batch actions (backup-first): Back up · Free up space · Delete.
             // Save-to-device is secondary → overflow (docs/GALLERY-UX-INTERACTION.md §3).
+            IconButton(onClick = onSelectAll) {
+                Icon(Icons.Default.SelectAll, contentDescription = stringResource(R.string.action_select_all))
+            }
             IconButton(onClick = onSync) {
                 Icon(Icons.Default.CloudUpload, contentDescription = stringResource(R.string.action_sync_selected))
             }

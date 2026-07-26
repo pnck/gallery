@@ -89,6 +89,7 @@
     <string name="free_queued">Backing up %1$d photo(s) first — free up space again once they finish</string>
     <string name="free_space_none">Nothing to free up</string>
     <string name="action_select">Select</string>
+    <string name="action_select_all">Select all</string>
 
     <!-- Delete confirmation (PRD §3.7) -->
     <string name="delete_confirm_title">Delete %1$d photo(s)?</string>

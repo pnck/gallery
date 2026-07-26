@@ -248,6 +248,14 @@ class TimelineViewModel @Inject constructor(
         }
     }
 
+    /** Select every photo in the current view (Google-Photos parity); toggles off
+     *  when everything is already selected. Honors the active sort/filter. */
+    fun selectAllVisible() {
+        val ids = photos.value.map { it.id }.toSet()
+        _selectionActive.value = true
+        _selection.value = if (_selection.value == ids) emptySet() else ids
+    }
+
     /** Enqueue a targeted upload for the selected photos (un-excluding any dropped ones). */
     fun syncSelected() {
         val ids = _selection.value.toList()
