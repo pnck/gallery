@@ -3,6 +3,8 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Fast-scroller scrub ticks on API < 34 (Compose SegmentTick covers 34+). -->
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <!-- Permission matrix per PRD §6.3 -->
     <!-- API <= 32 -->

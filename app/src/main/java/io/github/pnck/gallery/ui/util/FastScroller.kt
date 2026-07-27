@@ -1,5 +1,9 @@
 package io.github.pnck.gallery.ui.util
 
+import android.content.Context
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
@@ -34,6 +38,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
@@ -135,6 +140,8 @@ fun FastScroller(
     }
     val fraction = if (dragging) fingerFraction else restingFraction
     val haptics = LocalHapticFeedback.current
+    val context = LocalContext.current
+    val scrubTick = remember(context) { ScrubTick(context) }
 
     // Full-size overlay: the bubble needs real width (it was squeezed into the
     // 56dp rail and collapsed to a blank strip). Only the 56dp rail consumes
@@ -219,19 +226,43 @@ fun FastScroller(
                         fingerFraction = f
                         if (slotChanged) {
                             // SegmentTick (API 34+) is purpose-built for scrub ticks;
-                            // TextHandleMove is a no-op on many OEM ROMs, LongPress
-                            // would be far too heavy per slot.
-                            haptics.performHapticFeedback(
-                                if (android.os.Build.VERSION.SDK_INT >= 34) {
-                                    HapticFeedbackType.SegmentTick
-                                } else {
-                                    HapticFeedbackType.TextHandleMove
-                                },
-                            )
+                            // below 34 Compose haptics map to view feedback constants
+                            // that are no-ops on many OEM ROMs — vibrate directly.
+                            if (Build.VERSION.SDK_INT >= 34) {
+                                haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                            } else {
+                                scrubTick.tick()
+                            }
                             scope.launch { state.scrollToItem(model.cellIndexAt(f)) }
                         }
                     }
                 },
         )
+    }
+}
+
+/**
+ * Scrub-tick vibration for API < 34, where Compose haptics map to view feedback
+ * constants that many OEM ROMs silently ignore. EFFECT_TICK (API 29+) is the
+ * light "clock tick" Google Photos uses for slot crossings; API 26–28 get a
+ * short, soft one-shot of similar weight.
+ */
+private class ScrubTick(context: Context) {
+    private val vibrator: Vibrator? = context.getSystemService(Vibrator::class.java)
+
+    fun tick() {
+        val v = vibrator ?: return
+        if (!v.hasVibrator()) return
+        when {
+            Build.VERSION.SDK_INT >= 29 ->
+                v.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK))
+            else ->
+                v.vibrate(VibrationEffect.createOneShot(TICK_MS, TICK_AMPLITUDE))
+        }
+    }
+
+    private companion object {
+        const val TICK_MS = 12L
+        const val TICK_AMPLITUDE = 80
     }
 }
