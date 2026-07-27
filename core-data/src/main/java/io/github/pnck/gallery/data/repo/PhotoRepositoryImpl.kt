@@ -358,4 +358,7 @@ internal fun PhotoEntity.toTimelinePhoto(): TimelinePhoto =
         cloudId = cloudId,
         provider = provider,
         excluded = excluded,
+        // Unclassified = pending AND never hashed: scan inserts rows like this;
+        // reconcile (or the upload path) computes the MD5 and classifies them.
+        classified = syncState != SyncState.PENDING_UPLOAD || contentHashValue != null,
     )

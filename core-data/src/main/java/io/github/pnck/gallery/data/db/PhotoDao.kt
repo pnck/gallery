@@ -74,9 +74,16 @@ interface PhotoDao {
      * blocks the queue) and capped at [MAX_UPLOAD_ATTEMPTS] per file — a file past
      * the cap is revived by reconcile or an explicit user sync, both of which
      * reset the counter.
+     *
+     * CLASSIFIED pendings only (contentHashValue IS NOT NULL): a freshly scanned
+     * row has never been compared to the cloud — it may already be backed up.
+     * Queueing it for upload without proof re-uploads duplicates (the
+     * "everything turned pending after rebuild" loop). Reconcile classifies
+     * first (it computes the hash and matches); only provably-missing bytes upload.
      */
     @Query(
         "SELECT * FROM photos WHERE syncState = 0 AND excluded = 0 AND uploadAttempts < 8 " +
+            "AND contentHashValue IS NOT NULL " +
             "ORDER BY sizeBytes ASC, dateTaken ASC",
     )
     suspend fun getPendingUploads(): List<PhotoEntity>

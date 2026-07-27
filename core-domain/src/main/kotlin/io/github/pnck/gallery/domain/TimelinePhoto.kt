@@ -26,6 +26,13 @@ data class TimelinePhoto(
     val provider: String?,
     /** User dropped this photo from automatic backup ("clear queue"); still local. */
     val excluded: Boolean = false,
+    /**
+     * True once the photo's bytes have been compared against the cloud (content
+     * hash computed by reconcile or at upload). A freshly scanned PENDING_UPLOAD
+     * row is UNCLASSIFIED — it may well be backed up already; the grid shows NO
+     * badge for it rather than a premature "not backed up".
+     */
+    val classified: Boolean = true,
 ) {
     /** True when only the cloud copy remains (PRD §3.7); the grid keeps a cloud badge. */
     val showCloudIcon: Boolean get() = syncState == SyncState.CLOUD_ONLY

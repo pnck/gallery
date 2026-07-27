@@ -733,6 +733,7 @@ private fun PhotoCell(
         SyncStateBadge(
             state = photo.syncState,
             excluded = photo.excluded,
+            classified = photo.classified,
             modifier = Modifier.align(Alignment.TopEnd).padding(4.dp),
         )
         if (selectionMode) {
@@ -1007,9 +1008,12 @@ private fun BackupBanner(
  * Monochrome (white) icons — differentiated by shape, not colour, for a clean look.
  */
 @Composable
-private fun SyncStateBadge(state: SyncState, excluded: Boolean, modifier: Modifier = Modifier) {
+private fun SyncStateBadge(state: SyncState, excluded: Boolean, classified: Boolean, modifier: Modifier = Modifier) {
     val (icon: ImageVector, description: String) = when {
         excluded -> Icons.Default.CloudOff to stringResource(R.string.badge_excluded)
+        // Unclassified (freshly scanned, never compared to the cloud): NO badge —
+        // it may already be backed up; reconcile assigns the truthful badge.
+        state == SyncState.PENDING_UPLOAD && !classified -> return
         state == SyncState.PENDING_UPLOAD -> Icons.Default.CloudUpload to stringResource(R.string.badge_pending_upload)
         state == SyncState.SYNCED -> Icons.Default.CloudDone to stringResource(R.string.badge_synced)
         state == SyncState.CLOUD_ONLY -> Icons.Default.Cloud to stringResource(R.string.badge_cloud_only)

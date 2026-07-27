@@ -38,10 +38,17 @@ object SyncPipeline {
     }
 
     /**
-     * Kick the scan → downstream → upload chain. [force] uses REPLACE so an explicit
-     * user action ("Back up now") restarts the chain even when a previous one is stuck
-     * retrying (e.g. it was blocked on a wedged tunnel); the default KEEP coalesces the
-     * automatic triggers (ContentObserver, permission grant) so they don't pile up.
+     * Kick the scan → downstream → RECONCILE → upload chain. [force] uses REPLACE so an
+     * explicit user action ("Back up now") restarts the chain even when a previous one
+     * is stuck retrying (e.g. it was blocked on a wedged tunnel); the default KEEP
+     * coalesces the automatic triggers (ContentObserver, permission grant).
+     *
+     * The reconcile step is load-bearing, not optional: after a reinstall every
+     * scanned local row is PENDING_UPLOAD, and WITHOUT content-matching first the
+     * upload step would blindly RE-UPLOAD photos the cloud already has (the
+     * "background sync stole uploads and duplicated my Drive" loop). A reconcile
+     * retry blocks the chain — uploading unclassified rows is never the right
+     * fallback.
      */
     fun enqueue(workManager: WorkManager, force: Boolean = false) {
         val scan = OneTimeWorkRequestBuilder<ScanWorker>().build()
@@ -53,12 +60,22 @@ object SyncPipeline {
             )
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .build()
+        val reconcile = OneTimeWorkRequestBuilder<ReconcileWorker>()
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build(),
+            )
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+            .build()
 
         val policy = if (force) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP
-        // scan (local) → downstream (pull cloud) → upload (push local).
+        // scan (local) → downstream (pull cloud) → reconcile (match by content)
+        // → upload (only what the cloud provably lacks).
         workManager
             .beginUniqueWork(UNIQUE_NAME, policy, scan)
             .then(downstream)
+            .then(reconcile)
             .then(uploadRequest())
             .enqueue()
     }
