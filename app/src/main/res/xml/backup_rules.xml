@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Legacy backup rules (API ≤ 30; see data_extraction_rules.xml for 31+).
+
+  Excluded on purpose — everything here is device-local state that must NOT
+  survive a reinstall:
+  - EncryptedSharedPreferences: their master key lives in the Android Keystore
+    and never restores, so a restored store is undecryptable (reads throw).
+  - DataStore flags/cursors (app_settings, scan_cursor): restored "scan done" /
+    sort / allowlist state would be inconsistent with the EMPTY Room database
+    of a fresh install (e.g. cloud truth ingested before the first local scan).
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="auth_store.xml" />
+    <exclude domain="sharedpref" path="transport_store.xml" />
+    <exclude domain="sharedpref" path="mydrive_auth.xml" />
+    <exclude domain="file" path="datastore/" />
+</full-backup-content>
