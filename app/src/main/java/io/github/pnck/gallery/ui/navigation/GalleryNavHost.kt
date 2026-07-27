@@ -1,5 +1,9 @@
 package io.github.pnck.gallery.ui.navigation
 
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.rememberDrawerState
@@ -9,6 +13,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -64,10 +72,15 @@ fun GalleryNavHost() {
 
     ModalNavigationDrawer(
         drawerState = drawerState,
-        gesturesEnabled = topLevel,
+        // gesturesEnabled = false deliberately: M3's ModalNavigationDrawer attaches
+        // its drag detector to the WHOLE content box (any horizontal swipe anywhere
+        // opens the drawer). Material Design opens a modal drawer from the LEADING
+        // EDGE only — enforced below by an explicit 24.dp edge strip instead.
+        gesturesEnabled = false,
         drawerContent = {
             GalleryDrawer(
                 selected = route ?: Routes.TIMELINE,
+                onClose = { scope.launch { drawerState.close() } },
                 onMyPhotos = {
                     scope.launch { drawerState.close() }
                     // My Drive always sits ON TOP of the timeline — going back to
@@ -94,45 +107,73 @@ fun GalleryNavHost() {
             )
         },
     ) {
-        NavHost(navController = navController, startDestination = Routes.TIMELINE) {
-            composable(Routes.TIMELINE) {
-                TimelineScreen(
-                    onPhotoClick = { photoId -> navController.navigate(Routes.photoDetail(photoId)) },
-                    onSettingsClick = { navController.navigate(Routes.SETTINGS) },
-                    onOpenDrawer = openDrawer,
+        Box {
+            NavHost(navController = navController, startDestination = Routes.TIMELINE) {
+                composable(Routes.TIMELINE) {
+                    TimelineScreen(
+                        onPhotoClick = { photoId -> navController.navigate(Routes.photoDetail(photoId)) },
+                        onSettingsClick = { navController.navigate(Routes.SETTINGS) },
+                        onOpenDrawer = openDrawer,
+                    )
+                }
+                composable(Routes.MY_DRIVE) {
+                    MyDriveScreen(
+                        onOpenDrawer = openDrawer,
+                        onSettingsClick = { navController.navigate(Routes.SETTINGS) },
+                    )
+                }
+                composable(
+                    route = Routes.PHOTO_DETAIL,
+                    arguments = listOf(navArgument("photoId") { type = NavType.StringType }),
+                ) { backStackEntry ->
+                    PhotoDetailScreen(
+                        photoId = backStackEntry.arguments?.getString("photoId").orEmpty(),
+                        onBack = { navController.popBackStack() },
+                    )
+                }
+                composable(Routes.SETTINGS) {
+                    SettingsScreen(
+                        onBack = { navController.popBackStack() },
+                        onTransportClick = { navController.navigate(Routes.TRANSPORT) },
+                        onStorageClick = { navController.navigate(Routes.STORAGE) },
+                        onDiagnosticsClick = { navController.navigate(Routes.DIAGNOSTICS) },
+                    )
+                }
+                composable(Routes.TRANSPORT) {
+                    TransportScreen(onBack = { navController.popBackStack() })
+                }
+                composable(Routes.STORAGE) {
+                    SpaceManagementScreen(onBack = { navController.popBackStack() })
+                }
+                composable(Routes.DIAGNOSTICS) {
+                    DiagnosticsScreen(onBack = { navController.popBackStack() })
+                }
+            }
+
+            // The ONLY swipe-open zone (MD: leading edge). 24.dp ≈ the system gesture
+            // strip; a rightward fling past the threshold springs the drawer open.
+            if (topLevel) {
+                val density = androidx.compose.ui.platform.LocalDensity.current
+                val openThreshold = with(density) { 48.dp.toPx() }
+                Box(
+                    Modifier
+                        .align(Alignment.CenterStart)
+                        .fillMaxHeight()
+                        .width(24.dp)
+                        .pointerInput(Unit) {
+                            var acc = 0f
+                            detectHorizontalDragGestures(
+                                onDragStart = { acc = 0f },
+                                onHorizontalDrag = { change, dragAmount ->
+                                    change.consume()
+                                    acc += dragAmount
+                                },
+                                onDragEnd = {
+                                    if (acc > openThreshold) scope.launch { drawerState.open() }
+                                },
+                            )
+                        },
                 )
-            }
-            composable(Routes.MY_DRIVE) {
-                MyDriveScreen(
-                    onOpenDrawer = openDrawer,
-                    onSettingsClick = { navController.navigate(Routes.SETTINGS) },
-                )
-            }
-            composable(
-                route = Routes.PHOTO_DETAIL,
-                arguments = listOf(navArgument("photoId") { type = NavType.StringType }),
-            ) { backStackEntry ->
-                PhotoDetailScreen(
-                    photoId = backStackEntry.arguments?.getString("photoId").orEmpty(),
-                    onBack = { navController.popBackStack() },
-                )
-            }
-            composable(Routes.SETTINGS) {
-                SettingsScreen(
-                    onBack = { navController.popBackStack() },
-                    onTransportClick = { navController.navigate(Routes.TRANSPORT) },
-                    onStorageClick = { navController.navigate(Routes.STORAGE) },
-                    onDiagnosticsClick = { navController.navigate(Routes.DIAGNOSTICS) },
-                )
-            }
-            composable(Routes.TRANSPORT) {
-                TransportScreen(onBack = { navController.popBackStack() })
-            }
-            composable(Routes.STORAGE) {
-                SpaceManagementScreen(onBack = { navController.popBackStack() })
-            }
-            composable(Routes.DIAGNOSTICS) {
-                DiagnosticsScreen(onBack = { navController.popBackStack() })
             }
         }
     }
