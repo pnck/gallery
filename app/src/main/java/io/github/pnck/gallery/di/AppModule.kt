@@ -30,6 +30,7 @@ import io.github.pnck.gallery.data.sync.UploadBatchProcessor
 import io.github.pnck.gallery.domain.PhotoRepository
 import io.github.pnck.gallery.network.SharedHttpClient
 import io.github.pnck.gallery.network.transport.OutboundRouter
+import io.github.pnck.gallery.transport.SystemVpnMonitor
 import io.github.pnck.gallery.transport.TransportController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -97,8 +98,13 @@ object AppModule {
      */
     @Provides
     @Singleton
-    fun provideTransportController(): TransportController =
-        TransportController(CoroutineScope(SupervisorJob() + Dispatchers.Default)).apply {
+    fun provideTransportController(@ApplicationContext context: Context): TransportController =
+        TransportController(
+            CoroutineScope(SupervisorJob() + Dispatchers.Default),
+            // While a system VPN covers us, the router yields to it (NO_PROXY) so the
+            // userspace WG tunnel never fights the VPN for the same peer.
+            systemVpnActive = SystemVpnMonitor(context).vpnActive,
+        ).apply {
             // Every route rebind (manual connect/disconnect AND supervisor
             // auto-reconnect) must drop pooled connections — a pooled socket keeps
             // pointing at the dead tunnel's old loopback port otherwise.

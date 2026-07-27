@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- SystemVpnMonitor reads default-network capabilities (TRANSPORT_VPN) so the
+         transport can yield while a system VPN holds the network. Normal permission,
+         granted at install time; merged into the app manifest. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+</manifest>

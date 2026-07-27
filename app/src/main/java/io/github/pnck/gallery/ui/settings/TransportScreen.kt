@@ -73,6 +73,7 @@ fun TransportScreen(
     val error by viewModel.error.collectAsState()
     val health by viewModel.health.collectAsState()
     val saved by viewModel.savedForm.collectAsState()
+    val vpnActive by viewModel.systemVpnActive.collectAsState()
 
     var wgEnabled by rememberSaveable { mutableStateOf(true) }
     var socksEnabled by rememberSaveable { mutableStateOf(true) }
@@ -191,7 +192,7 @@ fun TransportScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            MonitorCard(state = state, health = health, error = error)
+            MonitorCard(state = state, health = health, error = error, vpnActive = vpnActive)
 
             toggleRow("WireGuard tunnel", wgEnabled) { wgEnabled = it }
             if (wgEnabled) {
@@ -339,7 +340,7 @@ private fun toggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Un
 
 /** Live status + transfer/handshake monitor, WireGuard-app style. */
 @Composable
-private fun MonitorCard(state: TransportState, health: TransportHealth?, error: String?) {
+private fun MonitorCard(state: TransportState, health: TransportHealth?, error: String?, vpnActive: Boolean) {
     // A 1 Hz clock so "x ago" keeps ticking even when byte counters are static.
     var nowSec by remember { mutableLongStateOf(System.currentTimeMillis() / 1000) }
     LaunchedEffect(state) {
@@ -349,17 +350,32 @@ private fun MonitorCard(state: TransportState, health: TransportHealth?, error: 
         }
     }
 
-    val (label, labelColor) = when (state) {
-        is TransportState.Disconnected -> "Disconnected" to MaterialTheme.colorScheme.onSurfaceVariant
-        is TransportState.Connecting -> "Connecting…" to MaterialTheme.colorScheme.primary
-        is TransportState.Connected -> "Connected" to Color(0xFF2E7D32)
-        is TransportState.Degraded -> "Degraded" to MaterialTheme.colorScheme.tertiary
-        is TransportState.Failed -> "Failed" to MaterialTheme.colorScheme.error
+    // Yielding is a projection over (tunnel state, system VPN presence): the tunnel
+    // IS still connected, but every route is masked to NO_PROXY while the VPN holds
+    // the network — say so instead of a misleading plain "Connected".
+    val yielding = vpnActive && state is TransportState.Connected
+    val (label, labelColor) = when {
+        yielding -> "Yielding to system VPN" to MaterialTheme.colorScheme.tertiary
+        else -> when (state) {
+            is TransportState.Disconnected -> "Disconnected" to MaterialTheme.colorScheme.onSurfaceVariant
+            is TransportState.Connecting -> "Connecting…" to MaterialTheme.colorScheme.primary
+            is TransportState.Connected -> "Connected" to Color(0xFF2E7D32)
+            is TransportState.Degraded -> "Degraded" to MaterialTheme.colorScheme.tertiary
+            is TransportState.Failed -> "Failed" to MaterialTheme.colorScheme.error
+        }
     }
 
     Card(Modifier.fillMaxWidth().padding(top = 8.dp)) {
         Column(Modifier.padding(16.dp)) {
             Text(label, style = MaterialTheme.typography.titleMedium, color = labelColor)
+
+            if (yielding) {
+                Text(
+                    "A system VPN is active — traffic goes direct until it disconnects.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
 
             // Show the actionable reason for degraded/failed states.
             val reason = when (state) {

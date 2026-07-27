@@ -59,6 +59,12 @@ class TransportViewModel @Inject constructor(
     val transportState: StateFlow<TransportState> =
         controller.state.stateIn(viewModelScope, SharingStarted.Eagerly, controller.state.value)
 
+    /** True while a system VPN covers us and the tunnel is yielding (routes are
+     *  masked to NO_PROXY even though [transportState] stays Connected). */
+    val systemVpnActive: StateFlow<Boolean> =
+        (controller.systemVpnActive ?: MutableStateFlow(false))
+            .stateIn(viewModelScope, SharingStarted.Eagerly, controller.systemVpnActive?.value == true)
+
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 

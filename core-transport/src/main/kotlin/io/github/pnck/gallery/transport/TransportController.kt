@@ -1,5 +1,6 @@
 package io.github.pnck.gallery.transport
 
+import android.util.Log
 import io.github.pnck.gallery.network.transport.NetworkTransport
 import io.github.pnck.gallery.network.transport.TransportHealth
 import io.github.pnck.gallery.network.transport.OutboundRouter
@@ -13,6 +14,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -25,6 +28,8 @@ import kotlinx.coroutines.sync.withLock
  * changes what [router] delegates to:
  *  - no active transport  → [OutboundRouter] returns `null` → NO_PROXY (true direct).
  *  - active + Connected    → routes hosts to the core's loopback SOCKS5.
+ *  - system VPN active     → yields: also `null` → NO_PROXY (the tunnel keeps
+ *    running but receives no traffic, so its WG UDP never fights the VPN).
  *
  * This preserves invariant #8: with the transport off the graph behaves exactly
  * as if :core-transport were never on the classpath.
@@ -34,6 +39,12 @@ import kotlinx.coroutines.sync.withLock
  */
 class TransportController(
     private val scope: CoroutineScope,
+    /**
+     * Live projection of "a system VPN covers this app" (see [SystemVpnMonitor]).
+     * While true, the router yields — returns null → NO_PROXY — so our userspace
+     * WG tunnel never fights the system VPN for the same peer. Null in tests.
+     */
+    val systemVpnActive: StateFlow<Boolean>? = null,
 ) {
     @Volatile
     private var active: NetworkTransport? = null
@@ -54,7 +65,36 @@ class TransportController(
     val state: StateFlow<TransportState> = _state.asStateFlow()
 
     /** Stable insertion-point router. Safe to build the OkHttpClient from this once. */
-    val router: OutboundRouter = OutboundRouter { host -> active?.proxyFor(host) }
+    val router: OutboundRouter = OutboundRouter { host ->
+        routeFor(systemVpnActive?.value == true, active?.proxyFor(host))
+    }
+
+    init {
+        // A VPN flip rebinds every route (tunnel ↔ direct), so pooled OkHttp
+        // connections must be evicted exactly like on connect/disconnect — otherwise
+        // sockets pooled under the old route keep dialing it. The tunnel itself is
+        // NOT torn down: nothing is routed to it while yielding, so its WG socket
+        // idles, and traffic flows through it again the instant the VPN goes away
+        // (no reconnect race — resume is a pure derivation).
+        systemVpnActive?.let { vpn ->
+            scope.launch {
+                // drop(1): the startup emission is not a flip — the router already
+                // derives the right route from the current value, and the pool is
+                // empty at boot, so there is nothing to rebind.
+                vpn.drop(1).distinctUntilChanged().collect { activeVpn ->
+                    Log.w(
+                        TAG,
+                        if (activeVpn) {
+                            "system VPN up — transport yields, traffic goes direct"
+                        } else {
+                            "system VPN gone — transport route restored"
+                        },
+                    )
+                    onRouteRebind?.invoke()
+                }
+            }
+        }
+    }
 
     /**
      * Invoked on EVERY route rebind — connect (a fresh tunnel gets a fresh loopback
@@ -121,8 +161,9 @@ class TransportController(
         _state.value = TransportState.Disconnected
     }
 
-    /** Current loopback route for [host], if the transport is up. */
-    fun proxyFor(host: String): ProxySpec? = active?.proxyFor(host)
+    /** Current effective route for [host] — null while off OR while yielding to a
+     *  system VPN (same decision the [router] applies). */
+    fun proxyFor(host: String): ProxySpec? = routeFor(systemVpnActive?.value == true, active?.proxyFor(host))
 
     /** Poll a live health snapshot (transfer bytes, handshake) — null when off. */
     suspend fun health(): TransportHealth? = active?.probe()
@@ -130,8 +171,18 @@ class TransportController(
     /** Ground-truth dump of the running config, or null when off. */
     suspend fun diagnosticInfo(): String? = active?.diagnosticInfo()
 
-    private companion object {
+    internal companion object {
+        const val TAG = "TransportController"
+
         /** Delay before an automatic reconnect, so a flapping peer can't hot-loop us. */
         const val RECONNECT_BACKOFF_MS = 5_000L
+
+        /**
+         * The pure yield decision: an active system VPN always wins — the tunnel
+         * route is masked (null → NO_PROXY) for as long as the VPN holds the
+         * network. Derived from inputs, nothing is synchronized or restored.
+         */
+        internal fun routeFor(systemVpnActive: Boolean, tunnelRoute: ProxySpec?): ProxySpec? =
+            if (systemVpnActive) null else tunnelRoute
     }
 }

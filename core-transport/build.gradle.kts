@@ -29,6 +29,12 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    testOptions {
+        // TransportController logs VPN yield/resume transitions via android.util.Log;
+        // let JVM unit tests run through those calls instead of "not mocked" crashes.
+        unitTests.isReturnDefaultValues = true
+    }
+
     // The UniFFI bindings are generated Kotlin checked into src/main/uniffi (see
     // regen-bindings.sh). Keeping them separate from hand-written code makes the
     // "do not edit" boundary obvious and lets CI diff them for drift.
