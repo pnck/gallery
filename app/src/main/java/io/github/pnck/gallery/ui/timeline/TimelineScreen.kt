@@ -603,9 +603,10 @@ private fun buildTimelineCells(
  * The scrub model for the fast scroller: equal slots per period.
  *  - date sorts → ONE SLOT PER YEAR-MONTH, never collapsed (a 26-year library
  *    still snaps month by month; landing cell = that month's section header);
- *  - size sorts → DYNAMIC value-range slots over the actual min..max (fixed
- *    buckets are meaningless when all photos share one size class; degenerate
- *    min==max → no scroller).
+ *  - size sorts → DYNAMIC QUANTILE SLOTS: each slot holds an equal share of
+ *    the photos and is labeled by its actual boundary size, so tick resolution
+ *    follows the data (3.1/3.4/3.8 MB when everything clusters, wide gaps when
+ *    it doesn't). Identical boundaries collapse; one size class → no scroller.
  */
 private fun buildScrubModel(cells: List<GridCell>, sort: TimelineSort): ScrubModel? {
     val dated = sort == TimelineSort.DATE_DESC || sort == TimelineSort.DATE_ASC
@@ -640,27 +641,23 @@ private fun sizeScrubModel(cells: List<GridCell>): ScrubModel? {
     cells.forEachIndexed { index, cell ->
         if (cell is GridCell.Item) items += index to cell.photo.sizeBytes
     }
-    if (items.size < 2) return null
-    val first = items.first().second
-    val last = items.last().second
-    if (first == last) return null // one size class — nothing to scrub
-    val slots = 24.coerceAtMost(items.size)
-    val descending = first > last
-    val indices = IntArray(slots)
-    val labels = ArrayList<String>(slots)
-    var cursor = 0
-    for (s in 0 until slots) {
-        val v = first + ((last - first) * s / (slots - 1))
-        // Landing cell: the first item at or past this slot's value.
-        while (cursor < items.size - 1 &&
-            (if (descending) items[cursor].second > v else items[cursor].second < v)
-        ) {
-            cursor++
-        }
-        indices[s] = items[cursor].first
-        labels += formatSize(v)
+    if (items.size < 2 || items.first().second == items.last().second) return null
+
+    // Quantile boundaries: slot i starts at item (i * N / K) — equal PHOTO
+    // COUNT per slot, so resolution concentrates where the data is dense.
+    val k = 24.coerceAtMost(items.size)
+    val indices = ArrayList<Int>(k)
+    val labels = ArrayList<String>(k)
+    var lastValue = Long.MIN_VALUE
+    for (s in 0 until k) {
+        val item = items[s * items.size / k]
+        if (item.second == lastValue) continue // collapse identical boundaries
+        lastValue = item.second
+        indices += item.first
+        labels += formatSize(item.second)
     }
-    return ScrubModel(indices, labels)
+    if (labels.size < 2) return null
+    return ScrubModel(indices.toIntArray(), labels)
 }
 
 private fun formatSize(bytes: Long): String = when {
