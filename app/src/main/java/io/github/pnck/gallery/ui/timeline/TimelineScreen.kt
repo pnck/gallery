@@ -361,7 +361,6 @@ fun TimelineScreen(
                     FastScroller(
                         state = gridState,
                         itemCount = cells.size,
-                        labelForIndex = { i -> cells.getOrNull(i)?.let(::cellDateLabel) },
                         markers = remember(cells) { buildTimeMarkers(cells) },
                         modifier = Modifier.align(Alignment.TopEnd),
                     )
@@ -578,59 +577,99 @@ private sealed interface GridCell {
     data class Item(val photo: io.github.pnck.gallery.domain.TimelinePhoto) : GridCell
 }
 
-/** Interleave year-section headers between photos when sorted by date (Google-Photos
- *  style). Size sorts show a flat grid — grouping by year would be meaningless there. */
+/** Interleave year-MONTH section headers between photos when sorted by date
+ *  (Google-Photos style). Size sorts show a flat grid — grouping is done by the
+ *  scroller's size buckets instead. */
 private fun buildTimelineCells(
     photos: List<io.github.pnck.gallery.domain.TimelinePhoto>,
     sort: TimelineSort,
 ): List<GridCell> {
     val dated = sort == TimelineSort.DATE_DESC || sort == TimelineSort.DATE_ASC
     if (!dated) return photos.map { GridCell.Item(it) }
-    val out = ArrayList<GridCell>(photos.size + 16)
-    var lastYear = Int.MIN_VALUE
+    val out = ArrayList<GridCell>(photos.size + 32)
+    var lastYm = Long.MIN_VALUE
     for (p in photos) {
-        val year = yearOf(p.dateTaken)
-        if (year != lastYear) {
-            out += GridCell.Header(year.toString())
-            lastYear = year
+        val ym = yearOf(p.dateTaken) * 100L + monthOf(p.dateTaken)
+        if (ym != lastYm) {
+            out += GridCell.Header(yearMonthLabel(p.dateTaken))
+            lastYm = ym
         }
         out += GridCell.Item(p)
     }
     return out
 }
 
-/** The fast-scroll bubble label for a cell: its header text, or a photo's year-month. */
-private fun cellDateLabel(cell: GridCell): String = when (cell) {
-    is GridCell.Header -> cell.label
-    is GridCell.Item -> yearMonthLabel(cell.photo.dateTaken)
-}
-
 /**
- * Year-month notches for the fast-scroll axis, built from the sectioned cells in
- * display order (null for non-date sorts — a time axis is meaningless there).
- * Over-long axes collapse to year-only so ticks never overlap.
+ * Notches for the fast-scroll axis, derived from the cells in display order:
+ *  - date sorts → one per YEAR-MONTH (labeled year ticks + month dots; axes
+ *    longer than 48 periods collapse to year-only);
+ *  - size sorts → size buckets (same uniform-per-period mechanism).
+ * Positions are per PERIOD, never per item — a month with 1,000 photos must not
+ * own more rail than a month with one.
  */
 private fun buildTimeMarkers(cells: List<GridCell>): List<TimeMarker>? {
-    if (cells.none { it is GridCell.Header }) return null
+    if (cells.isEmpty()) return null
+    return if (cells.any { it is GridCell.Header }) {
+        dateMarkers(cells)
+    } else {
+        sizeBucketMarkers(cells)
+    }
+}
+
+private fun dateMarkers(cells: List<GridCell>): List<TimeMarker> {
     val out = ArrayList<TimeMarker>()
     var lastYm = Long.MIN_VALUE
+    var headerIdx = 0
     cells.forEachIndexed { index, cell ->
-        if (cell is GridCell.Item) {
-            val epochMs = cell.photo.dateTaken
-            val ym = yearOf(epochMs) * 100L + monthOf(epochMs)
-            if (ym != lastYm) {
-                lastYm = ym
-                out += TimeMarker(
-                    year = yearOf(epochMs),
-                    month = monthOf(epochMs),
-                    label = yearMonthLabel(epochMs),
-                    firstCellIndex = index,
-                )
+        when (cell) {
+            is GridCell.Header -> headerIdx = index
+            is GridCell.Item -> {
+                val epochMs = cell.photo.dateTaken
+                val ym = yearOf(epochMs) * 100L + monthOf(epochMs)
+                if (ym != lastYm) {
+                    lastYm = ym
+                    val month = monthOf(epochMs)
+                    out += TimeMarker(
+                        axisLabel = if (month == 1) yearOf(epochMs).toString() else null,
+                        label = yearMonthLabel(epochMs),
+                        firstCellIndex = headerIdx,
+                    )
+                }
             }
         }
     }
     if (out.size <= 48) return out
-    return out.filter { it.month == 1 }.map { it.copy(month = 0, label = it.year.toString()) }
+    // Collapse: years only, landing on each year's first month section.
+    return out.filter { it.axisLabel != null }
+}
+
+private val SIZE_BUCKETS = listOf(
+    0L to "<1 MB",
+    1L shl 20 to "1–10 MB",
+    10L shl 20 to "10–100 MB",
+    100L shl 20 to "100 MB–1 GB",
+    1L shl 30 to ">1 GB",
+)
+
+private fun sizeBucketMarkers(cells: List<GridCell>): List<TimeMarker> {
+    fun bucketOf(bytes: Long): Int {
+        var b = 0
+        for (i in SIZE_BUCKETS.indices) if (bytes >= SIZE_BUCKETS[i].first) b = i
+        return b
+    }
+    val out = ArrayList<TimeMarker>()
+    var lastBucket = -1
+    cells.forEachIndexed { index, cell ->
+        if (cell is GridCell.Item) {
+            val b = bucketOf(cell.photo.sizeBytes)
+            if (b != lastBucket) {
+                lastBucket = b
+                val label = SIZE_BUCKETS[b].second
+                out += TimeMarker(axisLabel = label, label = label, firstCellIndex = index)
+            }
+        }
+    }
+    return out
 }
 
 private val yearCalendar = java.util.Calendar.getInstance()
