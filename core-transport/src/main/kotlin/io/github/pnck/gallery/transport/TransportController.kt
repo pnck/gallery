@@ -91,6 +91,16 @@ class TransportController(
                         },
                     )
                     onRouteRebind?.invoke()
+                    if (!activeVpn) {
+                        // A failure parked while yielding (e.g. driverDead) becomes
+                        // actionable now — reconnect immediately instead of waiting
+                        // for the next fresh Failed emission (there won't be one).
+                        val st = _state.value
+                        val cfg = desiredConfig
+                        if (st is TransportState.Failed && st.retryable && cfg != null) {
+                            runCatching { connect(cfg) }
+                        }
+                    }
                 }
             }
         }
@@ -110,7 +120,7 @@ class TransportController(
     suspend fun connect(config: TransportConfig) = lifecycleLock.withLock {
         desiredConfig = config
         teardownLocked()
-        val transport = NativeNetworkTransport(config, scope)
+        val transport = NativeNetworkTransport(config, scope, systemVpnActive)
         stateJob = scope.launch {
             transport.state.collect { _state.value = it }
         }
@@ -141,8 +151,12 @@ class TransportController(
             _state.collect { st ->
                 if (st is TransportState.Failed && st.retryable) {
                     val cfg = desiredConfig ?: return@collect
+                    // While a system VPN holds the network the failure is expected —
+                    // reconnecting now would just fight the VPN and hot-loop. The
+                    // VPN-off transition re-triggers the reconnect (init collector).
+                    if (systemVpnActive?.value == true) return@collect
                     delay(RECONNECT_BACKOFF_MS)
-                    if (desiredConfig != null) {
+                    if (desiredConfig != null && systemVpnActive?.value != true) {
                         runCatching { connect(cfg) }
                     }
                 }

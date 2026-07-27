@@ -306,7 +306,9 @@ fun TransportScreen(
             ) {
                 Button(
                     onClick = { viewModel.connect(currentForm(), publicKey) },
-                    enabled = !active,
+                    // A system VPN owns the network — manual connect/disconnect is
+                    // disabled until it goes away (routes yield automatically).
+                    enabled = !active && !vpnActive,
                     modifier = Modifier.weight(1f),
                 ) {
                     if (trying) {
@@ -317,9 +319,17 @@ fun TransportScreen(
                 }
                 OutlinedButton(
                     onClick = viewModel::disconnect,
-                    enabled = active || state is TransportState.Failed,
+                    enabled = (active || state is TransportState.Failed) && !vpnActive,
                     modifier = Modifier.weight(1f),
                 ) { Text("Disconnect") }
+            }
+            if (vpnActive) {
+                Text(
+                    "Connect/disconnect is disabled while a system VPN is active; " +
+                        "the tunnel yields automatically and Diagnostics stays available.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
 
         }
@@ -350,10 +360,11 @@ private fun MonitorCard(state: TransportState, health: TransportHealth?, error: 
         }
     }
 
-    // Yielding is a projection over (tunnel state, system VPN presence): the tunnel
-    // IS still connected, but every route is masked to NO_PROXY while the VPN holds
-    // the network — say so instead of a misleading plain "Connected".
-    val yielding = vpnActive && state is TransportState.Connected
+    // Yielding is a projection over (tunnel state, system VPN presence): whenever a
+    // system VPN holds the network and the tunnel is up in any form, every route is
+    // masked to NO_PROXY — say so instead of a misleading plain status. (Handshake
+    // noise is suppressed upstream while yielding, so Connected is truthful here.)
+    val yielding = vpnActive && state !is TransportState.Disconnected
     val (label, labelColor) = when {
         yielding -> "Yielding to system VPN" to MaterialTheme.colorScheme.tertiary
         else -> when (state) {
@@ -376,6 +387,13 @@ private fun MonitorCard(state: TransportState, health: TransportHealth?, error: 
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            if (vpnActive && state is TransportState.Disconnected) {
+                Text(
+                    "System VPN active — the built-in tunnel is disabled while it runs.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
 
             // Show the actionable reason for degraded/failed states.
             val reason = when (state) {
@@ -387,7 +405,7 @@ private fun MonitorCard(state: TransportState, health: TransportHealth?, error: 
                 Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
-            if (state is TransportState.Connected) {
+            if (state is TransportState.Connected && !yielding) {
                 val port = (state as TransportState.Connected).localSocksPort
                 Text(
                     "Local SOCKS5: 127.0.0.1:$port",

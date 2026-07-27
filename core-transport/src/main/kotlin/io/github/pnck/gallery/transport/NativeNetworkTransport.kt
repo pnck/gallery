@@ -39,6 +39,13 @@ import uniffi.gallery_transport.TransportHealth as CoreHealth
 class NativeNetworkTransport(
     private val config: TransportConfig,
     private val scope: CoroutineScope,
+    /**
+     * Live "a system VPN covers us" projection (see [SystemVpnMonitor]). While
+     * true, handshake loss is EXPECTED — our WG UDP rides the VPN and may not
+     * reach the peer — so the monitor neither degrades nor escalates to Failed;
+     * boringtun re-keys on its own once traffic resumes after the VPN drops.
+     */
+    private val vpnActive: StateFlow<Boolean>? = null,
 ) : NetworkTransport {
 
     private val core: WgCore by lazy { WgCore() }
@@ -131,23 +138,42 @@ class NativeNetworkTransport(
                         lastOkMs = now
                         _state.value = TransportState.Connected(port, h.lastHandshakeEpoch?.toLong() ?: epochSeconds())
                     }
-                    // Lost a previously-good handshake: allow a grace period to
-                    // self-recover, then declare Failed(retryable) → controller reconnects.
+                    // Lost a previously-good handshake. While yielding to a system
+                    // VPN this is EXPECTED (our UDP rides the VPN); keep reporting
+                    // Connected and let boringtun re-key on its own when traffic
+                    // resumes — degrading/reconnecting would fight the VPN for
+                    // nothing and hot-loop the supervisor. Otherwise allow a grace
+                    // period to self-recover, then Failed(retryable) → reconnect.
                     everConnected -> {
-                        if (now - lastOkMs >= RECONNECT_AFTER_MS) {
+                        if (vpnActive?.value == true) {
+                            _state.value = TransportState.Connected(
+                                port,
+                                h.lastHandshakeEpoch?.toLong() ?: epochSeconds(),
+                            )
+                        } else if (now - lastOkMs >= RECONNECT_AFTER_MS) {
                             _state.value = TransportState.Failed(
                                 "WireGuard handshake lost and didn't recover — reconnecting.",
                                 retryable = true,
                             )
                             return@launch
+                        } else {
+                            _state.value = TransportState.Degraded("WireGuard handshake lost — recovering…")
                         }
-                        _state.value = TransportState.Degraded("WireGuard handshake lost — recovering…")
                     }
-                    // Initial connect, never handshaked yet.
-                    now - startMs > HANDSHAKE_WARN_MS -> _state.value = TransportState.Degraded(
-                        "No WireGuard handshake yet. Check: the server has YOUR public key as a peer, " +
-                            "the endpoint host:port is reachable, and the peer public key is correct.",
-                    )
+                    // Initial connect, never handshaked yet. While a system VPN is
+                    // up, absence of a handshake is expected (yielding) — stay
+                    // Connecting instead of crying Degraded with a misleading
+                    // "check your peer config" hint.
+                    now - startMs > HANDSHAKE_WARN_MS -> {
+                        _state.value = if (vpnActive?.value == true) {
+                            TransportState.Connecting
+                        } else {
+                            TransportState.Degraded(
+                                "No WireGuard handshake yet. Check: the server has YOUR public key as a peer, " +
+                                    "the endpoint host:port is reachable, and the peer public key is correct.",
+                            )
+                        }
+                    }
                     else -> _state.value = TransportState.Connecting
                 }
                 delay(1_000)

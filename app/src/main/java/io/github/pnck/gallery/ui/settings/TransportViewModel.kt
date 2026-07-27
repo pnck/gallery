@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -84,10 +86,13 @@ class TransportViewModel @Inject constructor(
         viewModelScope.launch {
             _savedForm.value = withContext(Dispatchers.IO) { configStore.load() }
         }
-        // Poll health only while connected; clear it otherwise.
+        // Poll health only while connected AND not yielding to a system VPN —
+        // a tunneled handshake probe is meaningless while traffic goes direct.
         viewModelScope.launch {
-            transportState.collect { st ->
-                if (st is TransportState.Connected) startPolling() else stopPolling()
+            combine(transportState, systemVpnActive) { st, vpn ->
+                st is TransportState.Connected && !vpn
+            }.distinctUntilChanged().collect { polling ->
+                if (polling) startPolling() else stopPolling()
             }
         }
     }
