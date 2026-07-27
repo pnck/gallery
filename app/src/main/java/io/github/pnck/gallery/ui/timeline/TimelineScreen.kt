@@ -132,6 +132,8 @@ fun TimelineScreen(
     onPhotoClick: (String) -> Unit,
     onSettingsClick: () -> Unit,
     onOpenDrawer: () -> Unit = {},
+    /** False until this destination has settled (RESUMED) — guards the hamburger. */
+    drawerEnabled: Boolean = true,
     viewModel: TimelineViewModel = hiltViewModel(),
 ) {
     val photos by viewModel.photos.collectAsState()
@@ -262,7 +264,10 @@ fun TimelineScreen(
             } else {
                 TopAppBar(
                     navigationIcon = {
-                        IconButton(onClick = onOpenDrawer) {
+                        // Disabled mid-transition (see GalleryNavHost's topLevel
+                        // projection): a fast second tap on this spot while the
+                        // screen is still animating in must not open the drawer.
+                        IconButton(onClick = onOpenDrawer, enabled = drawerEnabled) {
                             Icon(Icons.Default.Menu, contentDescription = stringResource(R.string.open_drawer))
                         }
                     },

@@ -83,6 +83,8 @@ import me.saket.telephoto.zoomable.coil3.ZoomableAsyncImage
 fun MyDriveScreen(
     onOpenDrawer: () -> Unit,
     onSettingsClick: () -> Unit,
+    /** False until this destination has settled (RESUMED) — guards the hamburger. */
+    drawerEnabled: Boolean = true,
     viewModel: MyDriveViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
@@ -119,6 +121,7 @@ fun MyDriveScreen(
             configured = state.configured,
             onEnable = viewModel::enableBrowsing,
             onOpenDrawer = onOpenDrawer,
+            drawerEnabled = drawerEnabled,
         )
         ElevateDialogs(state.elevating, viewModel::enableBrowsing, viewModel::cancelElevate)
         return
@@ -179,7 +182,10 @@ fun MyDriveScreen(
             } else {
                 TopAppBar(
                     navigationIcon = {
-                        IconButton(onClick = { if (inSubfolder) viewModel.goUp() else onOpenDrawer() }) {
+                        IconButton(
+                            onClick = { if (inSubfolder) viewModel.goUp() else onOpenDrawer() },
+                            enabled = inSubfolder || drawerEnabled,
+                        ) {
                             if (inSubfolder) {
                                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                             } else {
@@ -252,13 +258,18 @@ fun MyDriveScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MyDriveGate(configured: Boolean, onEnable: () -> Unit, onOpenDrawer: () -> Unit) {
+private fun MyDriveGate(
+    configured: Boolean,
+    onEnable: () -> Unit,
+    onOpenDrawer: () -> Unit,
+    drawerEnabled: Boolean,
+) {
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.drawer_my_drive)) },
                 navigationIcon = {
-                    IconButton(onClick = onOpenDrawer) {
+                    IconButton(onClick = onOpenDrawer, enabled = drawerEnabled) {
                         Icon(Icons.Default.Menu, contentDescription = stringResource(R.string.open_drawer))
                     }
                 },

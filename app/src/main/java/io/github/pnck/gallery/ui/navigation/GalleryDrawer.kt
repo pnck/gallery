@@ -1,66 +1,47 @@
 package io.github.pnck.gallery.ui.navigation
 
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.PhotoLibrary
-import androidx.compose.material3.DrawerDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.github.pnck.gallery.R
 
 /**
- * The swipe-out side panel (per the agreed nav model): 【My Photos · My Drive · reserved】.
+ * The side panel's CONTENT (the chrome — offset, scrim, drag zones — lives in
+ * GalleryNavHost's custom drawer): 【My Photos · My Drive · reserved】.
  *
  * "My Photos" is the default backup/album surface (least-privilege drive.file). "My
  * Drive" is a DELIBERATELY separate feature that requests broader Drive-read access on
  * its own — kept apart from the main flow so the least-privilege default is never
  * silently widened. The third slot is reserved.
  *
- * Width follows the MD3 modal-drawer spec (full width capped at the 360.dp token);
- * a leftward drag on the sheet closes it (the container's own drag gestures are
- * disabled — see GalleryNavHost — so swipe-to-close must live on the sheet).
+ * [interactionsEnabled] is false while the sheet is still sliding in: a tap that
+ * OPENED the drawer (e.g. a fast double-tap on the top-left back/hamburger spot)
+ * must not be able to select an item mid-stream — the sheet slides in under the
+ * still-active gesture and would navigate somewhere the user never aimed at.
  */
 @Composable
 fun GalleryDrawer(
     selected: String,
-    /** False while the sheet is animating in: a tap that OPENED the drawer (e.g. a
-     *  fast double-tap on the top-left back/hamburger spot) must not be able to
-     *  select an item mid-stream — the sheet slides in under the still-active
-     *  gesture and would navigate somewhere the user never aimed at. */
     interactionsEnabled: Boolean,
-    onClose: () -> Unit,
     onMyPhotos: () -> Unit,
     onMyDrive: () -> Unit,
 ) {
-    ModalDrawerSheet(
-        modifier = Modifier
-            .widthIn(max = DrawerDefaults.MaximumDrawerWidth)
-            .fillMaxWidth()
-            .pointerInput(Unit) {
-                var acc = 0f
-                detectHorizontalDragGestures(
-                    onDragStart = { acc = 0f },
-                    onHorizontalDrag = { _, dragAmount -> acc += dragAmount },
-                    onDragEnd = { if (acc < -48.dp.toPx()) onClose() },
-                )
-            },
-    ) {
+    Column(Modifier.fillMaxSize()) {
         Spacer(Modifier.height(12.dp))
         Text(
             stringResource(R.string.app_name),
