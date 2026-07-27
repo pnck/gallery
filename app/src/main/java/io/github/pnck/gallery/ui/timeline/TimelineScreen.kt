@@ -135,6 +135,11 @@ fun TimelineScreen(
     viewModel: TimelineViewModel = hiltViewModel(),
 ) {
     val photos by viewModel.photos.collectAsState()
+    // Sort-paired list for grouping/scrubbing: `sort` (the UI selection) flips
+    // before the new query lands; using the paired timeline.sort for cell building
+    // means a stale list is never grouped by a sort it wasn't ordered with
+    // (duplicate year-header keys → LazyGrid crash, the "size → date" flash-crash).
+    val timeline by viewModel.timeline.collectAsState()
     val syncStatus by viewModel.syncStatus.collectAsState()
     val selection by viewModel.selection.collectAsState()
     val selectionMode by viewModel.selectionActive.collectAsState()
@@ -334,7 +339,7 @@ fun TimelineScreen(
             } else {
                 // Group into year sections (Google-Photos style) when sorted by date;
                 // other sorts (size) show a flat grid with no headers.
-                val cells = remember(photos, sort) { buildTimelineCells(photos, sort) }
+                val cells = remember(timeline) { buildTimelineCells(timeline.photos, timeline.sort) }
                 Box(Modifier.fillMaxSize()) {
                     LazyVerticalGrid(
                         state = gridState,
@@ -377,7 +382,7 @@ fun TimelineScreen(
                     FastScroller(
                         state = gridState,
                         itemCount = cells.size,
-                        model = remember(cells, sort) { buildScrubModel(cells, sort) },
+                        model = remember(cells) { buildScrubModel(cells, timeline.sort) },
                         modifier = Modifier.align(Alignment.TopEnd),
                     )
                 }
@@ -603,12 +608,14 @@ private fun buildTimelineCells(
     val dated = sort == TimelineSort.DATE_DESC || sort == TimelineSort.DATE_ASC
     if (!dated) return photos.map { GridCell.Item(it) }
     val out = ArrayList<GridCell>(photos.size + 32)
-    var lastYm = Long.MIN_VALUE
+    // Header per FIRST occurrence of a year-month, not per consecutive change:
+    // identical for correctly date-sorted input, and crash-proof (no duplicate
+    // "h:<label>" grid keys) if the list is ever momentarily stale/mis-ordered.
+    val seen = HashSet<Long>()
     for (p in photos) {
         val ym = yearOf(p.dateTaken) * 100L + monthOf(p.dateTaken)
-        if (ym != lastYm) {
+        if (seen.add(ym)) {
             out += GridCell.Header(yearMonthLabel(p.dateTaken))
-            lastYm = ym
         }
         out += GridCell.Item(p)
     }

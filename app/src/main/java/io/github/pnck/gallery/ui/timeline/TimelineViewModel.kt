@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
+import android.util.Log
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.pnck.gallery.data.settings.AppSettingsStore
 import io.github.pnck.gallery.data.sync.MediaReconciler
@@ -24,6 +25,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
@@ -36,6 +38,11 @@ import kotlinx.coroutines.launch
 sealed class TimelineIntent {
     data object ForceSync : TimelineIntent()
 }
+
+/** The timeline list PAIRED with the sort that produced it (see TimelineViewModel.timeline). */
+data class TimelineList(val sort: TimelineSort, val photos: List<TimelinePhoto>)
+
+private const val TAG = "gallery-timeline"
 
 sealed interface SyncStatus {
     data object Idle : SyncStatus
@@ -98,12 +105,27 @@ class TimelineViewModel @Inject constructor(
     val buckets: StateFlow<List<MediaBucket>> = _buckets.asStateFlow()
 
     /**
-     * The whole ordered/filtered timeline (metadata only). The grid groups it into
-     * date sections (year headers) and the side fast-scroller maps a scroll position to
-     * its date — both need the full positional list, so this replaces paging here.
+     * The whole ordered/filtered timeline (metadata only), PAIRED with the sort it
+     * was actually ordered by. The grid groups it into date sections whose headers
+     * are keyed by year-month label — if the grid ever grouped a stale (old-sort)
+     * list with the new sort, the same label would appear in many disjoint runs and
+     * LazyVerticalGrid would crash on duplicate keys ("size → date" flash-crash).
+     * Deriving (sort, photos) from one flatMapLatest makes the mismatch impossible.
      */
-    val photos: StateFlow<List<TimelinePhoto>> = queryHolder.query
-        .flatMapLatest { repo.getTimeline(it) }
+    val timeline: StateFlow<TimelineList> = queryHolder.query
+        .flatMapLatest { q ->
+            repo.getTimeline(q).map { list -> TimelineList(q.sort, list) }
+        }
+        .catch { e ->
+            Log.w(TAG, "timeline flow failed — showing empty grid instead of crashing", e)
+            emit(TimelineList(TimelineSort.DATE_DESC, emptyList()))
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TimelineList(TimelineSort.DATE_DESC, emptyList()))
+
+    /** Same list as [timeline] (sort-paired source of truth) for consumers that
+     *  don't group by date (selection actions, badge logic). */
+    val photos: StateFlow<List<TimelinePhoto>> = timeline
+        .map { it.photos }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     init {
