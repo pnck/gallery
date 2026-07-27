@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -81,6 +82,7 @@ import me.saket.telephoto.zoomable.coil3.ZoomableAsyncImage
 @Composable
 fun MyDriveScreen(
     onOpenDrawer: () -> Unit,
+    onSettingsClick: () -> Unit,
     viewModel: MyDriveViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
@@ -184,6 +186,13 @@ fun MyDriveScreen(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
+                    },
+                    actions = {
+                        // Connection management (account, network acceleration) lives
+                        // in Settings — reachable from My Drive too, not just Photos.
+                        IconButton(onClick = onSettingsClick) {
+                            Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.settings))
+                        }
                     },
                 )
             }

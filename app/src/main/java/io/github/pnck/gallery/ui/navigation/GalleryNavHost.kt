@@ -91,7 +91,10 @@ fun GalleryNavHost() {
                 )
             }
             composable(Routes.MY_DRIVE) {
-                MyDriveScreen(onOpenDrawer = openDrawer)
+                MyDriveScreen(
+                    onOpenDrawer = openDrawer,
+                    onSettingsClick = { navController.navigate(Routes.SETTINGS) },
+                )
             }
             composable(
                 route = Routes.PHOTO_DETAIL,
