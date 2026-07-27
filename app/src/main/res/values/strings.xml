@@ -203,6 +203,7 @@
     <string name="storage_app_freeable">%1$d backed up · freeable</string>
     <string name="storage_app_not_backed">Not backed up yet</string>
     <string name="storage_app_cloud_only">Cloud only (no local copy)</string>
+    <string name="storage_photo_count">%1$d photos</string>
     <string name="storage_free_button">Free up %1$s</string>
     <string name="storage_free_none">Nothing to free up</string>
     <string name="storage_free_explainer">Only backed-up photos are released. The local copy is removed after its cloud copy is verified; a cloud preview stays in the timeline.</string>

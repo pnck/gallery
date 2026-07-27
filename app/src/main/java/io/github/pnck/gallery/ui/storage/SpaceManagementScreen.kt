@@ -261,7 +261,7 @@ private fun AppMediaCard(summary: StorageSummary, context: android.content.Conte
             )
             StatRow(
                 label = stringResource(R.string.storage_app_cloud_only),
-                value = summary.cloudOnlyCount.toString(),
+                value = stringResource(R.string.storage_photo_count, summary.cloudOnlyCount),
             )
         }
     }
