@@ -70,14 +70,26 @@ fun GalleryNavHost() {
                 selected = route ?: Routes.TIMELINE,
                 onMyPhotos = {
                     scope.launch { drawerState.close() }
-                    navController.navigate(Routes.TIMELINE) {
-                        popUpTo(Routes.TIMELINE) { inclusive = true }
-                        launchSingleTop = true
+                    // My Drive always sits ON TOP of the timeline — going back to
+                    // My Photos is a pop, never a re-create: the timeline entry (its
+                    // ViewModel, scroll state, paging) survives, and My Drive's own
+                    // state is saved for restoreState on the way back. The old code
+                    // popped the START destination itself (inclusive), momentarily
+                    // emptying the back stack → NavHost composed zero destinations
+                    // → the "black screen after switching tabs" report.
+                    if (!navController.popBackStack(Routes.TIMELINE, inclusive = false, saveState = true)) {
+                        navController.navigate(Routes.TIMELINE) {
+                            launchSingleTop = true
+                            restoreState = true
+                        }
                     }
                 },
                 onMyDrive = {
                     scope.launch { drawerState.close() }
-                    navController.navigate(Routes.MY_DRIVE) { launchSingleTop = true }
+                    navController.navigate(Routes.MY_DRIVE) {
+                        launchSingleTop = true
+                        restoreState = true
+                    }
                 },
             )
         },
