@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -135,7 +136,10 @@ fun FastScroller(
     val fraction = if (dragging) fingerFraction else restingFraction
     val haptics = LocalHapticFeedback.current
 
-    BoxWithConstraints(modifier.fillMaxHeight().width(56.dp).graphicsLayer { this.alpha = alpha }) {
+    // Full-size overlay: the bubble needs real width (it was squeezed into the
+    // 56dp rail and collapsed to a blank strip). Only the 56dp rail consumes
+    // touches — everything else stays scroll-through.
+    BoxWithConstraints(modifier.fillMaxSize().graphicsLayer { this.alpha = alpha }) {
         val handleH = 48.dp
         val handleHPx = with(density) { handleH.toPx() }
         val maxY = constraints.maxHeight.toFloat()
@@ -145,7 +149,7 @@ fun FastScroller(
 
         fun yToFraction(y: Float): Float = ((y - padVpx - handleHPx / 2) / usableH).coerceIn(0f, 1f)
 
-        // Floating bubble: the landing period, following the finger.
+        // Floating bubble: the focused period, following the finger.
         if (dragging) {
             Surface(
                 color = Color.White.copy(alpha = 0.92f),
@@ -192,7 +196,7 @@ fun FastScroller(
             }
         }
 
-        // Gesture layer: the whole rail is the grab zone while visible. The
+        // Gesture layer: the 56dp rail is the grab zone while visible. The
         // focus SNAPS to slots — crossing one jumps the wall and ticks haptics.
         Box(
             Modifier
@@ -214,7 +218,7 @@ fun FastScroller(
                         val slotChanged = model.slotIndexAt(f) != model.slotIndexAt(fingerFraction)
                         fingerFraction = f
                         if (slotChanged) {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            haptics.performHapticFeedback(HapticFeedbackType.ClockTick)
                             scope.launch { state.scrollToItem(model.cellIndexAt(f)) }
                         }
                     }
