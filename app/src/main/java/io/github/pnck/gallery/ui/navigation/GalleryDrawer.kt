@@ -39,6 +39,11 @@ import io.github.pnck.gallery.R
 @Composable
 fun GalleryDrawer(
     selected: String,
+    /** False while the sheet is animating in: a tap that OPENED the drawer (e.g. a
+     *  fast double-tap on the top-left back/hamburger spot) must not be able to
+     *  select an item mid-stream — the sheet slides in under the still-active
+     *  gesture and would navigate somewhere the user never aimed at. */
+    interactionsEnabled: Boolean,
     onClose: () -> Unit,
     onMyPhotos: () -> Unit,
     onMyDrive: () -> Unit,
@@ -66,14 +71,14 @@ fun GalleryDrawer(
             icon = { Icon(Icons.Default.PhotoLibrary, contentDescription = null) },
             label = { Text(stringResource(R.string.drawer_my_photos)) },
             selected = selected == Routes.TIMELINE,
-            onClick = onMyPhotos,
+            onClick = { if (interactionsEnabled) onMyPhotos() },
             modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
         )
         NavigationDrawerItem(
             icon = { Icon(Icons.Default.CloudQueue, contentDescription = null) },
             label = { Text(stringResource(R.string.drawer_my_drive)) },
             selected = selected == Routes.MY_DRIVE,
-            onClick = onMyDrive,
+            onClick = { if (interactionsEnabled) onMyDrive() },
             modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
         )
         NavigationDrawerItem(

@@ -80,6 +80,8 @@ fun GalleryNavHost() {
         drawerContent = {
             GalleryDrawer(
                 selected = route ?: Routes.TIMELINE,
+                // Items only respond once the sheet has SETTLED open — see GalleryDrawer.
+                interactionsEnabled = drawerState.isOpen && !drawerState.isAnimationRunning,
                 onClose = { scope.launch { drawerState.close() } },
                 onMyPhotos = {
                     scope.launch { drawerState.close() }
