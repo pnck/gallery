@@ -282,7 +282,8 @@ object AppModule {
         scanner: LocalMediaScanner,
         settings: AppSettingsStore,
         resolver: ContentResolver,
-    ): ReconcileProcessor = ReconcileProcessor(provider, photoDao, scanner, settings, resolver)
+        @ApplicationContext context: Context,
+    ): ReconcileProcessor = ReconcileProcessor(provider, photoDao, scanner, settings, resolver, context)
 
     @Provides
     @Singleton

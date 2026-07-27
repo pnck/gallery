@@ -34,6 +34,9 @@ class MediaReconciler(
     suspend fun reconcile(): Int {
         val since = appContext.scanCursorStore.data.first()[cursorKey] ?: 0L
         val items = scanner.scanIncremental(since)
+        // The scan QUERY succeeded (empty or not): the local library has loaded at
+        // least once, so cloud truth may now enter the DB (ReconcileProcessor gate).
+        settings.setInitialScanDone()
         if (items.isEmpty()) return 0
 
         // Scan allowlist (PRD §6.1): when non-empty, only import photos from the chosen

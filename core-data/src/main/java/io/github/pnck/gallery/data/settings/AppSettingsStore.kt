@@ -23,6 +23,7 @@ class AppSettingsStore(private val context: Context) {
     private val scanBucketsKey = stringSetPreferencesKey("scan_bucket_ids")
     private val sortKey = stringPreferencesKey("timeline_sort")
     private val sizeBackfilledKey = booleanPreferencesKey("size_backfilled_v3")
+    private val initialScanDoneKey = booleanPreferencesKey("initial_scan_done")
     private val logLevelKey = stringPreferencesKey("transport_log_level")
 
     /** Name of the app's cloud folder that uploads are pinned to. */
@@ -41,6 +42,17 @@ class AppSettingsStore(private val context: Context) {
 
     /** False until the one-time v3 size/bucket backfill scan has been kicked off. */
     val sizeBackfilled: Flow<Boolean> = context.appSettingsStore.data.map { it[sizeBackfilledKey] ?: false }
+
+    /**
+     * False until the first successful local MediaStore scan. Cloud truth (reconcile /
+     * downstream sync) must not enter the DB before this — a cloud-first fill makes
+     * the timeline show only cloud-only photos and the local library look lost.
+     */
+    val initialScanDone: Flow<Boolean> = context.appSettingsStore.data.map { it[initialScanDoneKey] ?: false }
+
+    suspend fun setInitialScanDone() {
+        context.appSettingsStore.edit { it[initialScanDoneKey] = true }
+    }
 
     /** Persisted timeline ordering (defaults to newest-first). */
     val timelineSort: Flow<TimelineSort> = context.appSettingsStore.data.map { prefs ->

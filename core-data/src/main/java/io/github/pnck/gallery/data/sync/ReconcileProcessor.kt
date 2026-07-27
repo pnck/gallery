@@ -1,8 +1,13 @@
 package io.github.pnck.gallery.data.sync
 
+import android.Manifest
 import android.content.ContentResolver
+import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.util.Log
+import androidx.core.content.ContextCompat
 import io.github.pnck.gallery.data.db.PhotoDao
 import io.github.pnck.gallery.data.db.PhotoEntity
 import io.github.pnck.gallery.data.scanner.LocalMediaScanner
@@ -52,15 +57,40 @@ class ReconcileProcessor(
     private val scanner: LocalMediaScanner,
     private val settings: AppSettingsStore,
     private val resolver: ContentResolver,
+    private val appContext: Context,
 ) {
     sealed interface Outcome {
         data class Done(val synced: Int, val pendingUpload: Int, val cloudOnly: Int, val pruned: Int) : Outcome
 
         /** A transient cloud error — nothing was changed; retry later. */
         data object Retry : Outcome
+
+        /**
+         * Preconditions not met (no media-read permission, or the first local scan
+         * hasn't completed) — nothing was changed and there is nothing to retry:
+         * the scan pipeline will make the next run possible.
+         */
+        data object Skipped : Outcome
     }
 
     suspend fun reconcile(): Outcome = withContext(Dispatchers.IO) {
+        // Guard 1 — LOCAL truth must exist before any cloud ingestion: filling the
+        // DB cloud-first makes the timeline show only cloud-only photos and the
+        // local library look lost (the fresh-install report). Skip, don't retry —
+        // the scan pipeline sets the flag and kicks us again.
+        if (!settings.initialScanDone.first()) {
+            Log.i(TAG, "reconcile: skipped — initial local scan not done yet")
+            return@withContext Outcome.Skipped
+        }
+        // Guard 2 — never classify against a BLIND local scan: without the media
+        // permission the local "truth" is an empty list and step C would prune
+        // every local-backed row (SYNCED badges lost). The cloud side has the same
+        // rule already (abort on partial listing); symmetry demands it here.
+        if (!hasMediaReadPermission()) {
+            Log.i(TAG, "reconcile: skipped — no media read permission")
+            return@withContext Outcome.Skipped
+        }
+
         // 1. FULL cloud truth. Abort (Retry) on any error so we never prune against a
         //    partial listing — backup safety outranks freshness.
         val cloud = mutableListOf<CloudFile>()
@@ -128,6 +158,18 @@ class ReconcileProcessor(
         val cloudOnly = plan.upserts.count { it.syncState == SyncState.CLOUD_ONLY }
         Log.i(TAG, "reconcile: synced=$synced pendingUpload=$pending cloudOnly=$cloudOnly pruned=${plan.deleteIds.size}")
         Outcome.Done(synced, pending, cloudOnly, plan.deleteIds.size)
+    }
+
+    /** The media-read permission for this SDK level, including the API 34+ partial grant. */
+    private fun hasMediaReadPermission(): Boolean {
+        fun granted(p: String) = ContextCompat.checkSelfPermission(appContext, p) == PackageManager.PERMISSION_GRANTED
+        return when {
+            Build.VERSION.SDK_INT >= 34 ->
+                granted(Manifest.permission.READ_MEDIA_IMAGES) ||
+                    granted(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+            Build.VERSION.SDK_INT >= 33 -> granted(Manifest.permission.READ_MEDIA_IMAGES)
+            else -> granted(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
     }
 
     private fun computeMd5(uriStr: String): String? = runCatching {

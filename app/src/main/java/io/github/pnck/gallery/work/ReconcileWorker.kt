@@ -39,6 +39,9 @@ class ReconcileWorker @AssistedInject constructor(
                     .build(),
             )
             is ReconcileProcessor.Outcome.Retry -> Result.retry()
+            // Preconditions unmet (no permission / first scan pending): succeed
+            // quietly — retrying now would spin on the same preconditions.
+            is ReconcileProcessor.Outcome.Skipped -> Result.success()
         }
     }
 
