@@ -92,12 +92,16 @@ class TransportController(
                     )
                     onRouteRebind?.invoke()
                     if (!activeVpn) {
-                        // A failure parked while yielding (e.g. driverDead) becomes
-                        // actionable now — reconnect immediately instead of waiting
-                        // for the next fresh Failed emission (there won't be one).
+                        // The network path just changed fundamentally: a failure
+                        // parked while yielding (e.g. driverDead) OR a stuck
+                        // Degraded (handshake lost on the VPN-captured socket —
+                        // boringtun re-keys through the same dead socket, so only
+                        // a fresh driver heals it) becomes actionable now.
                         val st = _state.value
                         val cfg = desiredConfig
-                        if (st is TransportState.Failed && st.retryable && cfg != null) {
+                        val stuck = st is TransportState.Degraded ||
+                            (st is TransportState.Failed && st.retryable)
+                        if (stuck && cfg != null) {
                             runCatching { connect(cfg) }
                         }
                     }

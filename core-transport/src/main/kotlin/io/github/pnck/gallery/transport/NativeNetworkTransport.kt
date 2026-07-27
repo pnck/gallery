@@ -165,10 +165,21 @@ class NativeNetworkTransport(
                     // Connecting instead of crying Degraded with a misleading
                     // "check your peer config" hint.
                     now - startMs > HANDSHAKE_WARN_MS -> {
-                        _state.value = if (vpnActive?.value == true) {
-                            TransportState.Connecting
+                        // Never escalate while yielding, and never sit in Degraded
+                        // forever: a handshake that can't complete within
+                        // HANDSHAKE_FAIL_MS means the path is dead (classic case:
+                        // the UDP socket was born under a system VPN that has
+                        // since closed) — only a fresh driver+socket heals it.
+                        if (vpnActive?.value == true) {
+                            _state.value = TransportState.Connecting
+                        } else if (now - startMs > HANDSHAKE_FAIL_MS) {
+                            _state.value = TransportState.Failed(
+                                "WireGuard handshake never completed — reconnecting with a fresh driver.",
+                                retryable = true,
+                            )
+                            return@launch
                         } else {
-                            TransportState.Degraded(
+                            _state.value = TransportState.Degraded(
                                 "No WireGuard handshake yet. Check: the server has YOUR public key as a peer, " +
                                     "the endpoint host:port is reachable, and the peer public key is correct.",
                             )
@@ -212,6 +223,11 @@ class NativeNetworkTransport(
     private companion object {
         const val LOOPBACK = "127.0.0.1"
         const val HANDSHAKE_WARN_MS = 12_000L
+
+        /** Never-handshaked connects escalate to Failed(retryable) after this —
+         *  a fresh driver+socket is the only cure for a dead network path
+         *  (e.g. the socket was created under a since-closed system VPN). */
+        const val HANDSHAKE_FAIL_MS = 60_000L
 
         /** Grace window for a lost handshake to self-recover before we force a
          *  full reconnect. Deliberately long: WG is UDP, session loss is routine
