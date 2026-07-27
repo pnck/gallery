@@ -45,7 +45,7 @@ class SpaceManagementViewModel @Inject constructor(
         .stateIn(
             viewModelScope,
             SharingStarted.WhileSubscribed(5_000),
-            StorageSummary(0, 0, 0, 0, 0),
+            StorageSummary(0, 0, 0, 0, 0, 0),
         )
 
     private val _device = MutableStateFlow(DeviceStorage(0, 0))

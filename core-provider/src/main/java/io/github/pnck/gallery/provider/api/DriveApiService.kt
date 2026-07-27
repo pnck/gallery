@@ -29,11 +29,16 @@ interface DriveApiService {
 
     @GET("drive/v3/files")
     suspend fun listFiles(
-        @Query("q") query: String = "mimeType contains 'image/' and trashed = false",
+        // No image-only mime filter: the reconcile/downstream truth must include
+        // EVERY file the app can see — an upload that ever went out with a
+        // non-image MIME (an older build's fallback) would otherwise be invisible,
+        // unmatchable by content hash, and re-uploaded forever. Folders excluded:
+        // the backup folder itself must not become a CLOUD_ONLY photo row.
+        @Query("q") query: String = "mimeType != 'application/vnd.google-apps.folder' and trashed = false",
         @Query("pageToken") pageToken: String?,
         @Query("pageSize") pageSize: Int = 100,
         @Query("fields") fields: String =
-            "nextPageToken, files(id, name, size, md5Checksum, thumbnailLink, imageMediaMetadata)",
+            "nextPageToken, files(id, name, mimeType, size, md5Checksum, thumbnailLink, imageMediaMetadata)",
     ): Response<DriveFileListResponse>
 
     /** Which Google account this token belongs to — diagnoses account mismatch. */

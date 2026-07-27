@@ -235,6 +235,9 @@ fun TimelineScreen(
         is TimelineEvent.Deleted -> stringResource(R.string.photos_deleted, event.count)
         is TimelineEvent.FreeQueued -> stringResource(R.string.free_queued, event.count)
         is TimelineEvent.SpaceFreed -> stringResource(R.string.space_freed, event.count)
+        is TimelineEvent.Rebuilt -> stringResource(
+            R.string.rebuild_done, event.synced, event.pendingUpload, event.cloudOnly, event.pruned,
+        )
         null -> null
     }
     LaunchedEffect(eventMessage) {

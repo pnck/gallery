@@ -16,6 +16,7 @@ import io.github.pnck.gallery.domain.TimelinePhoto
 import io.github.pnck.gallery.domain.TimelineSort
 import io.github.pnck.gallery.ui.util.DeleteConfirm
 import io.github.pnck.gallery.ui.util.DeleteRequest
+import io.github.pnck.gallery.work.ReconcileWorker
 import io.github.pnck.gallery.work.SyncPipeline
 import io.github.pnck.gallery.work.UploadWorker
 import javax.inject.Inject
@@ -59,6 +60,11 @@ sealed interface TimelineEvent {
     data class FreeQueued(val count: Int) : TimelineEvent
     /** Released the local copies of already-backed-up selected photos. */
     data class SpaceFreed(val count: Int) : TimelineEvent
+
+    /** "Rebuild sync state" finished — the tallies ARE the diagnosis when the result
+     *  surprises (e.g. synced=0 with a full cloud means the cloud files are not
+     *  visible to the app's drive.file scope). */
+    data class Rebuilt(val synced: Int, val pendingUpload: Int, val cloudOnly: Int, val pruned: Int) : TimelineEvent
 }
 
 /** A named entry in the sync-queue view (PRD §9.1). */
@@ -139,6 +145,7 @@ class TimelineViewModel @Inject constructor(
                 settings.setSizeBackfilled()
             }
         }
+        watchRebuildResults()
     }
 
     fun setSort(newSort: TimelineSort) {
@@ -294,6 +301,28 @@ class TimelineViewModel @Inject constructor(
      *  prune drift). Self-heals phantom/stale rows without touching any files. */
     fun rebuildSyncState() {
         SyncPipeline.enqueueReconcile(workManager)
+    }
+
+    private fun watchRebuildResults() {
+        viewModelScope.launch {
+            var reportedId: java.util.UUID? = null
+            workManager.getWorkInfosForUniqueWorkFlow(SyncPipeline.RECONCILE_NAME).collect { infos ->
+                val done = infos.firstOrNull { it.state == WorkInfo.State.SUCCEEDED } ?: return@collect
+                if (done.id == reportedId) return@collect
+                reportedId = done.id
+                val d = done.outputData
+                // Only report a real reconcile outcome (a no-account run carries no tallies).
+                if (!d.hasKeyWithValueOfType(ReconcileWorker.KEY_SYNCED, Int::class.java)) return@collect
+                events.send(
+                    TimelineEvent.Rebuilt(
+                        synced = d.getInt(ReconcileWorker.KEY_SYNCED, 0),
+                        pendingUpload = d.getInt(ReconcileWorker.KEY_PENDING, 0),
+                        cloudOnly = d.getInt(ReconcileWorker.KEY_CLOUD_ONLY, 0),
+                        pruned = d.getInt(ReconcileWorker.KEY_PRUNED, 0),
+                    ),
+                )
+            }
+        }
     }
 
     /** "Clear queue": stop the current sweep and drop all waiting photos from backup. */

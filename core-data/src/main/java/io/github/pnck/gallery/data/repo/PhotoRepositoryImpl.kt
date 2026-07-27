@@ -71,6 +71,7 @@ class PhotoRepositoryImpl(
                 notBackedUpBytes = it.notBackedUpBytes,
                 freeableCount = it.freeableCount,
                 localCount = it.localCount,
+                cloudOnlyCount = it.cloudOnlyCount,
             )
         }
 

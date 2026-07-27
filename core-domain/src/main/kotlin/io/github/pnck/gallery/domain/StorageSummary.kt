@@ -19,4 +19,6 @@ data class StorageSummary(
     val freeableCount: Int,
     /** How many photos have a local copy on this device. */
     val localCount: Int,
+    /** How many photos exist only in the cloud (no local copy — syncable/viewable). */
+    val cloudOnlyCount: Int,
 )

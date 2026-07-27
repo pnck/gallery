@@ -259,6 +259,10 @@ private fun AppMediaCard(summary: StorageSummary, context: android.content.Conte
                 label = stringResource(R.string.storage_app_not_backed),
                 value = Formatter.formatShortFileSize(context, summary.notBackedUpBytes),
             )
+            StatRow(
+                label = stringResource(R.string.storage_app_cloud_only),
+                value = summary.cloudOnlyCount.toString(),
+            )
         }
     }
 }

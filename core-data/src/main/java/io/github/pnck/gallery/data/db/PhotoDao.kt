@@ -129,6 +129,25 @@ interface PhotoDao {
     @Query("DELETE FROM photos WHERE cloudId IN (:cloudIds)")
     suspend fun deleteByCloudIds(cloudIds: List<String>)
 
+    /**
+     * Server-side deletion handling (PRD §4.3): a row that still has a LOCAL copy
+     * must NOT be dropped — deleting it loses the backup link (and the excluded
+     * flag), so the photo vanishes from the timeline and re-imports as a phantom
+     * PENDING_UPLOAD on the next scan. Downgrade it instead: the badge flips to
+     * "not backed up" and the next upload re-links it. This is also what makes a
+     * cloud file that became invisible to the drive.file scope (Changes API reports
+     * it as removed) degrade gracefully instead of wiping the row.
+     */
+    @Query(
+        "UPDATE photos SET syncState = 0, cloudId = NULL, provider = NULL, cloudThumbnailUrl = NULL " +
+            "WHERE cloudId IN (:cloudIds) AND localUri IS NOT NULL",
+    )
+    suspend fun downgradeToPendingByCloudIds(cloudIds: List<String>)
+
+    /** Server-side deletion, cloud-only half: rows with no local copy are simply gone. */
+    @Query("DELETE FROM photos WHERE cloudId IN (:cloudIds) AND localUri IS NULL")
+    suspend fun deleteCloudOnlyByCloudIds(cloudIds: List<String>)
+
     @Query("DELETE FROM photos WHERE id IN (:ids)")
     suspend fun deleteByIds(ids: List<String>)
 
@@ -171,7 +190,8 @@ interface PhotoDao {
             "IFNULL(SUM(CASE WHEN syncState = 1 AND localUri IS NOT NULL THEN sizeBytes ELSE 0 END), 0) AS freeableBytes, " +
             "IFNULL(SUM(CASE WHEN syncState = 0 AND localUri IS NOT NULL THEN sizeBytes ELSE 0 END), 0) AS notBackedUpBytes, " +
             "IFNULL(SUM(CASE WHEN syncState = 1 AND localUri IS NOT NULL THEN 1 ELSE 0 END), 0) AS freeableCount, " +
-            "IFNULL(SUM(CASE WHEN localUri IS NOT NULL THEN 1 ELSE 0 END), 0) AS localCount " +
+            "IFNULL(SUM(CASE WHEN localUri IS NOT NULL THEN 1 ELSE 0 END), 0) AS localCount, " +
+            "IFNULL(SUM(CASE WHEN syncState = 2 THEN 1 ELSE 0 END), 0) AS cloudOnlyCount " +
             "FROM photos",
     )
     fun observeStorage(): Flow<StorageSummaryEntity>
@@ -184,6 +204,7 @@ data class StorageSummaryEntity(
     val notBackedUpBytes: Long,
     val freeableCount: Int,
     val localCount: Int,
+    val cloudOnlyCount: Int,
 )
 
 /** Projection for [PhotoDao.observeCounts]. */

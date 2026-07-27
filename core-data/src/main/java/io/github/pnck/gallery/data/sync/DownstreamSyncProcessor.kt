@@ -69,8 +69,13 @@ class DownstreamSyncProcessor(
         }
         val known = photoDao.getKnownCloudIds(provider.providerType.name).toMutableSet()
         val inserted = ingest(changes.upserted, known)
-        // MVP delete policy (PRD §4.3): drop the row for a server-side deletion.
-        if (changes.deletedCloudIds.isNotEmpty()) photoDao.deleteByCloudIds(changes.deletedCloudIds)
+        // Delete policy (PRD §4.3): a server-side removal flips rows WITH a local
+        // copy back to PENDING_UPLOAD (badge → "not backed up", re-upload re-links);
+        // only cloud-only rows are dropped. Never wipe a synced row wholesale.
+        if (changes.deletedCloudIds.isNotEmpty()) {
+            photoDao.downgradeToPendingByCloudIds(changes.deletedCloudIds)
+            photoDao.deleteCloudOnlyByCloudIds(changes.deletedCloudIds)
+        }
         syncKeyDao.upsert(SyncKeyEntity(target, nextPageToken = null, deltaToken = changes.newDeltaToken))
         return Outcome.Done(inserted, changes.deletedCloudIds.size)
     }

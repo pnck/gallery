@@ -3,6 +3,7 @@ package io.github.pnck.gallery.work
 import android.content.Context
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
+import androidx.work.Data
 import androidx.work.WorkerParameters
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
@@ -25,9 +26,26 @@ class ReconcileWorker @AssistedInject constructor(
 
     override suspend fun doWork(): Result {
         if (!authManager.isAuthorized()) return Result.success() // nothing to reconcile against
-        return when (reconcile.reconcile()) {
-            is ReconcileProcessor.Outcome.Done -> Result.success()
+        return when (val outcome = reconcile.reconcile()) {
+            // Surface the tallies in the output: the timeline reports them as a
+            // snackbar, so "Rebuild" is never a silent no-op — the counts ARE the
+            // diagnosis when the result surprises (e.g. synced=0 with a full cloud).
+            is ReconcileProcessor.Outcome.Done -> Result.success(
+                Data.Builder()
+                    .putInt(KEY_SYNCED, outcome.synced)
+                    .putInt(KEY_PENDING, outcome.pendingUpload)
+                    .putInt(KEY_CLOUD_ONLY, outcome.cloudOnly)
+                    .putInt(KEY_PRUNED, outcome.pruned)
+                    .build(),
+            )
             is ReconcileProcessor.Outcome.Retry -> Result.retry()
         }
+    }
+
+    companion object {
+        const val KEY_SYNCED = "synced"
+        const val KEY_PENDING = "pending"
+        const val KEY_CLOUD_ONLY = "cloudOnly"
+        const val KEY_PRUNED = "pruned"
     }
 }

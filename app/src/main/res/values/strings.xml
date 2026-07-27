@@ -121,6 +121,7 @@
     <string name="sync_queue_title">Queue</string>
     <string name="sync_queue_empty">Nothing running</string>
     <string name="rebuild_sync">Rebuild sync state</string>
+    <string name="rebuild_done">Rebuild done: %1$d backed up · %2$d to back up · %3$d cloud only · %4$d pruned</string>
     <string name="rebuild_sync_hint">Re-checks every photo against your cloud by content and fixes any wrong badges. Doesn\'t delete photos.</string>
     <string name="clear_queue">Clear backup queue</string>
     <string name="clear_queue_title">Clear backup queue?</string>
@@ -201,6 +202,7 @@
     <string name="storage_app_total">%1$d photos on device</string>
     <string name="storage_app_freeable">%1$d backed up · freeable</string>
     <string name="storage_app_not_backed">Not backed up yet</string>
+    <string name="storage_app_cloud_only">Cloud only (no local copy)</string>
     <string name="storage_free_button">Free up %1$s</string>
     <string name="storage_free_none">Nothing to free up</string>
     <string name="storage_free_explainer">Only backed-up photos are released. The local copy is removed after its cloud copy is verified; a cloud preview stays in the timeline.</string>
