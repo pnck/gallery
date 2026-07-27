@@ -244,7 +244,6 @@ fun TimelineScreen(
         topBar = {
             if (selectionMode) {
                 SelectionAppBar(
-                    count = selection.size,
                     onClear = viewModel::exitSelectionMode,
                     onSelectAll = viewModel::selectAllVisible,
                     onSync = viewModel::syncSelected,
@@ -302,6 +301,23 @@ fun TimelineScreen(
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
+            // Selection count as a centered pill under the app bar — the bar itself
+            // is packed with batch-action icons, a title there wraps and looks broken.
+            if (selectionMode) {
+                Box(Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        shape = RoundedCornerShape(50),
+                    ) {
+                        Text(
+                            stringResource(R.string.selection_count, selection.size),
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                    }
+                }
+            }
             BackupBanner(
                 state = backupState,
                 onRetry = viewModel::backupNow,
@@ -727,7 +743,6 @@ private fun PhotoCell(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SelectionAppBar(
-    count: Int,
     onClear: () -> Unit,
     onSelectAll: () -> Unit,
     onSync: () -> Unit,
@@ -741,7 +756,9 @@ private fun SelectionAppBar(
                 Icon(Icons.Default.Close, contentDescription = stringResource(R.string.selection_clear))
             }
         },
-        title = { Text(stringResource(R.string.selection_count, count)) },
+        // No title: the count lives in the centered banner below the bar — with five
+        // batch-action icons, a title here crowds and wraps.
+        title = { },
         actions = {
             // Primary batch actions (backup-first): Back up · Free up space · Delete.
             // Save-to-device is secondary → overflow (docs/GALLERY-UX-INTERACTION.md §3).
