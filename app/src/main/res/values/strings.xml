@@ -17,7 +17,19 @@
     <string name="mydrive_auth_title">Authorize in your browser</string>
     <string name="mydrive_auth_body">Approve read access in the browser that just opened, then return here.</string>
     <string name="mydrive_download">Download</string>
-    <string name="mydrive_downloaded">Downloaded %1$d file(s), %2$d failed</string>
+    <string name="mydrive_downloaded">Downloaded %1$d file(s), %2$d failed, %3$d skipped</string>
+    <string name="mydrive_download_guide_title">Choose where to save</string>
+    <string name="mydrive_download_guide_body">Next, Android shows a folder picker so you can choose where the files go — nothing downloads yet. Open the Download folder (or any folder you like) and tap "Use this folder"/"Allow": the download of %1$d file(s) starts immediately after.</string>
+    <string name="mydrive_choose_folder">Choose folder</string>
+    <string name="mydrive_details">Details</string>
+    <string name="mydrive_detail_type">Type</string>
+    <string name="mydrive_detail_size">Size</string>
+    <string name="mydrive_detail_extension">Extension</string>
+    <string name="mydrive_detail_created">Created</string>
+    <string name="mydrive_detail_modified">Modified</string>
+    <string name="mydrive_detail_md5">MD5</string>
+    <string name="mydrive_detail_owner">Owner</string>
+    <string name="mydrive_detail_id">Drive ID</string>
     <string name="mydrive_error">Couldn\'t load Drive: %1$s</string>
     <string name="mydrive_empty">Nothing here</string>
     <string name="mydrive_filter_all">All</string>
@@ -37,6 +49,7 @@
     <string name="settings_google_connected">Connected — tap to manage account</string>
     <string name="settings_google_disconnected">Not connected — tap to sign in (no GMS required)</string>
     <string name="cancel">Cancel</string>
+    <string name="close">Close</string>
 
     <!-- Device flow (ADR-0001) -->
     <string name="auth_device_title">Connect Google Drive</string>

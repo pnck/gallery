@@ -3,6 +3,7 @@ package io.github.pnck.gallery.ui.mydrive
 import android.content.Context
 import android.content.Intent
 import android.util.Base64
+import android.util.Log
 import androidx.core.net.toUri
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
@@ -143,10 +144,40 @@ class DriveReadAccess @Inject constructor(
         val req = Request.Builder().url(url).header("Authorization", "Bearer $token").build()
         val resp = client.newCall(req).execute()
         if (!resp.isSuccessful) {
+            val body = runCatching { resp.body?.string()?.take(300).orEmpty() }.getOrDefault("")
             resp.close()
+            Log.w(TAG, "download $fileId FAILED: HTTP ${resp.code} $body")
             throw IllegalStateException("Download ${resp.code} for $fileId")
         }
         resp.body?.byteStream() ?: throw IllegalStateException("Empty body for $fileId")
+    }
+
+    /** Full metadata for the details panel (the list call only carries a few fields). */
+    suspend fun details(fileId: String): DriveFileDetails = withContext(Dispatchers.IO) {
+        val token = validToken() ?: throw IllegalStateException("Drive read access expired.")
+        val fields = enc("name, mimeType, size, fileExtension, createdTime, modifiedTime, md5Checksum, owners")
+        val url = "https://www.googleapis.com/drive/v3/files/$fileId?fields=$fields"
+        val req = Request.Builder().url(url).header("Authorization", "Bearer $token").build()
+        client.newCall(req).execute().use { resp ->
+            val body = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) {
+                Log.w(TAG, "details $fileId FAILED: HTTP ${resp.code} ${body.take(300)}")
+                throw IllegalStateException("Details ${resp.code}: ${body.take(200)}")
+            }
+            val j = JSONObject(body)
+            val owner = j.optJSONArray("owners")?.optJSONObject(0)
+            DriveFileDetails(
+                name = j.optString("name"),
+                mimeType = j.optString("mimeType"),
+                sizeBytes = j.optString("size").toLongOrNull(),
+                extension = j.optString("fileExtension").takeIf { it.isNotEmpty() },
+                createdTime = j.optString("createdTime").takeIf { it.isNotEmpty() },
+                modifiedTime = j.optString("modifiedTime").takeIf { it.isNotEmpty() },
+                md5 = j.optString("md5Checksum").takeIf { it.isNotEmpty() },
+                owner = owner?.optString("displayName")?.takeIf { it.isNotEmpty() }
+                    ?: owner?.optString("emailAddress")?.takeIf { it.isNotEmpty() },
+            )
+        }
     }
 
     // ── Token endpoint ──────────────────────────────────────────────────────
@@ -182,6 +213,7 @@ class DriveReadAccess @Inject constructor(
         client.newCall(req).execute().use { resp ->
             val body = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) {
+                Log.w(TAG, "token call FAILED: HTTP ${resp.code} ${body.take(300)} (storeRefresh=$storeRefresh)")
                 return if (storeRefresh) "Token exchange failed (${resp.code}): ${body.take(200)}" else null
             }
             val json = JSONObject(body)
@@ -237,9 +269,22 @@ class DriveReadAccess @Inject constructor(
     private fun enc(s: String): String = URLEncoder.encode(s, "UTF-8")
 
     private companion object {
+        const val TAG = "gallery-mydrive"
         const val ACCESS = "access_token"
         const val EXPIRY = "access_expiry"
         const val REFRESH = "refresh_token"
         const val AUTH_TIMEOUT_MS = 180_000
     }
 }
+
+/** Full metadata for one file, shown in the details panel. */
+data class DriveFileDetails(
+    val name: String,
+    val mimeType: String,
+    val sizeBytes: Long?,
+    val extension: String?,
+    val createdTime: String?,
+    val modifiedTime: String?,
+    val md5: String?,
+    val owner: String?,
+)

@@ -1,8 +1,10 @@
 package io.github.pnck.gallery.ui.mydrive
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.provider.DocumentsContract
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -42,11 +44,20 @@ data class MyDriveState(
     val selection: Set<String> = emptySet(),
     /** The image entry being previewed full-screen, or null. */
     val preview: DriveEntry? = null,
+    /** Details panel state: non-null while the panel is open. */
+    val details: DetailsPanel? = null,
+)
+
+/** Details panel content: the row's entry plus the fetched metadata (null while loading). */
+data class DetailsPanel(
+    val entry: DriveEntry,
+    val details: DriveFileDetails? = null,
+    val error: String? = null,
 )
 
 /** One-shot feedback (snackbar). */
 sealed interface MyDriveEvent {
-    data class Downloaded(val ok: Int, val failed: Int) : MyDriveEvent
+    data class Downloaded(val ok: Int, val failed: Int, val skipped: Int = 0) : MyDriveEvent
 }
 
 /**
@@ -165,6 +176,30 @@ class MyDriveViewModel @Inject constructor(
         _state.value = _state.value.copy(preview = null)
     }
 
+    // ── Details panel ───────────────────────────────────────────────────────
+    fun showDetails(entry: DriveEntry) {
+        _state.value = _state.value.copy(details = DetailsPanel(entry))
+        if (entry.isFolder) return // the list call already knows everything about folders
+        viewModelScope.launch {
+            val panel = runCatching { driveRead.details(entry.id) }
+                .fold(
+                    onSuccess = { DetailsPanel(entry, details = it) },
+                    onFailure = {
+                        Log.w(TAG, "details for ${entry.id} failed: ${it.message}")
+                        DetailsPanel(entry, error = it.message)
+                    },
+                )
+            // Don't clobber the panel if the user already closed or re-targeted it.
+            if (_state.value.details?.entry?.id == entry.id) {
+                _state.value = _state.value.copy(details = panel)
+            }
+        }
+    }
+
+    fun dismissDetails() {
+        _state.value = _state.value.copy(details = null)
+    }
+
     /** Coil model for a thumbnail / full image, loaded with the drive.readonly token. */
     fun thumbModel(entry: DriveEntry): DriveReadUrl? = entry.thumbnailUrl?.let { DriveReadUrl(it) }
 
@@ -177,33 +212,81 @@ class MyDriveViewModel @Inject constructor(
         if (ids.isEmpty()) return
         val byId = _state.value.entries.associateBy { it.id }
         clearSelection()
+        // Keep the tree grant beyond this flow; without it a later process death
+        // turns a resumed download into a SecurityException.
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                treeUri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+        }.onFailure { Log.w(TAG, "persistable permission denied for $treeUri (continuing with the transient grant)") }
         viewModelScope.launch {
             val ok: Int
             val failed: Int
+            val skipped: Int
             withContext(Dispatchers.IO) {
                 val root = DocumentsContract.buildDocumentUriUsingTree(
                     treeUri, DocumentsContract.getTreeDocumentId(treeUri),
                 )
                 var okN = 0
                 var failN = 0
+                var skipN = 0
                 for (id in ids) {
                     val entry = byId[id] ?: continue
                     if (entry.isFolder) continue
-                    if (saveInto(root, entry)) okN++ else failN++
+                    when (val error = saveInto(root, entry)) {
+                        null -> okN++
+                        SKIP_UNSUPPORTED -> {
+                            Log.w(TAG, "skip ${entry.name}: Google-native file needs export, not download")
+                            skipN++
+                        }
+                        else -> {
+                            Log.w(TAG, "download ${entry.name} FAILED: $error")
+                            failN++
+                        }
+                    }
                 }
                 ok = okN
                 failed = failN
+                skipped = skipN
             }
-            events.send(MyDriveEvent.Downloaded(ok, failed))
+            events.send(MyDriveEvent.Downloaded(ok, failed, skipped))
         }
     }
 
-    private suspend fun saveInto(parentDoc: Uri, entry: DriveEntry): Boolean = runCatching {
+    /**
+     * Create the destination document and stream the file into it.
+     * @return null on success, [SKIP_UNSUPPORTED] for Google-native files, else the
+     *  failure reason. A failed/partial destination is deleted — never leave an
+     *  empty or half-written file behind.
+     */
+    private suspend fun saveInto(parentDoc: Uri, entry: DriveEntry): String? {
+        // Google Docs/Sheets/Slides are virtual files: alt=media 400s on them, they
+        // need the export endpoint. Skip loudly instead of writing an empty file.
+        if (entry.mimeType.startsWith("application/vnd.google-apps")) return SKIP_UNSUPPORTED
         val resolver = context.contentResolver
-        val doc = DocumentsContract.createDocument(resolver, parentDoc, entry.mimeType, entry.name)
-            ?: return@runCatching false
-        driveRead.download(entry.id).use { input ->
-            resolver.openOutputStream(doc)?.use { out -> input.copyTo(out) } != null
+        val doc = runCatching {
+            DocumentsContract.createDocument(resolver, parentDoc, entry.mimeType, entry.name)
+        }.getOrElse { return "createDocument threw: ${it.message}" }
+            ?: return "createDocument returned null (provider rejected ${entry.mimeType})"
+        val failure = runCatching {
+            driveRead.download(entry.id).use { input ->
+                val out = resolver.openOutputStream(doc)
+                    ?: throw IllegalStateException("openOutputStream returned null for $doc")
+                out.use { input.copyTo(it) }
+            }
+        }.exceptionOrNull()
+        if (failure != null) {
+            runCatching { DocumentsContract.deleteDocument(resolver, doc) }
+            return failure.message ?: failure.javaClass.simpleName
         }
-    }.getOrDefault(false)
+        return null
+    }
+
+    private companion object {
+        const val TAG = "gallery-mydrive"
+
+        /** Sentinel [saveInto] result for files Drive can't serve as bytes. */
+        const val SKIP_UNSUPPORTED = "google-native"
+    }
 }

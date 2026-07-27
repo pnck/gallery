@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -89,7 +90,7 @@ fun MyDriveScreen(
     var pendingEvent by remember { mutableStateOf<MyDriveEvent?>(null) }
     LaunchedEffect(Unit) { viewModel.eventFlow.collect { pendingEvent = it } }
     val message = when (val e = pendingEvent) {
-        is MyDriveEvent.Downloaded -> stringResource(R.string.mydrive_downloaded, e.ok, e.failed)
+        is MyDriveEvent.Downloaded -> stringResource(R.string.mydrive_downloaded, e.ok, e.failed, e.skipped)
         null -> null
     }
     LaunchedEffect(message) {
@@ -115,6 +116,9 @@ fun MyDriveScreen(
     val selecting = state.selection.isNotEmpty()
     val listState = rememberLazyListState()
     var filter by remember { mutableStateOf(DriveFilter.ALL) }
+    // Two-step download: explain the coming SAF folder picker FIRST (it looks like
+    // the download broke to anyone who doesn't know Android storage), then launch it.
+    var showDownloadGuide by remember { mutableStateOf(false) }
 
     // Client-side type filter; folders always stay visible so navigation still works.
     val shown = remember(state.entries, filter) {
@@ -149,7 +153,7 @@ fun MyDriveScreen(
                     },
                     title = { Text(stringResource(R.string.selection_count, state.selection.size)) },
                     actions = {
-                        IconButton(onClick = { downloadPicker.launch(null) }) {
+                        IconButton(onClick = { showDownloadGuide = true }) {
                             Icon(Icons.Default.Download, contentDescription = stringResource(R.string.mydrive_download))
                         }
                     },
@@ -203,6 +207,7 @@ fun MyDriveScreen(
                                 sizeText = entry.sizeBytes?.let { Formatter.formatShortFileSize(context, it) },
                                 onClick = { if (selecting && !entry.isFolder) viewModel.toggleSelect(entry.id) else viewModel.open(entry) },
                                 onLongClick = { if (!entry.isFolder) viewModel.toggleSelect(entry.id) },
+                                onDetails = { viewModel.showDetails(entry) },
                             )
                         }
                     }
@@ -213,6 +218,27 @@ fun MyDriveScreen(
 
     state.preview?.let { entry ->
         ImagePreview(model = viewModel.imageModel(entry.id), name = entry.name, onClose = viewModel::closePreview)
+    }
+
+    if (showDownloadGuide) {
+        AlertDialog(
+            onDismissRequest = { showDownloadGuide = false },
+            title = { Text(stringResource(R.string.mydrive_download_guide_title)) },
+            text = { Text(stringResource(R.string.mydrive_download_guide_body, state.selection.size)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDownloadGuide = false
+                    downloadPicker.launch(null)
+                }) { Text(stringResource(R.string.mydrive_choose_folder)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDownloadGuide = false }) { Text(stringResource(R.string.cancel)) }
+            },
+        )
+    }
+
+    state.details?.let { panel ->
+        DetailsDialog(panel = panel, onClose = viewModel::dismissDetails)
     }
 }
 
@@ -302,7 +328,13 @@ private fun DriveRow(
     sizeText: String?,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    onDetails: () -> Unit,
 ) {
+    // "JPG · 2.4 MiB" — the extension matters as much as the size when every
+    // file type shares one list.
+    val supporting = listOfNotNull(entry.extensionLabel(), sizeText)
+        .joinToString(" · ")
+        .takeIf { it.isNotEmpty() }
     ListItem(
         modifier = Modifier
             .then(if (selected) Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)) else Modifier)
@@ -323,8 +355,77 @@ private fun DriveRow(
             }
         },
         headlineContent = { Text(entry.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        supportingContent = sizeText?.let { { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
+        supportingContent = supporting?.let { { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
+        trailingContent = {
+            IconButton(onClick = onDetails) {
+                Icon(
+                    Icons.Default.Info,
+                    contentDescription = stringResource(R.string.mydrive_details),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
     )
+}
+
+/** Uppercase extension from the file name, e.g. "JPG" — null for folders/dotless names. */
+private fun DriveEntry.extensionLabel(): String? {
+    if (isFolder) return null
+    val ext = name.substringAfterLast('.', "")
+    return if (ext.length in 1..5) ext.uppercase() else null
+}
+
+@Composable
+private fun DetailsDialog(panel: DetailsPanel, onClose: () -> Unit) {
+    val context = LocalContext.current
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text(panel.entry.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+        text = {
+            Column {
+                DetailRow(R.string.mydrive_detail_type, panel.entry.mimeType)
+                DetailRow(
+                    R.string.mydrive_detail_size,
+                    panel.entry.sizeBytes?.let { Formatter.formatShortFileSize(context, it) },
+                )
+                val d = panel.details
+                when {
+                    d != null -> {
+                        DetailRow(R.string.mydrive_detail_extension, d.extension?.uppercase())
+                        DetailRow(R.string.mydrive_detail_created, formatRfc3339(d.createdTime))
+                        DetailRow(R.string.mydrive_detail_modified, formatRfc3339(d.modifiedTime))
+                        DetailRow(R.string.mydrive_detail_md5, d.md5)
+                        DetailRow(R.string.mydrive_detail_owner, d.owner)
+                    }
+                    panel.error != null ->
+                        Text(panel.error, color = MaterialTheme.colorScheme.error)
+                    // Folders skip the metadata fetch (there is nothing more to know).
+                    !panel.entry.isFolder ->
+                        CircularProgressIndicator(Modifier.size(20.dp).padding(top = 8.dp))
+                }
+                DetailRow(R.string.mydrive_detail_id, panel.entry.id)
+            }
+        },
+        confirmButton = { TextButton(onClick = onClose) { Text(stringResource(R.string.close)) } },
+    )
+}
+
+@Composable
+private fun DetailRow(labelRes: Int, value: String?) {
+    if (value.isNullOrEmpty()) return
+    Column(Modifier.padding(vertical = 4.dp)) {
+        Text(stringResource(labelRes), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+/** "2026-07-27T10:00:00.000Z" → "2026-07-27 10:00" (local); unparsable stays raw. */
+private fun formatRfc3339(raw: String?): String? = raw?.let {
+    runCatching {
+        java.time.OffsetDateTime.parse(it)
+            .atZoneSameInstant(java.time.ZoneId.systemDefault())
+            .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
+    }.getOrDefault(it)
 }
 
 /** File-type categories for the browser filter. Folders always show regardless. */
