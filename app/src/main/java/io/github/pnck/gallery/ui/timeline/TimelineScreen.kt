@@ -105,7 +105,7 @@ import io.github.pnck.gallery.domain.SyncFilter
 import io.github.pnck.gallery.domain.SyncState
 import io.github.pnck.gallery.domain.TimelineSort
 import io.github.pnck.gallery.ui.util.FastScroller
-import io.github.pnck.gallery.ui.util.TimeMarker
+import io.github.pnck.gallery.ui.util.ScrubModel
 import io.github.pnck.gallery.ui.util.pinchToStep
 import io.github.pnck.gallery.ui.util.rememberSystemDelete
 import androidx.compose.ui.unit.Dp
@@ -361,7 +361,7 @@ fun TimelineScreen(
                     FastScroller(
                         state = gridState,
                         itemCount = cells.size,
-                        markers = remember(cells) { buildTimeMarkers(cells) },
+                        model = remember(cells, sort) { buildScrubModel(cells, sort) },
                         modifier = Modifier.align(Alignment.TopEnd),
                     )
                 }
@@ -600,24 +600,21 @@ private fun buildTimelineCells(
 }
 
 /**
- * Notches for the fast-scroll axis, derived from the cells in display order:
- *  - date sorts → one per YEAR-MONTH (labeled year ticks + month dots; axes
- *    longer than 48 periods collapse to year-only);
- *  - size sorts → size buckets (same uniform-per-period mechanism).
- * Positions are per PERIOD, never per item — a month with 1,000 photos must not
- * own more rail than a month with one.
+ * The scrub model for the fast scroller: equal slots per period.
+ *  - date sorts → ONE SLOT PER YEAR-MONTH, never collapsed (a 26-year library
+ *    still snaps month by month; landing cell = that month's section header);
+ *  - size sorts → DYNAMIC value-range slots over the actual min..max (fixed
+ *    buckets are meaningless when all photos share one size class; degenerate
+ *    min==max → no scroller).
  */
-private fun buildTimeMarkers(cells: List<GridCell>): List<TimeMarker>? {
-    if (cells.isEmpty()) return null
-    return if (cells.any { it is GridCell.Header }) {
-        dateMarkers(cells)
-    } else {
-        sizeBucketMarkers(cells)
-    }
+private fun buildScrubModel(cells: List<GridCell>, sort: TimelineSort): ScrubModel? {
+    val dated = sort == TimelineSort.DATE_DESC || sort == TimelineSort.DATE_ASC
+    return if (dated) dateScrubModel(cells) else sizeScrubModel(cells)
 }
 
-private fun dateMarkers(cells: List<GridCell>): List<TimeMarker> {
-    val out = ArrayList<TimeMarker>()
+private fun dateScrubModel(cells: List<GridCell>): ScrubModel? {
+    val indices = ArrayList<Int>()
+    val labels = ArrayList<String>()
     var lastYm = Long.MIN_VALUE
     var headerIdx = 0
     cells.forEachIndexed { index, cell ->
@@ -628,48 +625,48 @@ private fun dateMarkers(cells: List<GridCell>): List<TimeMarker> {
                 val ym = yearOf(epochMs) * 100L + monthOf(epochMs)
                 if (ym != lastYm) {
                     lastYm = ym
-                    val month = monthOf(epochMs)
-                    out += TimeMarker(
-                        axisLabel = if (month == 1) yearOf(epochMs).toString() else null,
-                        label = yearMonthLabel(epochMs),
-                        firstCellIndex = headerIdx,
-                    )
+                    indices += headerIdx
+                    labels += yearMonthLabel(epochMs)
                 }
             }
         }
     }
-    if (out.size <= 48) return out
-    // Collapse: years only, landing on each year's first month section.
-    return out.filter { it.axisLabel != null }
+    if (labels.size < 2) return null
+    return ScrubModel(indices.toIntArray(), labels)
 }
 
-private val SIZE_BUCKETS = listOf(
-    0L to "<1 MB",
-    1L shl 20 to "1–10 MB",
-    10L shl 20 to "10–100 MB",
-    100L shl 20 to "100 MB–1 GB",
-    1L shl 30 to ">1 GB",
-)
-
-private fun sizeBucketMarkers(cells: List<GridCell>): List<TimeMarker> {
-    fun bucketOf(bytes: Long): Int {
-        var b = 0
-        for (i in SIZE_BUCKETS.indices) if (bytes >= SIZE_BUCKETS[i].first) b = i
-        return b
-    }
-    val out = ArrayList<TimeMarker>()
-    var lastBucket = -1
+private fun sizeScrubModel(cells: List<GridCell>): ScrubModel? {
+    val items = ArrayList<Pair<Int, Long>>()
     cells.forEachIndexed { index, cell ->
-        if (cell is GridCell.Item) {
-            val b = bucketOf(cell.photo.sizeBytes)
-            if (b != lastBucket) {
-                lastBucket = b
-                val label = SIZE_BUCKETS[b].second
-                out += TimeMarker(axisLabel = label, label = label, firstCellIndex = index)
-            }
-        }
+        if (cell is GridCell.Item) items += index to cell.photo.sizeBytes
     }
-    return out
+    if (items.size < 2) return null
+    val first = items.first().second
+    val last = items.last().second
+    if (first == last) return null // one size class — nothing to scrub
+    val slots = 24.coerceAtMost(items.size)
+    val descending = first > last
+    val indices = IntArray(slots)
+    val labels = ArrayList<String>(slots)
+    var cursor = 0
+    for (s in 0 until slots) {
+        val v = first + ((last - first) * s / (slots - 1))
+        // Landing cell: the first item at or past this slot's value.
+        while (cursor < items.size - 1 &&
+            (if (descending) items[cursor].second > v else items[cursor].second < v)
+        ) {
+            cursor++
+        }
+        indices[s] = items[cursor].first
+        labels += formatSize(v)
+    }
+    return ScrubModel(indices, labels)
+}
+
+private fun formatSize(bytes: Long): String = when {
+    bytes >= 1L shl 30 -> "%.1f GB".format(bytes / (1L shl 30).toDouble())
+    bytes >= 1L shl 20 -> "%.1f MB".format(bytes / (1L shl 20).toDouble())
+    else -> "%.0f KB".format(bytes / (1L shl 10).toDouble())
 }
 
 private val yearCalendar = java.util.Calendar.getInstance()
