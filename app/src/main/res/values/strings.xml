@@ -18,9 +18,7 @@
     <string name="mydrive_auth_body">Approve read access in the browser that just opened, then return here.</string>
     <string name="mydrive_download">Download</string>
     <string name="mydrive_downloaded">Downloaded %1$d file(s), %2$d failed, %3$d skipped</string>
-    <string name="mydrive_download_guide_title">Choose where to save</string>
-    <string name="mydrive_download_guide_body">Next, Android shows a folder picker so you can choose where the files go — nothing downloads yet. Open the Download folder (or any folder you like) and tap "Use this folder"/"Allow": the download of %1$d file(s) starts immediately after.</string>
-    <string name="mydrive_choose_folder">Choose folder</string>
+    <string name="mydrive_saved_downloads">Saved %1$d file(s) to Downloads (%2$d failed, %3$d skipped)</string>
     <string name="mydrive_details">Details</string>
     <string name="mydrive_detail_type">Type</string>
     <string name="mydrive_detail_size">Size</string>

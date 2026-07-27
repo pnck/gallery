@@ -1,10 +1,15 @@
 package io.github.pnck.gallery.ui.mydrive
 
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
 import android.provider.DocumentsContract
+import android.provider.MediaStore
 import android.util.Log
+import androidx.annotation.RequiresApi
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -57,7 +62,13 @@ data class DetailsPanel(
 
 /** One-shot feedback (snackbar). */
 sealed interface MyDriveEvent {
-    data class Downloaded(val ok: Int, val failed: Int, val skipped: Int = 0) : MyDriveEvent
+    data class Downloaded(
+        val ok: Int,
+        val failed: Int,
+        val skipped: Int = 0,
+        /** True when files landed in the system Downloads folder (vs a SAF-picked one). */
+        val toDownloads: Boolean = false,
+    ) : MyDriveEvent
 }
 
 /**
@@ -206,12 +217,18 @@ class MyDriveViewModel @Inject constructor(
     fun imageModel(id: String): DriveReadUrl =
         DriveReadUrl("https://www.googleapis.com/drive/v3/files/$id?alt=media")
 
-    // ── Multi-select download to a user-chosen folder (SAF, any location) ────
+    // ── Download ────────────────────────────────────────────────────────────
+    /**
+     * Download the selection straight into the system Downloads folder — one tap,
+     * no picker, no permission (MediaStore lets an app write its own Downloads
+     * entries on API 29+). This is the default path; [downloadSelectedTo] (SAF
+     * picker) remains only as the pre-29 fallback.
+     */
+    @RequiresApi(Build.VERSION_CODES.Q)
+    fun downloadSelected() = downloadBatch(toDownloads = true) { entry -> saveToDownloads(entry) }
+
+    /** Legacy path (pre-29): download the selection into a SAF-picked folder. */
     fun downloadSelectedTo(treeUri: Uri) {
-        val ids = _state.value.selection.toList()
-        if (ids.isEmpty()) return
-        val byId = _state.value.entries.associateBy { it.id }
-        clearSelection()
         // Keep the tree grant beyond this flow; without it a later process death
         // turns a resumed download into a SecurityException.
         runCatching {
@@ -220,42 +237,80 @@ class MyDriveViewModel @Inject constructor(
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
             )
         }.onFailure { Log.w(TAG, "persistable permission denied for $treeUri (continuing with the transient grant)") }
+        val root = DocumentsContract.buildDocumentUriUsingTree(
+            treeUri, DocumentsContract.getTreeDocumentId(treeUri),
+        )
+        downloadBatch(toDownloads = false) { entry -> saveInto(root, entry) }
+    }
+
+    /** Run [save] over the selection, tally ok/failed/skipped, and report. */
+    private fun downloadBatch(toDownloads: Boolean, save: suspend (DriveEntry) -> String?) {
+        val ids = _state.value.selection.toList()
+        if (ids.isEmpty()) return
+        val byId = _state.value.entries.associateBy { it.id }
+        clearSelection()
         viewModelScope.launch {
-            val ok: Int
-            val failed: Int
-            val skipped: Int
+            var ok = 0
+            var failed = 0
+            var skipped = 0
             withContext(Dispatchers.IO) {
-                val root = DocumentsContract.buildDocumentUriUsingTree(
-                    treeUri, DocumentsContract.getTreeDocumentId(treeUri),
-                )
-                var okN = 0
-                var failN = 0
-                var skipN = 0
                 for (id in ids) {
                     val entry = byId[id] ?: continue
                     if (entry.isFolder) continue
-                    when (val error = saveInto(root, entry)) {
-                        null -> okN++
+                    when (val error = save(entry)) {
+                        null -> ok++
                         SKIP_UNSUPPORTED -> {
                             Log.w(TAG, "skip ${entry.name}: Google-native file needs export, not download")
-                            skipN++
+                            skipped++
                         }
                         else -> {
                             Log.w(TAG, "download ${entry.name} FAILED: $error")
-                            failN++
+                            failed++
                         }
                     }
                 }
-                ok = okN
-                failed = failN
-                skipped = skipN
             }
-            events.send(MyDriveEvent.Downloaded(ok, failed, skipped))
+            events.send(MyDriveEvent.Downloaded(ok, failed, skipped, toDownloads = toDownloads))
         }
     }
 
     /**
-     * Create the destination document and stream the file into it.
+     * Stream [entry] into a new MediaStore Downloads entry (marked pending while
+     * writing so other apps don't see a partial file).
+     * @return null on success, [SKIP_UNSUPPORTED] for Google-native files, else the
+     *  failure reason. A failed/partial entry is deleted — never leave an empty or
+     *  half-written file behind.
+     */
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private suspend fun saveToDownloads(entry: DriveEntry): String? {
+        if (entry.mimeType.startsWith("application/vnd.google-apps")) return SKIP_UNSUPPORTED
+        val resolver = context.contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, entry.name)
+            put(MediaStore.Downloads.MIME_TYPE, entry.mimeType)
+            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+            put(MediaStore.Downloads.IS_PENDING, 1)
+        }
+        val uri = runCatching { resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) }
+            .getOrElse { return "MediaStore insert threw: ${it.message}" }
+            ?: return "MediaStore insert returned null"
+        val failure = runCatching {
+            driveRead.download(entry.id).use { input ->
+                val out = resolver.openOutputStream(uri)
+                    ?: throw IllegalStateException("openOutputStream returned null for $uri")
+                out.use { input.copyTo(it) }
+            }
+        }.exceptionOrNull()
+        if (failure != null) {
+            runCatching { resolver.delete(uri, null, null) }
+            return failure.message ?: failure.javaClass.simpleName
+        }
+        resolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
+        return null
+    }
+
+    /**
+     * Create the destination document and stream the file into it (SAF path).
      * @return null on success, [SKIP_UNSUPPORTED] for Google-native files, else the
      *  failure reason. A failed/partial destination is deleted — never leave an
      *  empty or half-written file behind.

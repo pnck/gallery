@@ -90,7 +90,10 @@ fun MyDriveScreen(
     var pendingEvent by remember { mutableStateOf<MyDriveEvent?>(null) }
     LaunchedEffect(Unit) { viewModel.eventFlow.collect { pendingEvent = it } }
     val message = when (val e = pendingEvent) {
-        is MyDriveEvent.Downloaded -> stringResource(R.string.mydrive_downloaded, e.ok, e.failed, e.skipped)
+        is MyDriveEvent.Downloaded -> stringResource(
+            if (e.toDownloads) R.string.mydrive_saved_downloads else R.string.mydrive_downloaded,
+            e.ok, e.failed, e.skipped,
+        )
         null -> null
     }
     LaunchedEffect(message) {
@@ -116,16 +119,14 @@ fun MyDriveScreen(
     val selecting = state.selection.isNotEmpty()
     val listState = rememberLazyListState()
     var filter by remember { mutableStateOf(DriveFilter.ALL) }
-    // Two-step download: explain the coming SAF folder picker FIRST (it looks like
-    // the download broke to anyone who doesn't know Android storage), then launch it.
-    var showDownloadGuide by remember { mutableStateOf(false) }
 
     // Client-side type filter; folders always stay visible so navigation still works.
     val shown = remember(state.entries, filter) {
         state.entries.filter { it.isFolder || filter.matches(it.mimeType) }
     }
 
-    // Pick a destination folder (SAF, any volume) then download the selection into it.
+    // Pick a destination folder (SAF) — pre-29 fallback only; on API 29+ downloads
+    // go straight to the system Downloads folder via MediaStore (no permission).
     val downloadPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) viewModel.downloadSelectedTo(uri)
     }
@@ -153,7 +154,15 @@ fun MyDriveScreen(
                     },
                     title = { Text(stringResource(R.string.selection_count, state.selection.size)) },
                     actions = {
-                        IconButton(onClick = { showDownloadGuide = true }) {
+                        IconButton(onClick = {
+                            // One tap = done: API 29+ writes Downloads via MediaStore
+                            // (no permission, no picker); older devices need SAF.
+                            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                                viewModel.downloadSelected()
+                            } else {
+                                downloadPicker.launch(null)
+                            }
+                        }) {
                             Icon(Icons.Default.Download, contentDescription = stringResource(R.string.mydrive_download))
                         }
                     },
@@ -218,23 +227,6 @@ fun MyDriveScreen(
 
     state.preview?.let { entry ->
         ImagePreview(model = viewModel.imageModel(entry.id), name = entry.name, onClose = viewModel::closePreview)
-    }
-
-    if (showDownloadGuide) {
-        AlertDialog(
-            onDismissRequest = { showDownloadGuide = false },
-            title = { Text(stringResource(R.string.mydrive_download_guide_title)) },
-            text = { Text(stringResource(R.string.mydrive_download_guide_body, state.selection.size)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    showDownloadGuide = false
-                    downloadPicker.launch(null)
-                }) { Text(stringResource(R.string.mydrive_choose_folder)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDownloadGuide = false }) { Text(stringResource(R.string.cancel)) }
-            },
-        )
     }
 
     state.details?.let { panel ->
