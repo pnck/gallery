@@ -360,11 +360,22 @@ private fun DriveRow(
     )
 }
 
-/** Uppercase extension from the file name, e.g. "JPG" — null for folders/dotless names. */
+/** Uppercase extension from the file name, e.g. "JPG" — null for folders. Files
+ *  whose Drive name carries no extension (notably Google-native Docs/Sheets/Slides,
+ *  which only GET an extension when exported) fall back to a short label derived
+ *  from the MIME subtype, so no row is left type-less. */
 private fun DriveEntry.extensionLabel(): String? {
     if (isFolder) return null
     val ext = name.substringAfterLast('.', "")
-    return if (ext.length in 1..5) ext.uppercase() else null
+    if (ext.length in 1..5) return ext.uppercase()
+    val sub = mimeType.substringAfterLast('.', mimeType.substringAfter('/', ""))
+    return when {
+        sub.equals("document", ignoreCase = true) -> "DOC"
+        sub.equals("spreadsheet", ignoreCase = true) -> "SHEET"
+        sub.equals("presentation", ignoreCase = true) -> "SLIDE"
+        sub.length in 1..5 -> sub.uppercase()
+        else -> null
+    }
 }
 
 @Composable
