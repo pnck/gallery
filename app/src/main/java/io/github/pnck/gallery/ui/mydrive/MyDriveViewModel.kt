@@ -39,6 +39,8 @@ sealed interface ElevatePhase {
 
 data class MyDriveState(
     val configured: Boolean = true,
+    /** False until the authorization flag resolves (keystore read is off-main). */
+    val gateResolved: Boolean = false,
     val granted: Boolean = false,
     val elevating: ElevatePhase = ElevatePhase.Idle,
     val stack: List<Crumb> = listOf(Crumb(DriveEntry.ROOT_ID, "")),
@@ -84,7 +86,7 @@ class MyDriveViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(
-        MyDriveState(configured = driveRead.configured, granted = driveRead.isAuthorized()),
+        MyDriveState(configured = driveRead.configured),
     )
     val state = _state.asStateFlow()
 
@@ -94,7 +96,26 @@ class MyDriveViewModel @Inject constructor(
     private var elevateJob: Job? = null
 
     init {
-        if (_state.value.granted) loadFolder(DriveEntry.ROOT_ID)
+        // The gate is a pure projection of the authorization flag: collect it from
+        // the store-backed flow (seeded off-main — keystore reads must not touch
+        // the main thread) and load the root folder whenever it flips to granted.
+        viewModelScope.launch {
+            driveRead.authorized.collect { granted ->
+                val wasGranted = _state.value.granted
+                _state.value = _state.value.copy(granted = granted, gateResolved = true)
+                if (granted && !wasGranted) {
+                    loadFolder(DriveEntry.ROOT_ID)
+                } else if (!granted && wasGranted) {
+                    // Revoked in Settings while we were alive: reset to the gate.
+                    _state.value = _state.value.copy(
+                        stack = listOf(Crumb(DriveEntry.ROOT_ID, "")),
+                        entries = emptyList(),
+                        nextPageToken = null,
+                        selection = emptySet(),
+                    )
+                }
+            }
+        }
     }
 
     // ── drive.readonly elevation (browser consent, separate from backup sign-in) ──
@@ -104,8 +125,8 @@ class MyDriveViewModel @Inject constructor(
             _state.value = _state.value.copy(elevating = ElevatePhase.Working)
             val error = driveRead.authorize()
             if (error == null) {
-                _state.value = _state.value.copy(granted = true, elevating = ElevatePhase.Idle)
-                loadFolder(DriveEntry.ROOT_ID)
+                // The authorized-flow collector flips granted and loads the root.
+                _state.value = _state.value.copy(elevating = ElevatePhase.Idle)
             } else {
                 _state.value = _state.value.copy(elevating = ElevatePhase.Failed(error))
             }

@@ -23,6 +23,10 @@ import java.security.SecureRandom
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
@@ -67,6 +71,18 @@ class DriveReadAccess @Inject constructor(
     fun isAuthorized(): Boolean = prefs.getString(REFRESH, null) != null
 
     /**
+     * Live authorization flag, derived from the token store: seeded on first
+     * collection (the keystore read happens on the collector's dispatcher, never
+     * at DI-construction time), flipped by [authorize]/[signOut]. Both the My
+     * Drive gate and the Settings account panel collect this — one truth, no
+     * synchronization.
+     */
+    private val _authorized = MutableStateFlow<Boolean?>(null)
+    val authorized: Flow<Boolean> = _authorized
+        .map { it ?: isAuthorized() }
+        .distinctUntilChanged()
+
+    /**
      * Run the browser consent flow. Opens the system browser to Google, captures the
      * redirect on a loopback server, exchanges the code for tokens, and stores them.
      * @return null on success, else a human-readable error.
@@ -91,7 +107,9 @@ class DriveReadAccess @Inject constructor(
                 )
                 val code = server.accept().use { readCode(it) }
                     ?: return@runCatching "No authorization code returned."
-                exchangeCode(code, verifier, redirect)
+                exchangeCode(code, verifier, redirect).also { error ->
+                    if (error == null) _authorized.value = true
+                }
             }
         }.getOrElse { "Authorization failed: ${it.message}" }
     }
@@ -107,6 +125,7 @@ class DriveReadAccess @Inject constructor(
 
     suspend fun signOut() = withContext(Dispatchers.IO) {
         prefs.edit().clear().apply()
+        _authorized.value = false
     }
 
     // ── Drive read calls (bare client + our Bearer) ─────────────────────────

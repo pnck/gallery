@@ -107,6 +107,13 @@ fun MyDriveScreen(
         if (state.preview != null) viewModel.closePreview() else viewModel.goUp()
     }
 
+    if (!state.gateResolved) {
+        // Keystore read in flight — a bare spinner, not the gate (which would
+        // flash "Enable browsing" at users who already granted).
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        return
+    }
+
     if (!state.granted) {
         MyDriveGate(
             configured = state.configured,

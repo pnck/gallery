@@ -228,6 +228,8 @@ fun SettingsScreen(
                 busy = busy,
                 accountEmail = state.accountEmail,
                 folderName = folderName,
+                myDriveAuthorized = state.myDriveAuthorized,
+                onMyDriveSignOut = viewModel::signOutMyDrive,
                 onSignIn = { showAccount = false; viewModel.signInGoogle() },
                 onSignOut = { showAccount = false; viewModel.signOutGoogle() },
                 onUpdateFolder = viewModel::updateRemoteFolderName,
@@ -253,6 +255,8 @@ private fun AccountSheet(
     authorized: Boolean,
     busy: Boolean,
     accountEmail: String?,
+    myDriveAuthorized: Boolean,
+    onMyDriveSignOut: () -> Unit,
     folderName: String,
     onSignIn: () -> Unit,
     onSignOut: () -> Unit,
@@ -303,6 +307,26 @@ private fun AccountSheet(
                     },
                 )
                 HorizontalDivider()
+            }
+            // The separate drive.readonly grant ("My Drive" browser) is managed in
+            // the same panel — revoking it never touches the backup grant above.
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.mydrive_account_row)) },
+                supportingContent = {
+                    Text(
+                        stringResource(
+                            if (myDriveAuthorized) R.string.mydrive_account_on else R.string.mydrive_account_off,
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+                trailingContent = if (myDriveAuthorized) {
+                    { TextButton(onClick = onMyDriveSignOut) { Text(stringResource(R.string.mydrive_account_revoke)) } }
+                } else {
+                    null
+                },
+            )
+            if (authorized) {
                 Spacer(Modifier.height(20.dp))
                 Button(
                     onClick = { confirmSignOut = true },

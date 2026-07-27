@@ -28,6 +28,10 @@
     <string name="mydrive_detail_md5">MD5</string>
     <string name="mydrive_detail_owner">Owner</string>
     <string name="mydrive_detail_id">Drive ID</string>
+    <string name="mydrive_account_row">My Drive browsing (read access)</string>
+    <string name="mydrive_account_on">Enabled — can read your whole Drive</string>
+    <string name="mydrive_account_off">Not enabled</string>
+    <string name="mydrive_account_revoke">Revoke</string>
     <string name="mydrive_error">Couldn\'t load Drive: %1$s</string>
     <string name="mydrive_empty">Nothing here</string>
     <string name="mydrive_filter_all">All</string>

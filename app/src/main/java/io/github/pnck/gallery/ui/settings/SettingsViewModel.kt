@@ -40,6 +40,8 @@ data class SettingsState(
     val signIn: SignInPhase = SignInPhase.Idle,
     /** Email of the signed-in account, so the user can spot an account mismatch. */
     val accountEmail: String? = null,
+    /** The separate drive.readonly grant ("My Drive" browser) — managed here too. */
+    val myDriveAuthorized: Boolean = false,
 )
 
 @HiltViewModel
@@ -47,6 +49,7 @@ class SettingsViewModel @Inject constructor(
     private val googleAuthManager: AuthManager,
     private val settings: AppSettingsStore,
     private val provider: ICloudStorageProvider,
+    private val driveRead: io.github.pnck.gallery.ui.mydrive.DriveReadAccess,
     transportController: TransportController,
 ) : ViewModel() {
 
@@ -84,6 +87,17 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             googleAuthManager.authorized.collect { refreshAuthState() }
         }
+        // The My Drive (drive.readonly) grant, same treatment — one panel manages both.
+        viewModelScope.launch {
+            driveRead.authorized.collect { myDrive ->
+                _state.value = _state.value.copy(myDriveAuthorized = myDrive)
+            }
+        }
+    }
+
+    /** Revoke the separate drive.readonly grant from the account panel. */
+    fun signOutMyDrive() {
+        viewModelScope.launch { driveRead.signOut() }
     }
 
     /** Keystore-backed read is synchronous + can jank the main thread — do it off-main. */
