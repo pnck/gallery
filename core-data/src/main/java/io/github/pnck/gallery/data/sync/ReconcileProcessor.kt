@@ -149,7 +149,33 @@ class ReconcileProcessor(
         }
 
         // 3. Pure derivation, 4. apply.
+        // Guard 3 — an EMPTY local truth while local-backed rows exist is never a
+        // real "user deleted everything": it's a blind scan (storage unmounted,
+        // MediaStore mid-reindex, OEM query quirk — on 2026-07-27 it pruned 943
+        // rows in one pass). The cloud side already refuses to prune on a partial
+        // listing; the local side now refuses on an empty one. The next scan or
+        // reconcile with a readable library self-heals.
+        Log.i(TAG, "reconcile: truth local=${local.size} cloud=${cloudTruth.size} existing=${existing.size}")
+        if (local.isEmpty() && existing.any { it.localUri != null }) {
+            Log.w(TAG, "reconcile: ABORT — local scan empty but local-backed rows exist; not pruning")
+            return@withContext Outcome.Skipped
+        }
         val plan = planReconcile(local, cloudTruth, existing, provider.providerType.name)
+        // Guard 4 — cap mass-pruning: deleting local-backed rows for more than half
+        // the library in ONE pass is never a legitimate cleanup, it's a partially
+        // blind scan (MediaStore mid-reindex returns a subset, SD card unmounted).
+        // Linger is cheap (next reconcile self-heals); a wrong mass-prune is the
+        // "all my badges died" report.
+        val existingById = existing.associateBy { it.id }
+        val localBackedExisting = existing.count { it.localUri != null }
+        val localBackedDeletes = plan.deleteIds.count { existingById[it]?.localUri != null }
+        if (localBackedDeletes > localBackedExisting / 2 && localBackedDeletes > MASS_PRUNE_MIN) {
+            Log.w(
+                TAG,
+                "reconcile: ABORT — would prune $localBackedDeletes of $localBackedExisting local-backed rows",
+            )
+            return@withContext Outcome.Skipped
+        }
         if (plan.upserts.isNotEmpty()) photoDao.upsertAll(plan.upserts)
         if (plan.deleteIds.isNotEmpty()) photoDao.deleteByIds(plan.deleteIds)
 
@@ -185,6 +211,11 @@ class ReconcileProcessor(
         } ?: false
         if (ok) digest.digest().joinToString("") { "%02x".format(it) } else null
     }.getOrNull()
+
+    private companion object {
+        /** Minimum row count before the mass-prune cap (guard 4) can trigger. */
+        const val MASS_PRUNE_MIN = 20
+    }
 }
 
 /** Local ground-truth item for [planReconcile] (a MediaStore image + its MD5). */
