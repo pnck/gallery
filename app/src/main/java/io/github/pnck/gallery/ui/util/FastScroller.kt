@@ -218,7 +218,16 @@ fun FastScroller(
                         val slotChanged = model.slotIndexAt(f) != model.slotIndexAt(fingerFraction)
                         fingerFraction = f
                         if (slotChanged) {
-                            haptics.performHapticFeedback(HapticFeedbackType.ClockTick)
+                            // SegmentTick (API 34+) is purpose-built for scrub ticks;
+                            // TextHandleMove is a no-op on many OEM ROMs, LongPress
+                            // would be far too heavy per slot.
+                            haptics.performHapticFeedback(
+                                if (android.os.Build.VERSION.SDK_INT >= 34) {
+                                    HapticFeedbackType.SegmentTick
+                                } else {
+                                    HapticFeedbackType.TextHandleMove
+                                },
+                            )
                             scope.launch { state.scrollToItem(model.cellIndexAt(f)) }
                         }
                     }
