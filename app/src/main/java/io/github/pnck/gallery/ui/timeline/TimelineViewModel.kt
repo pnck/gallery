@@ -14,6 +14,7 @@ import io.github.pnck.gallery.domain.SyncCounts
 import io.github.pnck.gallery.domain.SyncFilter
 import io.github.pnck.gallery.domain.TimelinePhoto
 import io.github.pnck.gallery.domain.TimelineSort
+import io.github.pnck.gallery.provider.AuthManager
 import io.github.pnck.gallery.ui.util.DeleteConfirm
 import io.github.pnck.gallery.ui.util.DeleteRequest
 import io.github.pnck.gallery.work.ReconcileWorker
@@ -21,6 +22,7 @@ import io.github.pnck.gallery.work.SyncPipeline
 import io.github.pnck.gallery.work.UploadWorker
 import javax.inject.Inject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -34,6 +36,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** MVI intents of the timeline (PRD §9.2). */
 sealed class TimelineIntent {
@@ -93,7 +96,20 @@ class TimelineViewModel @Inject constructor(
     private val workManager: WorkManager,
     private val reconciler: MediaReconciler,
     private val queryHolder: TimelineQueryHolder,
+    googleAuthManager: AuthManager,
 ) : ViewModel() {
+
+    /**
+     * Whether a cloud account is connected — the UNKNOWN badge ("checking backup
+     * status") is only meaningful when classification can actually happen; with no
+     * account, unclassified rows are simply LOCAL_ONLY.
+     */
+    val googleAuthorized: StateFlow<Boolean> = googleAuthManager.authorized
+
+    /** False until the first inline scan attempt finished (success or denied) —
+     *  the grid shows a spinner instead of a premature "no photos" empty state. */
+    private val _scanSettled = MutableStateFlow(false)
+    val scanSettled: StateFlow<Boolean> = _scanSettled.asStateFlow()
 
     // ── View options: sort (persisted) + sync-state filter (shared) + folders ──
     val sort: StateFlow<TimelineSort> = settings.timelineSort
@@ -135,6 +151,10 @@ class TimelineViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     init {
+        // The wall must not wait for WorkManager: run the local scan INLINE on
+        // entry (a MediaStore metadata query is sub-second; the worker chain's
+        // scheduling latency is what left the grid empty on launch).
+        viewModelScope.launch { scanInline() }
         // One-time upgrade fix: rows created before the v3 size/bucket columns have
         // sizeBytes=0 (breaks size sorting + the space-management totals). Force a full
         // rescan once to backfill their metadata, then remember it's done.
@@ -146,6 +166,20 @@ class TimelineViewModel @Inject constructor(
             }
         }
         watchRebuildResults()
+    }
+
+    /** Local MediaStore → Room scan on the caller's coroutine (idempotent, cursor-based).
+     *  Also the permission-grant path: ForceSync runs this FIRST, then kicks the
+     *  worker chain for the cloud side. */
+    private suspend fun scanInline() {
+        withContext(Dispatchers.IO) {
+            try {
+                reconciler.reconcile()
+            } catch (e: SecurityException) {
+                // No media permission yet — the screen's permission flow re-triggers.
+            }
+        }
+        _scanSettled.value = true
     }
 
     fun setSort(newSort: TimelineSort) {
@@ -429,7 +463,12 @@ class TimelineViewModel @Inject constructor(
 
     fun processIntent(intent: TimelineIntent) {
         when (intent) {
-            is TimelineIntent.ForceSync -> SyncPipeline.enqueue(workManager)
+            // Inline scan first (grid fills immediately), THEN the worker chain
+            // (downstream → reconcile → upload) for the cloud side.
+            is TimelineIntent.ForceSync -> viewModelScope.launch {
+                scanInline()
+                SyncPipeline.enqueue(workManager)
+            }
         }
     }
 

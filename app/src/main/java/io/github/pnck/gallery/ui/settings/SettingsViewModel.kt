@@ -2,6 +2,7 @@ package io.github.pnck.gallery.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.WorkManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.pnck.gallery.data.settings.AppSettingsStore
 import io.github.pnck.gallery.network.ApiResult
@@ -10,6 +11,7 @@ import io.github.pnck.gallery.provider.AuthManager
 import io.github.pnck.gallery.provider.DeviceAuthChallenge
 import io.github.pnck.gallery.provider.ICloudStorageProvider
 import io.github.pnck.gallery.transport.TransportController
+import io.github.pnck.gallery.work.SyncPipeline
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -50,6 +52,7 @@ class SettingsViewModel @Inject constructor(
     private val settings: AppSettingsStore,
     private val provider: ICloudStorageProvider,
     private val driveRead: io.github.pnck.gallery.ui.mydrive.DriveReadAccess,
+    private val workManager: WorkManager,
     transportController: TransportController,
 ) : ViewModel() {
 
@@ -132,8 +135,13 @@ class SettingsViewModel @Inject constructor(
                 is ApiResult.Success -> {
                     _state.value = _state.value.copy(signIn = SignInPhase.AwaitingApproval(challenge.data))
                     when (val result = googleAuthManager.pollForToken(challenge.data)) {
-                        is ApiResult.Success ->
+                        is ApiResult.Success -> {
                             _state.value = SettingsState(googleAuthorized = true, signIn = SignInPhase.Idle)
+                            // First login: kick the chain NOW (downstream → reconcile)
+                            // so badges converge — waiting 30 min for the periodic
+                            // run leaves the wall stuck at unclassified.
+                            SyncPipeline.enqueue(workManager, force = true)
+                        }
                         is ApiResult.Error ->
                             _state.value = _state.value.copy(
                                 signIn = SignInPhase.Failed(result.message, network = result.retryable),

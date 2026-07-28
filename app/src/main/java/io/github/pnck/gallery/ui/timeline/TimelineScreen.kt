@@ -160,6 +160,8 @@ fun TimelineScreen(
     val syncFilter by viewModel.syncFilter.collectAsState()
     val scanBuckets by viewModel.scanBuckets.collectAsState()
     val buckets by viewModel.buckets.collectAsState()
+    val authorized by viewModel.googleAuthorized.collectAsState()
+    val scanSettled by viewModel.scanSettled.collectAsState()
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
     val snackbarHost = remember { SnackbarHostState() }
@@ -344,10 +346,15 @@ fun TimelineScreen(
             )
             if (photos.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        text = stringResource(R.string.timeline_empty),
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
+                    if (!scanSettled) {
+                        // First scan in flight — never flash a fake "no photos" state.
+                        CircularProgressIndicator()
+                    } else {
+                        Text(
+                            text = stringResource(R.string.timeline_empty),
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                    }
                 }
             } else {
                 // Group into year sections (Google-Photos style) when sorted by date;
@@ -378,6 +385,7 @@ fun TimelineScreen(
                                 )
                                 is GridCell.Item -> PhotoCell(
                                     photo = c.photo,
+                                    accountConnected = authorized,
                                     selectionMode = selectionMode,
                                     selected = c.photo.id in selection,
                                     onClick = {
@@ -724,11 +732,15 @@ private fun yearMonthLabel(epochMs: Long): String = yearMonthFormat.format(java.
 @Composable
 private fun PhotoCell(
     photo: io.github.pnck.gallery.domain.TimelinePhoto,
+    /** When no account is connected, UNKNOWN ("checking") collapses to LOCAL_ONLY —
+     *  classification can never happen, so "not backed up" is the honest state. */
+    accountConnected: Boolean,
     selectionMode: Boolean,
     selected: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
+    val badge = if (!accountConnected && photo.badge == SyncBadge.UNKNOWN) SyncBadge.LOCAL_ONLY else photo.badge
     Box(
         Modifier
             .aspectRatio(1f)
@@ -741,7 +753,7 @@ private fun PhotoCell(
             modifier = Modifier.fillMaxSize(),
         )
         SyncStateBadge(
-            badge = photo.badge,
+            badge = badge,
             modifier = Modifier.align(Alignment.TopEnd).padding(4.dp),
         )
         if (selectionMode) {
