@@ -51,6 +51,14 @@ data class PhotoEntity(
      * sync clears this.
      */
     val excluded: Boolean = false,
+    /**
+     * In the sync queue (will be uploaded by the next sweep). Deliberately persisted
+     * rather than derived: scanning and reconcile CLASSIFY but never enqueue — a
+     * photo enters the queue only via an explicit action ("Back up now" queues all
+     * classified pendings; selecting photos queues those). This is what separates
+     * LOCAL_ONLY (classified, not queued) from QUEUED in the badge model.
+     */
+    val queued: Boolean = false,
     /** Consecutive upload batch attempts that included this file and failed — a
      *  poisoned file is skipped after the cap so it can't head-of-line-block the
      *  queue. Reset on success, on reconcile, and on explicit user sync. */

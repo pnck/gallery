@@ -90,6 +90,10 @@ class PhotoRepositoryImpl(
         photoDao.excludeAllPending()
     }
 
+    override suspend fun queueAllPending() = withContext(Dispatchers.IO) {
+        photoDao.queueAllPending()
+    }
+
     override suspend fun includeForBackup(ids: List<String>) = withContext(Dispatchers.IO) {
         photoDao.includeForBackup(ids)
     }
@@ -361,4 +365,6 @@ internal fun PhotoEntity.toTimelinePhoto(): TimelinePhoto =
         // Unclassified = pending AND never hashed: scan inserts rows like this;
         // reconcile (or the upload path) computes the MD5 and classifies them.
         classified = syncState != SyncState.PENDING_UPLOAD || contentHashValue != null,
+        queued = queued,
+        uploadAttempts = uploadAttempts,
     )

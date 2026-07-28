@@ -298,6 +298,8 @@ fun planReconcile(
             bucketName = l.bucketName,
             syncState = if (match != null) SyncState.SYNCED else SyncState.PENDING_UPLOAD,
             excluded = row?.excluded ?: false,
+            // Classify, never enqueue: queue membership survives reconcile untouched.
+            queued = row?.queued ?: false,
             // Truth re-derived: a still-pending file gets FRESH upload chances
             // (its attempt counter may have been exhausted by an old transient).
             uploadAttempts = 0,

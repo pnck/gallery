@@ -226,11 +226,13 @@ class TimelineViewModel @Inject constructor(
         }
     }
 
-    /** Explicit "Back up now" / "Sync now": un-pause and force-restart the chain so a
-     *  stuck (retrying) sweep doesn't swallow the request via KEEP. */
+    /** Explicit "Back up now" / "Sync now": the bulk manual include — queue all
+     *  classified pendings, un-pause, and force-restart the chain so a stuck
+     *  (retrying) sweep doesn't swallow the request via KEEP. */
     fun backupNow() {
         viewModelScope.launch {
             settings.setBackupPaused(false)
+            repo.queueAllPending()
             SyncPipeline.enqueue(workManager, force = true)
         }
     }

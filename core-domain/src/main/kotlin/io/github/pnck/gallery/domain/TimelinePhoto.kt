@@ -29,11 +29,46 @@ data class TimelinePhoto(
     /**
      * True once the photo's bytes have been compared against the cloud (content
      * hash computed by reconcile or at upload). A freshly scanned PENDING_UPLOAD
-     * row is UNCLASSIFIED — it may well be backed up already; the grid shows NO
-     * badge for it rather than a premature "not backed up".
+     * row is UNCLASSIFIED — it may well be backed up already; the grid shows the
+     * UNKNOWN badge for it rather than a premature "not backed up".
      */
     val classified: Boolean = true,
+    /**
+     * In the sync queue (see PhotoEntity.queued): sync is never automatic — a
+     * classified-but-unqueued photo is LOCAL_ONLY ("not backed up", the default);
+     * it becomes QUEUED only via an explicit include ("Back up now" / selection).
+     */
+    val queued: Boolean = true,
+    /** Batch attempts so far; > 0 marks the photo as actively uploading/retrying. */
+    val uploadAttempts: Int = 0,
 ) {
     /** True when only the cloud copy remains (PRD §3.7); the grid keeps a cloud badge. */
     val showCloudIcon: Boolean get() = syncState == SyncState.CLOUD_ONLY
 }
+
+/**
+ * The presentation badge, DERIVED from the row — never persisted, so it can never
+ * disagree with the data (PRD §3.7 keeps its four persisted sync states; these are
+ * projections, not new states):
+ *
+ *  UNKNOWN     pending + never hashed (fresh scan; reconcile hasn't classified it)
+ *  LOCAL_ONLY  classified, not backed up, NOT queued (the default — sync is manual)
+ *  QUEUED      manually included, waiting for the next sweep
+ *  UPLOADING   queued and claimed by a batch (attempts > 0)
+ *  BACKED_UP   synced
+ *  CLOUD_ONLY  cloud copy only
+ *  EXCLUDED    user opted out of backup entirely
+ */
+enum class SyncBadge { UNKNOWN, LOCAL_ONLY, QUEUED, UPLOADING, BACKED_UP, CLOUD_ONLY, EXCLUDED, NONE }
+
+val TimelinePhoto.badge: SyncBadge
+    get() = when {
+        syncState == SyncState.SYNCED -> SyncBadge.BACKED_UP
+        syncState == SyncState.CLOUD_ONLY -> SyncBadge.CLOUD_ONLY
+        syncState == SyncState.PENDING_DELETE -> SyncBadge.NONE
+        excluded -> SyncBadge.EXCLUDED
+        !classified -> SyncBadge.UNKNOWN
+        !queued -> SyncBadge.LOCAL_ONLY
+        uploadAttempts > 0 -> SyncBadge.UPLOADING
+        else -> SyncBadge.QUEUED
+    }

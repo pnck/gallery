@@ -82,7 +82,7 @@ interface PhotoDao {
      * first (it computes the hash and matches); only provably-missing bytes upload.
      */
     @Query(
-        "SELECT * FROM photos WHERE syncState = 0 AND excluded = 0 AND uploadAttempts < 8 " +
+        "SELECT * FROM photos WHERE syncState = 0 AND excluded = 0 AND queued = 1 AND uploadAttempts < 8 " +
             "AND contentHashValue IS NOT NULL " +
             "ORDER BY sizeBytes ASC, dateTaken ASC",
     )
@@ -101,11 +101,15 @@ interface PhotoDao {
     suspend fun resetUploadAttempts(ids: List<String>)
 
     /** "Clear queue": drop every waiting photo out of automatic backup (kept visible). */
-    @Query("UPDATE photos SET excluded = 1 WHERE syncState = 0")
+    @Query("UPDATE photos SET excluded = 1, queued = 0 WHERE syncState = 0")
     suspend fun excludeAllPending()
 
+    /** "Back up now": queue every classified pending photo for the next sweep. */
+    @Query("UPDATE photos SET queued = 1 WHERE syncState = 0 AND excluded = 0")
+    suspend fun queueAllPending()
+
     /** Put photos back in the queue — e.g. the user explicitly selects them to sync. */
-    @Query("UPDATE photos SET excluded = 0 WHERE id IN (:ids)")
+    @Query("UPDATE photos SET excluded = 0, queued = 1 WHERE id IN (:ids)")
     suspend fun includeForBackup(ids: List<String>)
 
     /** Targeted upload set for multi-select sync — only rows still PENDING_UPLOAD. */

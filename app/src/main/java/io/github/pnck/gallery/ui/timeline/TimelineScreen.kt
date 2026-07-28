@@ -42,11 +42,14 @@ import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.CloudQueue
+import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
@@ -100,10 +103,12 @@ import androidx.work.WorkInfo
 import coil3.compose.AsyncImage
 import io.github.pnck.gallery.R
 import io.github.pnck.gallery.domain.MediaBucket
+import io.github.pnck.gallery.domain.SyncBadge
 import io.github.pnck.gallery.domain.SyncCounts
 import io.github.pnck.gallery.domain.SyncFilter
 import io.github.pnck.gallery.domain.SyncState
 import io.github.pnck.gallery.domain.TimelineSort
+import io.github.pnck.gallery.domain.badge
 import io.github.pnck.gallery.ui.util.FastScroller
 import io.github.pnck.gallery.ui.util.ScrubModel
 import io.github.pnck.gallery.ui.util.pinchToStep
@@ -736,9 +741,7 @@ private fun PhotoCell(
             modifier = Modifier.fillMaxSize(),
         )
         SyncStateBadge(
-            state = photo.syncState,
-            excluded = photo.excluded,
-            classified = photo.classified,
+            badge = photo.badge,
             modifier = Modifier.align(Alignment.TopEnd).padding(4.dp),
         )
         if (selectionMode) {
@@ -1012,17 +1015,22 @@ private fun BackupBanner(
  * Per-state badge on a translucent scrim so it stays legible over bright photos.
  * Monochrome (white) icons — differentiated by shape, not colour, for a clean look.
  */
+/**
+ * Per-state badge on a translucent scrim so it stays legible over bright photos.
+ * Monochrome (white) icons — differentiated by shape, not colour, for a clean look.
+ * The six presentation states are DERIVED (see SyncBadge), never persisted.
+ */
 @Composable
-private fun SyncStateBadge(state: SyncState, excluded: Boolean, classified: Boolean, modifier: Modifier = Modifier) {
-    val (icon: ImageVector, description: String) = when {
-        excluded -> Icons.Default.CloudOff to stringResource(R.string.badge_excluded)
-        // Unclassified (freshly scanned, never compared to the cloud): NO badge —
-        // it may already be backed up; reconcile assigns the truthful badge.
-        state == SyncState.PENDING_UPLOAD && !classified -> return
-        state == SyncState.PENDING_UPLOAD -> Icons.Default.CloudUpload to stringResource(R.string.badge_pending_upload)
-        state == SyncState.SYNCED -> Icons.Default.CloudDone to stringResource(R.string.badge_synced)
-        state == SyncState.CLOUD_ONLY -> Icons.Default.Cloud to stringResource(R.string.badge_cloud_only)
-        else -> return // PENDING_DELETE: transient; no badge
+private fun SyncStateBadge(badge: SyncBadge, modifier: Modifier = Modifier) {
+    val (icon: ImageVector, description: String) = when (badge) {
+        SyncBadge.UNKNOWN -> Icons.Default.HourglassEmpty to stringResource(R.string.badge_unknown)
+        SyncBadge.LOCAL_ONLY -> Icons.Default.CloudUpload to stringResource(R.string.badge_pending_upload)
+        SyncBadge.QUEUED -> Icons.Default.CloudQueue to stringResource(R.string.badge_queued)
+        SyncBadge.UPLOADING -> Icons.Default.CloudSync to stringResource(R.string.badge_uploading)
+        SyncBadge.BACKED_UP -> Icons.Default.CloudDone to stringResource(R.string.badge_synced)
+        SyncBadge.CLOUD_ONLY -> Icons.Default.Cloud to stringResource(R.string.badge_cloud_only)
+        SyncBadge.EXCLUDED -> Icons.Default.CloudOff to stringResource(R.string.badge_excluded)
+        SyncBadge.NONE -> return
     }
     Box(
         modifier = modifier

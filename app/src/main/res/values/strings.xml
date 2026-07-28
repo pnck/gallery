@@ -85,7 +85,10 @@
     <string name="settings_transport_connected">Connected — acceleration active</string>
 
     <!-- Sync-state badges (PRD §3.7 / §9.1) -->
+    <string name="badge_unknown">Checking backup status…</string>
     <string name="badge_pending_upload">Not backed up</string>
+    <string name="badge_queued">In backup queue</string>
+    <string name="badge_uploading">Backing up…</string>
     <string name="badge_synced">Backed up</string>
     <string name="badge_cloud_only">Cloud only</string>
     <string name="badge_excluded">Excluded from backup</string>
