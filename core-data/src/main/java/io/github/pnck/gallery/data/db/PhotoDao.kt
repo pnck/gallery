@@ -44,6 +44,11 @@ interface PhotoDao {
     @Query("SELECT * FROM photos")
     suspend fun getAllRows(): List<PhotoEntity>
 
+    /** Row count — the scan cursor's sanity check ("cursor > 0 with an empty library
+     *  means the cache was wiped without the cursor: rescan from zero"). */
+    @Query("SELECT COUNT(*) FROM photos")
+    suspend fun count(): Int
+
     /** Cloud ids already tracked for a provider — downstream sync inserts only new ones. */
     @Query("SELECT cloudId FROM photos WHERE provider = :provider AND cloudId IS NOT NULL")
     suspend fun getKnownCloudIds(provider: String): List<String>

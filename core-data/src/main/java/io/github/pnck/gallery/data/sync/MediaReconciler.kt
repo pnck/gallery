@@ -1,38 +1,45 @@
 package io.github.pnck.gallery.data.sync
 
-import android.content.Context
-import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.longPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
 import io.github.pnck.gallery.data.db.PhotoDao
 import io.github.pnck.gallery.data.db.PhotoEntity
+import io.github.pnck.gallery.data.db.SyncKeyDao
+import io.github.pnck.gallery.data.db.SyncKeyEntity
 import io.github.pnck.gallery.data.scanner.LocalMediaScanner
 import io.github.pnck.gallery.data.settings.AppSettingsStore
 import io.github.pnck.gallery.domain.SyncState
 import java.util.UUID
 import kotlinx.coroutines.flow.first
 
-private val Context.scanCursorStore by preferencesDataStore(name = "scan_cursor")
-
 /**
  * MediaStore → Room reconciliation (T-202, PRD §6.1).
  *
- * Incremental: the DATE_MODIFIED cursor persists in DataStore so each run only
- * queries rows newer than the previous scan. Unknown content URIs are inserted
- * as PENDING_UPLOAD with a locally generated UUID primary key (PRD §3.6 — never
- * file hashes, which are computed lazily at upload time).
+ * Incremental: the DATE_MODIFIED cursor persists in `sync_keys` (Room) so each run
+ * only queries rows newer than the previous scan. The cursor deliberately lives in
+ * the SAME cache it cursors over: the DB is a pure cache recreated by
+ * `fallbackToDestructiveMigration` on schema bumps, and a cursor that outlives the
+ * library it describes is a silent killer — the scan then only looks for photos
+ * newer than the stale cursor, imports nothing, and the wall stays empty forever
+ * (the "No photos yet after upgrade" report). Wiped together, they cannot desync.
+ *
+ * Unknown content URIs are inserted as PENDING_UPLOAD with a locally generated UUID
+ * primary key (PRD §3.6 — never file hashes, which are computed lazily at upload
+ * time).
  */
 class MediaReconciler(
-    private val appContext: Context,
     private val scanner: LocalMediaScanner,
     private val photoDao: PhotoDao,
+    private val syncKeyDao: SyncKeyDao,
     private val settings: AppSettingsStore,
 ) {
-    private val cursorKey = longPreferencesKey("last_scan_date_modified_sec")
-
     /** @return number of newly discovered photos. */
     suspend fun reconcile(): Int {
-        val since = appContext.scanCursorStore.data.first()[cursorKey] ?: 0L
+        var since = syncKeyDao.get(SCAN_CURSOR_TARGET)?.deltaToken?.toLongOrNull() ?: 0L
+        if (since > 0 && photoDao.count() == 0) {
+            // A cursor without a library is a contradiction (backup/restore edge,
+            // partial data wipe): the cursor derives from the table, so trust the
+            // table and rescan from zero instead of trusting the cursor.
+            since = 0L
+        }
         val items = scanner.scanIncremental(since)
         // The scan QUERY succeeded (empty or not): the local library has loaded at
         // least once, so cloud truth may now enter the DB (ReconcileProcessor gate).
@@ -77,14 +84,24 @@ class MediaReconciler(
         // Advance the cursor over EVERY scanned row (even ones filtered out), so an
         // unchanged allowlist doesn't re-scan them next time. Widening the allowlist
         // resets the cursor (see resetCursor) to force a one-time full re-import.
-        val newCursor = items.maxOf { it.dateModifiedSec }
-        appContext.scanCursorStore.edit { it[cursorKey] = maxOf(newCursor, since) }
+        writeCursor(maxOf(items.maxOf { it.dateModifiedSec }, since))
         return fresh.size
     }
 
     /** Force the next [reconcile] to re-scan the whole library — used when the scan
      *  allowlist changes so newly-included folders get imported. */
     suspend fun resetCursor() {
-        appContext.scanCursorStore.edit { it[cursorKey] = 0L }
+        writeCursor(0L)
+    }
+
+    private suspend fun writeCursor(dateModifiedSec: Long) {
+        syncKeyDao.upsert(
+            SyncKeyEntity(SCAN_CURSOR_TARGET, nextPageToken = null, deltaToken = dateModifiedSec.toString()),
+        )
+    }
+
+    private companion object {
+        /** sync_keys target for the local-scan DATE_MODIFIED cursor (epoch seconds). */
+        const val SCAN_CURSOR_TARGET = "local_scan"
     }
 }
