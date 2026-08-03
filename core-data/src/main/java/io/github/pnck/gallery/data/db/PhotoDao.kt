@@ -4,6 +4,7 @@ import androidx.paging.PagingSource
 import androidx.room.Dao
 import androidx.room.Query
 import androidx.room.RawQuery
+import androidx.room.Transaction
 import androidx.room.Upsert
 import androidx.sqlite.db.SupportSQLiteQuery
 import kotlinx.coroutines.flow.Flow
@@ -169,6 +170,22 @@ interface PhotoDao {
 
     @Query("DELETE FROM photos WHERE id IN (:ids)")
     suspend fun deleteByIds(ids: List<String>)
+
+    /**
+     * Apply a reconcile plan ATOMICALLY, prune BEFORE upsert. A row being re-linked
+     * to a cloud file (upsert carrying cloudId=X) collides with the not-yet-pruned
+     * phantom row still holding X under UNIQUE(provider, cloudId) if the upsert
+     * lands first — the whole pass then rolls back and the classification is lost
+     * (the "everything stuck at hourglass" production bug, 2026-08-03). Deleting
+     * first is safe: plan deleteIds never overlap upsert row ids (consumed rows
+     * are never pruned), and tombstones are never in the plan.
+     */
+    @Transaction
+    suspend fun applyReconcilePlan(upserts: List<PhotoEntity>, deleteIds: List<String>) {
+        // Chunked: SQLite's host-variable cap (999 on older Android) bounds each IN(...).
+        deleteIds.chunked(500).forEach { deleteByIds(it) }
+        if (upserts.isNotEmpty()) upsertAll(upserts)
+    }
 
     @Query("SELECT * FROM photos WHERE localUri = :localUri LIMIT 1")
     suspend fun findByLocalUri(localUri: String): PhotoEntity?

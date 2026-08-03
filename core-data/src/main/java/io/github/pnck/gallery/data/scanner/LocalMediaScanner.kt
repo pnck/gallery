@@ -49,11 +49,15 @@ class LocalMediaScanner(private val resolver: ContentResolver) {
     suspend fun scanIncremental(sinceDateModifiedSec: Long): List<LocalMediaItem> =
         withContext(Dispatchers.IO) {
             val items = mutableListOf<LocalMediaItem>()
+            // Full sweeps (since <= 0) pass NO selection: "DATE_MODIFIED > 0" would
+            // silently drop rows whose date is 0/NULL (OEM media-scanner gaps — 13%
+            // of one production library), and the persisted cursor would then skip
+            // them on every future scan too.
             resolver.query(
                 MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
                 projection,
-                "${MediaStore.Images.Media.DATE_MODIFIED} > ?",
-                arrayOf(sinceDateModifiedSec.toString()),
+                if (sinceDateModifiedSec > 0) "${MediaStore.Images.Media.DATE_MODIFIED} > ?" else null,
+                if (sinceDateModifiedSec > 0) arrayOf(sinceDateModifiedSec.toString()) else null,
                 "${MediaStore.Images.Media.DATE_MODIFIED} ASC",
             )?.use { cursor ->
                 val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)

@@ -871,10 +871,10 @@ private fun SyncStatusSheet(
         Text(
             text = syncStatusDetail(status, accountConnected),
             style = MaterialTheme.typography.bodyLarge,
-            color = if (!accountConnected && status is SyncStatus.Idle) {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            } else {
-                MaterialTheme.colorScheme.primary
+            color = when {
+                status is SyncStatus.Failed -> MaterialTheme.colorScheme.error
+                !accountConnected && status is SyncStatus.Idle -> MaterialTheme.colorScheme.onSurfaceVariant
+                else -> MaterialTheme.colorScheme.primary
             },
         )
         Spacer(Modifier.height(16.dp))
@@ -1069,12 +1069,15 @@ private fun SyncStateBadge(badge: SyncBadge, modifier: Modifier = Modifier) {
 
 @Composable
 private fun syncStatusDetail(status: SyncStatus, accountConnected: Boolean): String = when {
+    // A failed chain trumps everything: the cloud side was not reconciled.
+    status is SyncStatus.Failed -> stringResource(R.string.sync_status_failed)
     // No account: "up to date" is UNKNOWABLE — the cloud side has never been read.
     !accountConnected && status is SyncStatus.Idle -> stringResource(R.string.sync_status_not_connected)
     else -> when (status) {
         is SyncStatus.Idle -> stringResource(R.string.sync_status_idle)
         is SyncStatus.Scanning -> stringResource(R.string.sync_scanning)
         is SyncStatus.Uploading -> stringResource(R.string.sync_uploading, status.done, status.total)
+        is SyncStatus.Failed -> stringResource(R.string.sync_status_failed)
     }
 }
 

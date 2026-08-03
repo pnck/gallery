@@ -176,8 +176,9 @@ class ReconcileProcessor(
             )
             return@withContext Outcome.Skipped
         }
-        if (plan.upserts.isNotEmpty()) photoDao.upsertAll(plan.upserts)
-        if (plan.deleteIds.isNotEmpty()) photoDao.deleteByIds(plan.deleteIds)
+        // Atomic, prune-before-upsert: re-linking a local row to a cloudId that a
+        // to-be-pruned phantom still holds must not hit UNIQUE(provider, cloudId).
+        photoDao.applyReconcilePlan(plan.upserts, plan.deleteIds)
 
         val synced = plan.upserts.count { it.syncState == SyncState.SYNCED }
         val pending = plan.upserts.count { it.syncState == SyncState.PENDING_UPLOAD }

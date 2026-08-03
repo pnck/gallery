@@ -52,6 +52,9 @@ sealed interface SyncStatus {
     data object Idle : SyncStatus
     data object Scanning : SyncStatus
     data class Uploading(val done: Int, val total: Int) : SyncStatus
+
+    /** The last chain FAILED (a worker threw): "up to date" would be a lie. */
+    data object Failed : SyncStatus
 }
 
 /** One-shot feedback for the timeline (rendered as a snackbar). */
@@ -476,7 +479,11 @@ class TimelineViewModel @Inject constructor(
 
     private fun List<WorkInfo>.toSyncStatus(): SyncStatus {
         val running = filter { it.state == WorkInfo.State.RUNNING }
-        if (running.isEmpty()) return SyncStatus.Idle
+        if (running.isEmpty()) {
+            // A failed chain means the cloud side was NOT reconciled — never Idle.
+            if (any { it.state == WorkInfo.State.FAILED }) return SyncStatus.Failed
+            return SyncStatus.Idle
+        }
         running.forEach { info ->
             val total = info.progress.getInt(UploadWorker.KEY_PROGRESS_TOTAL, 0)
             if (total > 0) {

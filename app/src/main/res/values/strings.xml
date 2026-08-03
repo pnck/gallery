@@ -118,6 +118,7 @@
     <!-- Sync status panel (PRD §9.1) -->
     <string name="sync_status_title">Sync status</string>
     <string name="sync_status_idle">Up to date</string>
+    <string name="sync_status_failed">Last sync failed — tap Sync now to retry</string>
     <string name="sync_status_not_connected">Not connected — photos stay on this device</string>
     <string name="sync_count_queued">Waiting</string>
     <string name="sync_count_pending">Not backed up</string>
