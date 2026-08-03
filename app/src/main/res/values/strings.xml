@@ -118,6 +118,8 @@
     <!-- Sync status panel (PRD §9.1) -->
     <string name="sync_status_title">Sync status</string>
     <string name="sync_status_idle">Up to date</string>
+    <string name="sync_status_not_connected">Not connected — photos stay on this device</string>
+    <string name="sync_count_queued">Waiting</string>
     <string name="sync_count_pending">Not backed up</string>
     <string name="sync_count_synced">Backed up</string>
     <string name="sync_count_cloud">Cloud only</string>
@@ -128,7 +130,7 @@
     <string name="rebuild_sync_hint">Re-checks every photo against your cloud by content and fixes any wrong badges. Doesn\'t delete photos.</string>
     <string name="clear_queue">Clear backup queue</string>
     <string name="clear_queue_title">Clear backup queue?</string>
-    <string name="clear_queue_message">%1$d photos will stop backing up automatically. They stay on your device, and you can still back up individual photos by selecting them.</string>
+    <string name="clear_queue_message">%1$d queued photos will be removed from the backup queue. They stay on your device, and you can queue them again anytime.</string>
     <string name="clear_queue_confirm">Clear</string>
     <string name="work_running">Running</string>
     <string name="work_enqueued">Queued</string>

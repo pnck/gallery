@@ -80,14 +80,14 @@ class PhotoRepositoryImpl(
 
     override fun observeSyncCounts(): Flow<SyncCounts> =
         photoDao.observeCounts().map {
-            SyncCounts(it.pendingUpload, it.synced, it.cloudOnly, it.pendingDelete)
+            SyncCounts(it.pendingUpload, it.queued, it.synced, it.cloudOnly, it.pendingDelete)
         }
 
     override suspend fun countWithoutCloud(ids: List<String>): Int =
         withContext(Dispatchers.IO) { photoDao.countWithoutCloud(ids) }
 
     override suspend fun clearBackupQueue() = withContext(Dispatchers.IO) {
-        photoDao.excludeAllPending()
+        photoDao.dequeueAll()
     }
 
     override suspend fun queueAllPending() = withContext(Dispatchers.IO) {

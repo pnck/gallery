@@ -426,6 +426,7 @@ fun TimelineScreen(
                 status = syncStatus,
                 counts = syncCounts,
                 queue = queue,
+                accountConnected = authorized,
                 onSyncNow = viewModel::backupNow,
                 onRebuild = { showStatus = false; viewModel.rebuildSyncState() },
                 onClearQueue = { showStatus = false; showClearConfirm = true },
@@ -437,7 +438,7 @@ fun TimelineScreen(
         AlertDialog(
             onDismissRequest = { showClearConfirm = false },
             title = { Text(stringResource(R.string.clear_queue_title)) },
-            text = { Text(stringResource(R.string.clear_queue_message, syncCounts.pendingUpload)) },
+            text = { Text(stringResource(R.string.clear_queue_message, syncCounts.queued)) },
             confirmButton = {
                 TextButton(onClick = { showClearConfirm = false; viewModel.clearBackupQueue() }) {
                     Text(stringResource(R.string.clear_queue_confirm))
@@ -858,6 +859,8 @@ private fun SyncStatusSheet(
     status: SyncStatus,
     counts: SyncCounts,
     queue: List<SyncJob>,
+    /** No account connected ⇒ "up to date" is unknowable; the sheet says so instead. */
+    accountConnected: Boolean,
     onSyncNow: () -> Unit,
     onRebuild: () -> Unit,
     onClearQueue: () -> Unit,
@@ -866,13 +869,18 @@ private fun SyncStatusSheet(
         Text(stringResource(R.string.sync_status_title), style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(4.dp))
         Text(
-            text = syncStatusDetail(status),
+            text = syncStatusDetail(status, accountConnected),
             style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.primary,
+            color = if (!accountConnected && status is SyncStatus.Idle) {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            } else {
+                MaterialTheme.colorScheme.primary
+            },
         )
         Spacer(Modifier.height(16.dp))
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            CountPill(counts.queued, stringResource(R.string.sync_count_queued))
             CountPill(counts.pendingUpload, stringResource(R.string.sync_count_pending))
             CountPill(counts.synced, stringResource(R.string.sync_count_synced))
             CountPill(counts.cloudOnly, stringResource(R.string.sync_count_cloud))
@@ -913,7 +921,7 @@ private fun SyncStatusSheet(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        if (counts.pendingUpload > 0) {
+        if (counts.queued > 0) {
             Spacer(Modifier.height(8.dp))
             TextButton(onClick = onClearQueue, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.clear_queue))
@@ -1060,10 +1068,14 @@ private fun SyncStateBadge(badge: SyncBadge, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun syncStatusDetail(status: SyncStatus): String = when (status) {
-    is SyncStatus.Idle -> stringResource(R.string.sync_status_idle)
-    is SyncStatus.Scanning -> stringResource(R.string.sync_scanning)
-    is SyncStatus.Uploading -> stringResource(R.string.sync_uploading, status.done, status.total)
+private fun syncStatusDetail(status: SyncStatus, accountConnected: Boolean): String = when {
+    // No account: "up to date" is UNKNOWABLE — the cloud side has never been read.
+    !accountConnected && status is SyncStatus.Idle -> stringResource(R.string.sync_status_not_connected)
+    else -> when (status) {
+        is SyncStatus.Idle -> stringResource(R.string.sync_status_idle)
+        is SyncStatus.Scanning -> stringResource(R.string.sync_scanning)
+        is SyncStatus.Uploading -> stringResource(R.string.sync_uploading, status.done, status.total)
+    }
 }
 
 @Composable

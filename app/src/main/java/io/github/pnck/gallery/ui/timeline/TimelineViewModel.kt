@@ -215,9 +215,11 @@ class TimelineViewModel @Inject constructor(
 
     /** Live per-state totals for the sync-status panel (PRD §9.1). */
     val syncCounts: StateFlow<SyncCounts> = repo.observeSyncCounts()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SyncCounts(0, 0, 0, 0))
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SyncCounts(0, 0, 0, 0, 0))
 
-    /** Google-Photos-style backup state: running progress, paused, waiting count, or idle. */
+    /** Google-Photos-style backup state: running progress, paused, waiting count, or idle.
+     *  "Waiting" is the manually built queue ONLY (counts.queued) — freshly scanned
+     *  rows are LOCAL_ONLY/UNKNOWN, never auto-waiting (sync is manual by default). */
     val backupState: StateFlow<BackupState> = combine(
         workManager.getWorkInfosForUniqueWorkFlow(SyncPipeline.UNIQUE_NAME),
         workManager.getWorkInfosForUniqueWorkFlow(SyncPipeline.TARGETED_NAME),
@@ -235,11 +237,11 @@ class TimelineViewModel @Inject constructor(
                 currentUri = running.progress.getString(UploadWorker.KEY_CURRENT_URI),
                 pct = running.progress.getInt(UploadWorker.KEY_CURRENT_PCT, 0),
             )
-            paused && counts.pendingUpload > 0 -> BackupState.Paused(counts.pendingUpload)
-            counts.pendingUpload > 0 -> {
+            paused && counts.queued > 0 -> BackupState.Paused(counts.queued)
+            counts.queued > 0 -> {
                 val failed = all.filter { it.state == WorkInfo.State.SUCCEEDED }
                     .maxOfOrNull { it.outputData.getInt(UploadWorker.KEY_FAILED, 0) } ?: 0
-                BackupState.Pending(counts.pendingUpload, failed)
+                BackupState.Pending(counts.queued, failed)
             }
             else -> BackupState.Idle
         }

@@ -105,9 +105,12 @@ interface PhotoDao {
     @Query("UPDATE photos SET uploadAttempts = 0 WHERE id IN (:ids)")
     suspend fun resetUploadAttempts(ids: List<String>)
 
-    /** "Clear queue": drop every waiting photo out of automatic backup (kept visible). */
-    @Query("UPDATE photos SET excluded = 1, queued = 0 WHERE syncState = 0")
-    suspend fun excludeAllPending()
+    /** "Clear queue": the queued photos drop back to LOCAL_ONLY (kept visible, simply
+     *  not waiting any more). It must NOT touch unqueued rows — sync is manual, so a
+     *  photo the user never queued was never in any queue (excluding it would make
+     *  "Back up now" skip it forever). */
+    @Query("UPDATE photos SET queued = 0 WHERE queued = 1")
+    suspend fun dequeueAll()
 
     /** "Back up now": queue every classified pending photo for the next sweep. */
     @Query("UPDATE photos SET queued = 1 WHERE syncState = 0 AND excluded = 0")
@@ -184,10 +187,16 @@ interface PhotoDao {
         dateModifiedSec: Long,
     )
 
-    /** Live per-state totals for the sync-status panel (PRD §9.1). */
+    /**
+     * Live per-state totals for the sync-status panel (PRD §9.1), split by the
+     * DERIVED badge semantics: "waiting" is the manually built queue (queued = 1)
+     * only — a freshly scanned row is PENDING_UPLOAD but NOT waiting, so it must
+     * never inflate the queue count (PRD: sync is manual by default).
+     */
     @Query(
         "SELECT " +
-            "IFNULL(SUM(CASE WHEN syncState = 0 AND excluded = 0 THEN 1 ELSE 0 END), 0) AS pendingUpload, " +
+            "IFNULL(SUM(CASE WHEN syncState = 0 AND excluded = 0 AND queued = 0 THEN 1 ELSE 0 END), 0) AS pendingUpload, " +
+            "IFNULL(SUM(CASE WHEN syncState = 0 AND excluded = 0 AND queued = 1 THEN 1 ELSE 0 END), 0) AS queued, " +
             "IFNULL(SUM(CASE WHEN syncState = 1 THEN 1 ELSE 0 END), 0) AS synced, " +
             "IFNULL(SUM(CASE WHEN syncState = 2 THEN 1 ELSE 0 END), 0) AS cloudOnly, " +
             "IFNULL(SUM(CASE WHEN syncState = 3 THEN 1 ELSE 0 END), 0) AS pendingDelete " +
@@ -226,6 +235,7 @@ data class StorageSummaryEntity(
 /** Projection for [PhotoDao.observeCounts]. */
 data class SyncCountsEntity(
     val pendingUpload: Int,
+    val queued: Int,
     val synced: Int,
     val cloudOnly: Int,
     val pendingDelete: Int,
