@@ -111,6 +111,7 @@ class PhotoRepositoryImpl(
                 provider = row.provider,
                 contentHashType = row.contentHashType,
                 contentHashValue = row.contentHashValue,
+                bucketName = row.bucketName,
             )
         }
     }

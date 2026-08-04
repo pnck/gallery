@@ -54,12 +54,15 @@ interface PhotoDao {
     @Query("SELECT cloudId FROM photos WHERE provider = :provider AND cloudId IS NOT NULL")
     suspend fun getKnownCloudIds(provider: String): List<String>
 
-    /** Synced rows that still hold a local copy — verified individually before freeing. */
-    @Query("SELECT * FROM photos WHERE syncState = 1 AND localUri IS NOT NULL")
+    /** Synced rows that still hold a local copy — verified individually before freeing.
+     *  cloudId IS NOT NULL: unlinked twin copies of a backed-up byte stream (SYNCED
+     *  via MD5, link owned by a sibling row) are NOT freeable — releasing their local
+     *  copy would leave a row with neither local nor cloud identity. */
+    @Query("SELECT * FROM photos WHERE syncState = 1 AND localUri IS NOT NULL AND cloudId IS NOT NULL")
     suspend fun getSyncedWithLocal(): List<PhotoEntity>
 
     /** Freeable subset limited to a selection (T-302, per-selection free-up-space). */
-    @Query("SELECT * FROM photos WHERE id IN (:ids) AND syncState = 1 AND localUri IS NOT NULL")
+    @Query("SELECT * FROM photos WHERE id IN (:ids) AND syncState = 1 AND localUri IS NOT NULL AND cloudId IS NOT NULL")
     suspend fun getSyncedWithLocalByIds(ids: List<String>): List<PhotoEntity>
 
     /** Content-hash lookup — the anti-state-machine-failure identity of a photo (PRD §3.5). */

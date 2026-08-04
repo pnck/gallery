@@ -19,6 +19,11 @@ data class PhotoInfo(
     val dateTakenMs: Long,
     val syncState: SyncState,
     val provider: String?,
+    /** Device folder (MediaStore bucket) holding the local copy — the duplicate-
+     *  detective's first clue ("did I save this twice?"). */
+    val folder: String?,
+    /** MediaStore row id — distinguishes same-folder double registrations. */
+    val mediaId: String?,
     val sizeBytes: Long?,
     val cameraMake: String?,
     val cameraModel: String?,
@@ -55,6 +60,8 @@ object ExifReader {
             dateTakenMs = details.dateTakenMs,
             syncState = details.syncState,
             provider = details.provider,
+            folder = details.bucketName,
+            mediaId = details.localUri?.substringAfterLast('/'),
             sizeBytes = size,
             cameraMake = exif?.getAttribute(ExifInterface.TAG_MAKE)?.trim()?.ifBlank { null },
             cameraModel = exif?.getAttribute(ExifInterface.TAG_MODEL)?.trim()?.ifBlank { null },

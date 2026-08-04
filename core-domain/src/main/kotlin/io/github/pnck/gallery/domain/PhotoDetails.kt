@@ -16,4 +16,6 @@ data class PhotoDetails(
     val provider: String?,
     val contentHashType: String?,
     val contentHashValue: String?,
+    /** MediaStore bucket (folder) display name of the local copy, when known. */
+    val bucketName: String? = null,
 )

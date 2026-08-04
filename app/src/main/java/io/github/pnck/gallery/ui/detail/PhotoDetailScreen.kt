@@ -367,6 +367,8 @@ private fun PhotoInfoSheet(info: PhotoInfo) {
         info.sizeBytes?.let { add(stringResource(R.string.info_size) to formatSize(it)) }
         add(stringResource(R.string.info_state) to syncStateLabel(info.syncState))
         info.provider?.let { add(stringResource(R.string.info_storage) to it) }
+        info.folder?.let { add(stringResource(R.string.info_folder) to it) }
+        info.mediaId?.let { add(stringResource(R.string.info_media_id) to it) }
         val camera = listOfNotNull(info.cameraMake, info.cameraModel).joinToString(" ").ifBlank { null }
         camera?.let { add(stringResource(R.string.info_camera) to it) }
         info.aperture?.let { add(stringResource(R.string.info_aperture) to it) }

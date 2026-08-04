@@ -283,14 +283,40 @@ fun planReconcile(
 
     // A. Every local file becomes a row. SYNCED if its bytes are in the cloud, else
     //    PENDING_UPLOAD (default: back it up). Tombstoned rows are left untouched.
+    //
+    //    Duplicate local copies of the same byte stream (same file saved twice,
+    //    MediaStore double-registration): only ONE row can hold the cloudId
+    //    (UNIQUE(provider, cloudId)), but EVERY copy whose bytes are in the cloud
+    //    is SYNCED — "backed up" is a statement about bytes, not about which row
+    //    owns the link. The unlinked copies carry cloudId=NULL ("link owned by a
+    //    twin row"); they must never re-upload, and free-space must skip them
+    //    (queries require cloudId IS NOT NULL).
+
+    // Pass 0 — link preservation: a row already linked to a cloud file KEEPS it
+    // while the file remains in the cloud listing and the local bytes are
+    // unchanged (or unhashable). Scan order must never migrate a link to a twin.
+    val preservedLinks = mutableMapOf<String, CloudTruth>()
+    for (l in local) {
+        val row = existingByUri[l.uri] ?: continue
+        val linked = row.cloudId ?: continue
+        val cloudFile = cloud.firstOrNull { it.cloudId == linked } ?: continue
+        if (l.md5 == null || cloudFile.md5 == null || cloudFile.md5 == l.md5) {
+            consumedCloudIds += linked
+            preservedLinks[l.uri] = cloudFile
+        }
+    }
     for (l in local) {
         val row = existingByUri[l.uri]
         if (row != null && row.syncState == SyncState.PENDING_DELETE) {
             consumedRowIds += row.id
             continue
         }
-        val match = l.md5?.let { md5 -> cloudByMd5[md5]?.firstOrNull { it.cloudId !in consumedCloudIds } }
+        val match = preservedLinks[l.uri] ?: l.md5?.let { md5 ->
+            cloudByMd5[md5]?.firstOrNull { it.cloudId !in consumedCloudIds }
+        }
         if (match != null) consumedCloudIds += match.cloudId
+        // Bytes provably in the cloud even when the match was consumed by a twin.
+        val backedUpElsewhere = match == null && l.md5 != null && cloudByMd5[l.md5]?.isNotEmpty() == true
         if (row != null) consumedRowIds += row.id
         upserts += PhotoEntity(
             id = row?.id ?: UUID.randomUUID().toString(),
@@ -307,7 +333,7 @@ fun planReconcile(
             sizeBytes = l.sizeBytes,
             bucketId = l.bucketId,
             bucketName = l.bucketName,
-            syncState = if (match != null) SyncState.SYNCED else SyncState.PENDING_UPLOAD,
+            syncState = if (match != null || backedUpElsewhere) SyncState.SYNCED else SyncState.PENDING_UPLOAD,
             excluded = row?.excluded ?: false,
             // Classify, never enqueue: queue membership survives reconcile untouched.
             queued = row?.queued ?: false,

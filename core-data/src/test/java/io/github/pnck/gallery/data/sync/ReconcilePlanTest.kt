@@ -97,4 +97,60 @@ class ReconcilePlanTest {
         assertTrue("tombstone not deleted", "t1" !in plan.deleteIds)
         assertTrue("tombstone not resurrected as a new row", plan.upserts.none { it.id == "t1" })
     }
+
+    @Test
+    fun `duplicate local copies of a cloud file are ALL synced, one owns the link`() {
+        // The reported case: the same photo saved in two folders (Camera + Pictures).
+        // Its bytes are provably in the cloud, so BOTH copies are backed up — but
+        // UNIQUE(provider, cloudId) allows only one row to hold the link.
+        val plan = planReconcile(
+            listOf(local("uri://camera", "AAA"), local("uri://pictures", "AAA")),
+            listOf(cloud("cA", "AAA")),
+            emptyList(),
+            "G_DRIVE",
+        )
+        assertEquals(2, plan.upserts.size)
+        assertTrue(plan.upserts.all { it.syncState == SyncState.SYNCED })
+        assertEquals(
+            "exactly one row owns the cloud link",
+            1,
+            plan.upserts.count { it.cloudId == "cA" },
+        )
+        assertEquals(1, plan.upserts.count { it.cloudId == null })
+    }
+
+    @Test
+    fun `twin copies never produce duplicate cloud ids`() {
+        // Two local copies + two DISTINCT cloud files with the same bytes: each
+        // cloud id is consumed by at most one row.
+        val plan = planReconcile(
+            listOf(local("uri://a", "AAA"), local("uri://b", "AAA")),
+            listOf(cloud("c1", "AAA"), cloud("c2", "AAA")),
+            emptyList(),
+            "G_DRIVE",
+        )
+        assertEquals(2, plan.upserts.count { it.syncState == SyncState.SYNCED })
+        assertEquals(2, plan.upserts.mapNotNull { it.cloudId }.toSet().size)
+    }
+
+    @Test
+    fun `existing link wins over re-matching when twins race for a cloud file`() {
+        // Row r2 was previously linked to cA; a twin local copy appears. The link
+        // must stay on r2 even though r1 is scanned first.
+        val existing = listOf(
+            row("r2", localUri = "uri://b", cloudId = "cA", md5 = "AAA", state = SyncState.SYNCED),
+        )
+        val plan = planReconcile(
+            listOf(local("uri://a", "AAA"), local("uri://b", "AAA")),
+            listOf(cloud("cA", "AAA")),
+            existing,
+            "G_DRIVE",
+        )
+        val r2 = plan.upserts.first { it.id == "r2" }
+        assertEquals("cA", r2.cloudId)
+        assertEquals(SyncState.SYNCED, r2.syncState)
+        val twin = plan.upserts.first { it.localUri == "uri://a" }
+        assertEquals(SyncState.SYNCED, twin.syncState)
+        assertEquals(null, twin.cloudId)
+    }
 }

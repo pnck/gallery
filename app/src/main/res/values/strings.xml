@@ -172,6 +172,8 @@
     <string name="info_size">File size</string>
     <string name="info_state">Backup state</string>
     <string name="info_storage">Cloud</string>
+    <string name="info_folder">Folder</string>
+    <string name="info_media_id">MediaStore id</string>
     <string name="info_camera">Camera</string>
     <string name="info_aperture">Aperture</string>
     <string name="info_shutter">Shutter</string>
