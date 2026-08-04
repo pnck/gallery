@@ -42,6 +42,16 @@ class PeriodicSyncWorker @AssistedInject constructor(
 
         // Rebuild classification from cloud + local truth (self-heals phantoms/drift).
         val recon = reconcile.reconcile()
+        // This IS the background context, so its outcome is the honest probe the
+        // UI derives the degradation rows from: a blind local scan proves media
+        // access is foreground-restricted (no permission API reports MIUI's
+        // 仅前台允许); a successful pass clears it. Foreground chain runs never
+        // touch this evidence (foreground scans work even when restricted).
+        when (recon) {
+            is ReconcileProcessor.Outcome.BlindScan -> settings.setBlindScanAt(System.currentTimeMillis())
+            is ReconcileProcessor.Outcome.Done -> settings.clearBlindScan()
+            else -> Unit
+        }
         // Scan + reconcile still run while paused; only the upload sweep stops.
         val up = if (settings.backupPaused.first()) {
             UploadBatchProcessor.Outcome.Done(0, 0)

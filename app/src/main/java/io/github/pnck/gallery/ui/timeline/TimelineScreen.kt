@@ -159,6 +159,7 @@ fun TimelineScreen(
     val authorized by viewModel.googleAuthorized.collectAsState()
     val scanSettled by viewModel.scanSettled.collectAsState()
     val lastBackgroundSyncAt by viewModel.lastBackgroundSyncAt.collectAsState()
+    val blindScanAt by viewModel.blindScanAt.collectAsState()
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
     val snackbarHost = remember { SnackbarHostState() }
@@ -175,9 +176,11 @@ fun TimelineScreen(
             }.getOrDefault(Long.MAX_VALUE)
             val ageMs = System.currentTimeMillis() - installedAt
             val staleMs = System.currentTimeMillis() - lastBackgroundSyncAt
-            // Background sync never ran (or is hours stale) on a hours-old install:
-            // MIUI's AutoStartManager is almost certainly rejecting the job.
-            ageMs > 3 * 3600_000L && (lastBackgroundSyncAt == 0L || staleMs > 3 * 3600_000L)
+            // Background sync never ran (or is stale beyond ~2 periods) on an
+            // older install: MIUI's AutoStartManager is almost certainly
+            // rejecting the job. Clears as soon as a run lands.
+            val windowMs = 70 * 60_000L
+            ageMs > windowMs && (lastBackgroundSyncAt == 0L || staleMs > windowMs)
         }
     }
     // rememberSaveable (not plain remember): the grid leaves composition while the
@@ -438,9 +441,10 @@ fun TimelineScreen(
 
     if (showStatus) {
         ModalBottomSheet(onDismissRequest = { showStatus = false }) {
-            // Probed at sheet-open time (an AppOps binder read — too costly to run
-            // on every timeline recomposition).
-            val fullMediaAccess = hasFullMediaAccess(context)
+            // AppOps probe at sheet-open time (a binder read — too costly for every
+            // timeline recomposition). On some MIUI builds it under-reports, so the
+            // background blind-scan evidence (blindScanAt) is the primary signal.
+            val fullMediaAccess = hasFullMediaAccess(context) && blindScanAt == 0L
             SyncStatusSheet(
                 status = syncStatus,
                 counts = syncCounts,

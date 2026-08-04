@@ -27,6 +27,7 @@ class AppSettingsStore(private val context: Context) {
     private val initialScanDoneKey = booleanPreferencesKey("initial_scan_done")
     private val logLevelKey = stringPreferencesKey("transport_log_level")
     private val lastBackgroundSyncAtKey = longPreferencesKey("last_background_sync_at")
+    private val blindScanAtKey = longPreferencesKey("blind_scan_at")
 
     /** Name of the app's cloud folder that uploads are pinned to. */
     val remoteFolderName: Flow<String> = context.appSettingsStore.data.map { prefs ->
@@ -97,6 +98,23 @@ class AppSettingsStore(private val context: Context) {
 
     suspend fun setLastBackgroundSyncAt(nowMs: Long) {
         context.appSettingsStore.edit { it[lastBackgroundSyncAtKey] = nowMs }
+    }
+
+    /**
+     * Wall-clock of the last BACKGROUND blind scan (0 = none observed): the
+     * periodic worker found MediaStore empty while local-backed rows exist —
+     * the definitive signature of foreground-restricted media access, which
+     * permission APIs cannot report (MIUI keeps the permission GRANTED).
+     * Cleared by the next successful background reconcile.
+     */
+    val blindScanAt: Flow<Long> = context.appSettingsStore.data.map { it[blindScanAtKey] ?: 0L }
+
+    suspend fun setBlindScanAt(nowMs: Long) {
+        context.appSettingsStore.edit { it[blindScanAtKey] = nowMs }
+    }
+
+    suspend fun clearBlindScan() {
+        context.appSettingsStore.edit { it.remove(blindScanAtKey) }
     }
 
     suspend fun setTransportLogLevel(level: String) {

@@ -71,6 +71,14 @@ class ReconcileProcessor(
          * the scan pipeline will make the next run possible.
          */
         data object Skipped : Outcome
+
+        /**
+         * The local scan came back EMPTY while local-backed rows exist (guard 3):
+         * the definitive signature of degraded media access (MIUI foreground-only
+         * app-op, OEM denial) — readable by the PERIODIC worker as proof that
+         * background scans are blind, which no permission API can report.
+         */
+        data object BlindScan : Outcome
     }
 
     suspend fun reconcile(): Outcome = withContext(Dispatchers.IO) {
@@ -158,7 +166,7 @@ class ReconcileProcessor(
         Log.i(TAG, "reconcile: truth local=${local.size} cloud=${cloudTruth.size} existing=${existing.size}")
         if (local.isEmpty() && existing.any { it.localUri != null }) {
             Log.w(TAG, "reconcile: ABORT — local scan empty but local-backed rows exist; not pruning")
-            return@withContext Outcome.Skipped
+            return@withContext Outcome.BlindScan
         }
         val plan = planReconcile(local, cloudTruth, existing, provider.providerType.name)
         // Guard 4 — cap mass-pruning: deleting local-backed rows for more than half

@@ -225,6 +225,12 @@ class TimelineViewModel @Inject constructor(
     val lastBackgroundSyncAt: StateFlow<Long> = settings.lastBackgroundSyncAt
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
 
+    /** Set when the periodic worker found MediaStore empty while local rows
+     *  exist — proof that BACKGROUND scans are blind (MIUI foreground-only
+     *  app-op), which no permission API can report. 0 = no evidence. */
+    val blindScanAt: StateFlow<Long> = settings.blindScanAt
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
+
     /** Google-Photos-style backup state: running progress, paused, waiting count, or idle.
      *  "Waiting" is the manually built queue ONLY (counts.queued) — freshly scanned
      *  rows are LOCAL_ONLY/UNKNOWN, never auto-waiting (sync is manual by default). */

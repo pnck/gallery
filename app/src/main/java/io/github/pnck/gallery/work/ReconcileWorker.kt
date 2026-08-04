@@ -42,6 +42,10 @@ class ReconcileWorker @AssistedInject constructor(
             // Preconditions unmet (no permission / first scan pending): succeed
             // quietly — retrying now would spin on the same preconditions.
             is ReconcileProcessor.Outcome.Skipped -> Result.success()
+            // Blind local scan: succeed quietly too — only the PERIODIC worker
+            // records this as degradation evidence (a foreground chain run says
+            // nothing about background access).
+            is ReconcileProcessor.Outcome.BlindScan -> Result.success()
         }
     }
 
