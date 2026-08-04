@@ -67,9 +67,15 @@ private const val OPSTR_READ_MEDIA_VISUAL_USER_SELECTED = "android:read_media_vi
  */
 fun openPermissionEditor(context: Context) {
     val intents = listOfNotNull(
-        // MIUI per-app permission editor (仅前台允许 → 始终允许 lives here).
+        // MIUI per-app STORAGE permission page (始终允许/仅前台允许 lives here).
+        // Verified on MIUI 12 (cepheus) — opens directly with the pkg extra.
+        Intent()
+            .setClassName("com.miui.securitycenter", "com.miui.permcenter.permissions.AppStoragePermissionsActivity")
+            .putExtra("extra_pkgname", context.packageName),
+        // Generic MIUI permission editor (note: PermissionsEditorActivity, plural —
+        // the singular class name circulated in blog posts does not exist on MIUI 12).
         Intent("miui.intent.action.APP_PERM_EDITOR")
-            .setClassName("com.miui.securitycenter", "com.miui.permcenter.permissions.AppPermissionsEditorActivity")
+            .setClassName("com.miui.securitycenter", "com.miui.permcenter.permissions.PermissionsEditorActivity")
             .putExtra("extra_pkgname", context.packageName),
         Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}")),
     )

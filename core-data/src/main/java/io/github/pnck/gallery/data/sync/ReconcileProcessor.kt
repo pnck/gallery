@@ -157,15 +157,18 @@ class ReconcileProcessor(
         }
 
         // 3. Pure derivation, 4. apply.
-        // Guard 3 — an EMPTY local truth while local-backed rows exist is never a
-        // real "user deleted everything": it's a blind scan (storage unmounted,
-        // MediaStore mid-reindex, OEM query quirk — on 2026-07-27 it pruned 943
-        // rows in one pass). The cloud side already refuses to prune on a partial
-        // listing; the local side now refuses on an empty one. The next scan or
-        // reconcile with a readable library self-heals.
+        // Guard 3 — a (near-)EMPTY local truth while local-backed rows exist is
+        // never a real "user deleted everything": it's a blind scan (storage
+        // unmounted, MediaStore mid-reindex, foreground-restricted app-op, OEM
+        // query quirk — on 2026-07-27 it pruned 943 rows in one pass; on
+        // 2026-08-03 a MIUI foreground-only grant returned 1 of 1087). The cloud
+        // side already refuses to prune on a partial listing; the local side
+        // refuses below 5% of the known library. BlindScan is the degradation
+        // EVIDENCE the periodic worker records (the UI's warning row).
         Log.i(TAG, "reconcile: truth local=${local.size} cloud=${cloudTruth.size} existing=${existing.size}")
-        if (local.isEmpty() && existing.any { it.localUri != null }) {
-            Log.w(TAG, "reconcile: ABORT — local scan empty but local-backed rows exist; not pruning")
+        val localBacked = existing.count { it.localUri != null }
+        if (localBacked > 0 && local.size * 20 < localBacked) {
+            Log.w(TAG, "reconcile: ABORT — local scan blind (${local.size} of $localBacked local rows); not pruning")
             return@withContext Outcome.BlindScan
         }
         val plan = planReconcile(local, cloudTruth, existing, provider.providerType.name)
@@ -175,12 +178,11 @@ class ReconcileProcessor(
         // Linger is cheap (next reconcile self-heals); a wrong mass-prune is the
         // "all my badges died" report.
         val existingById = existing.associateBy { it.id }
-        val localBackedExisting = existing.count { it.localUri != null }
         val localBackedDeletes = plan.deleteIds.count { existingById[it]?.localUri != null }
-        if (localBackedDeletes > localBackedExisting / 2 && localBackedDeletes > MASS_PRUNE_MIN) {
+        if (localBackedDeletes > localBacked / 2 && localBackedDeletes > MASS_PRUNE_MIN) {
             Log.w(
                 TAG,
-                "reconcile: ABORT — would prune $localBackedDeletes of $localBackedExisting local-backed rows",
+                "reconcile: ABORT — would prune $localBackedDeletes of $localBacked local-backed rows",
             )
             return@withContext Outcome.Skipped
         }
