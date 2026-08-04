@@ -1,9 +1,8 @@
 package io.github.pnck.gallery.ui.timeline
 
-import android.Manifest
+import android.app.Activity
 import android.content.pm.PackageManager
 import android.database.ContentObserver
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
@@ -113,17 +112,14 @@ import io.github.pnck.gallery.ui.util.FastScroller
 import io.github.pnck.gallery.ui.util.ScrubModel
 import io.github.pnck.gallery.ui.util.pinchToStep
 import io.github.pnck.gallery.ui.util.rememberSystemDelete
+import io.github.pnck.gallery.ui.util.hasFullMediaAccess
+import io.github.pnck.gallery.ui.util.isMiui
+import io.github.pnck.gallery.ui.util.mediaPermission
+import io.github.pnck.gallery.ui.util.openAutostartSettings
+import io.github.pnck.gallery.ui.util.openPermissionEditor
 import androidx.compose.ui.unit.Dp
 import java.text.SimpleDateFormat
 import java.util.Locale
-
-/** The media-read permission for this SDK level (PRD §6.3 matrix). */
-private fun mediaPermission(): String =
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        Manifest.permission.READ_MEDIA_IMAGES
-    } else {
-        Manifest.permission.READ_EXTERNAL_STORAGE
-    }
 
 /**
  * Timeline: square-cropped adaptive grid, Google Photos style (PRD §9.1).
@@ -162,10 +158,28 @@ fun TimelineScreen(
     val buckets by viewModel.buckets.collectAsState()
     val authorized by viewModel.googleAuthorized.collectAsState()
     val scanSettled by viewModel.scanSettled.collectAsState()
+    val lastBackgroundSyncAt by viewModel.lastBackgroundSyncAt.collectAsState()
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
     val snackbarHost = remember { SnackbarHostState() }
     val systemDelete = rememberSystemDelete()
+
+    // Degradation probe for the autostart row (recomputed when the background-sync
+    // heartbeat moves — the fix row appears/disappears purely from state).
+    val autostartBlocked = remember(lastBackgroundSyncAt) {
+        if (!isMiui()) {
+            false
+        } else {
+            val installedAt = runCatching {
+                context.packageManager.getPackageInfo(context.packageName, 0).firstInstallTime
+            }.getOrDefault(Long.MAX_VALUE)
+            val ageMs = System.currentTimeMillis() - installedAt
+            val staleMs = System.currentTimeMillis() - lastBackgroundSyncAt
+            // Background sync never ran (or is hours stale) on a hours-old install:
+            // MIUI's AutoStartManager is almost certainly rejecting the job.
+            ageMs > 3 * 3600_000L && (lastBackgroundSyncAt == 0L || staleMs > 3 * 3600_000L)
+        }
+    }
     // rememberSaveable (not plain remember): the grid leaves composition while the
     // detail viewer is open, and users expect to land back at the same scroll
     // position (Google-Photos behavior) — the nav back-stack entry's registry
@@ -225,12 +239,14 @@ fun TimelineScreen(
 
     // Ask for media access once on entry; API 34+ partial grant still returns
     // granted=true and MediaStore serves the user-selected subset (PRD §6.3).
+    // Scan gating uses the RUNTIME permission (foreground scans work even under
+    // MIUI's foreground-only app-op); hasFullMediaAccess is for the sheet's
+    // background-degradation row, not for gating the wall.
     LaunchedEffect(Unit) {
-        val permission = mediaPermission()
-        if (ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED) {
+        if (ContextCompat.checkSelfPermission(context, mediaPermission()) == PackageManager.PERMISSION_GRANTED) {
             viewModel.processIntent(TimelineIntent.ForceSync)
         } else {
-            permissionLauncher.launch(permission)
+            permissionLauncher.launch(mediaPermission())
         }
     }
 
@@ -422,11 +438,18 @@ fun TimelineScreen(
 
     if (showStatus) {
         ModalBottomSheet(onDismissRequest = { showStatus = false }) {
+            // Probed at sheet-open time (an AppOps binder read — too costly to run
+            // on every timeline recomposition).
+            val fullMediaAccess = hasFullMediaAccess(context)
             SyncStatusSheet(
                 status = syncStatus,
                 counts = syncCounts,
                 queue = queue,
                 accountConnected = authorized,
+                fullMediaAccess = fullMediaAccess,
+                autostartBlocked = autostartBlocked,
+                onFixMediaAccess = { openPermissionEditor(context) },
+                onFixAutostart = { (context as? Activity)?.let { openAutostartSettings(it) } },
                 onSyncNow = viewModel::backupNow,
                 onRebuild = { showStatus = false; viewModel.rebuildSyncState() },
                 onClearQueue = { showStatus = false; showClearConfirm = true },
@@ -861,6 +884,13 @@ private fun SyncStatusSheet(
     queue: List<SyncJob>,
     /** No account connected ⇒ "up to date" is unknowable; the sheet says so instead. */
     accountConnected: Boolean,
+    /** False = media access is foreground-restricted (MIUI 仅前台允许): background
+     *  scans return an EMPTY library, so reconcile/backup silently can't run. */
+    fullMediaAccess: Boolean,
+    /** MIUI autostart is (almost certainly) rejecting the periodic sync job. */
+    autostartBlocked: Boolean,
+    onFixMediaAccess: () -> Unit,
+    onFixAutostart: () -> Unit,
     onSyncNow: () -> Unit,
     onRebuild: () -> Unit,
     onClearQueue: () -> Unit,
@@ -878,6 +908,23 @@ private fun SyncStatusSheet(
             },
         )
         Spacer(Modifier.height(16.dp))
+
+        if (!fullMediaAccess) {
+            DegradedRow(
+                text = stringResource(R.string.media_access_degraded),
+                action = stringResource(R.string.media_access_fix),
+                onClick = onFixMediaAccess,
+            )
+            Spacer(Modifier.height(8.dp))
+        }
+        if (autostartBlocked) {
+            DegradedRow(
+                text = stringResource(R.string.autostart_blocked),
+                action = stringResource(R.string.autostart_fix),
+                onClick = onFixAutostart,
+            )
+            Spacer(Modifier.height(8.dp))
+        }
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             CountPill(counts.queued, stringResource(R.string.sync_count_queued))
@@ -936,6 +983,26 @@ private fun CountPill(value: Int, label: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text("$value", style = MaterialTheme.typography.headlineSmall)
         Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** A warning row in the sync sheet for a system-level degradation (restricted
+ *  media access / blocked autostart) with a one-tap jump to the remedy page. */
+@Composable
+private fun DegradedRow(text: String, action: String, onClick: () -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(8.dp)) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onClick) { Text(action) }
+        }
     }
 }
 

@@ -32,6 +32,10 @@ class PeriodicSyncWorker @AssistedInject constructor(
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
+        // Proof of life for background work: MIUI's AutoStartManager silently
+        // rejects this job — the UI infers "background sync is blocked" from a
+        // stale/zero timestamp (there is no API to query the autostart grant).
+        settings.setLastBackgroundSyncAt(System.currentTimeMillis())
         // Local scan needs no account; permission loss just yields nothing.
         runCatching { reconciler.reconcile() }
         if (!authManager.isAuthorized()) return Result.success()

@@ -120,6 +120,10 @@
     <string name="sync_status_idle">Up to date</string>
     <string name="sync_status_failed">Last sync failed — tap Sync now to retry</string>
     <string name="sync_status_not_connected">Not connected — photos stay on this device</string>
+    <string name="media_access_degraded">Photos can only be read while the app is open — background scan and backup are off</string>
+    <string name="media_access_fix">Allow</string>
+    <string name="autostart_blocked">Background sync is blocked by the system</string>
+    <string name="autostart_fix">Open settings</string>
     <string name="sync_count_queued">Waiting</string>
     <string name="sync_count_pending">Not backed up</string>
     <string name="sync_count_synced">Backed up</string>

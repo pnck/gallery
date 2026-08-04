@@ -220,6 +220,11 @@ class TimelineViewModel @Inject constructor(
     val syncCounts: StateFlow<SyncCounts> = repo.observeSyncCounts()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SyncCounts(0, 0, 0, 0, 0))
 
+    /** Wall-clock of the last successful background sync (0 = never) — the only
+     *  observable proof that the system lets background work run at all. */
+    val lastBackgroundSyncAt: StateFlow<Long> = settings.lastBackgroundSyncAt
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
+
     /** Google-Photos-style backup state: running progress, paused, waiting count, or idle.
      *  "Waiting" is the manually built queue ONLY (counts.queued) — freshly scanned
      *  rows are LOCAL_ONLY/UNKNOWN, never auto-waiting (sync is manual by default). */

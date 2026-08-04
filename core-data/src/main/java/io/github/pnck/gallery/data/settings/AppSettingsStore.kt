@@ -3,6 +3,7 @@ package io.github.pnck.gallery.data.settings
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -25,6 +26,7 @@ class AppSettingsStore(private val context: Context) {
     private val sizeBackfilledKey = booleanPreferencesKey("size_backfilled_v3")
     private val initialScanDoneKey = booleanPreferencesKey("initial_scan_done")
     private val logLevelKey = stringPreferencesKey("transport_log_level")
+    private val lastBackgroundSyncAtKey = longPreferencesKey("last_background_sync_at")
 
     /** Name of the app's cloud folder that uploads are pinned to. */
     val remoteFolderName: Flow<String> = context.appSettingsStore.data.map { prefs ->
@@ -84,6 +86,18 @@ class AppSettingsStore(private val context: Context) {
     /** Transport core (`gallery-wg`) verbosity: off/error/warn/info/debug/trace.
      *  Default warn — quiet by design (throughput is observed via diagnostics). */
     val transportLogLevel: Flow<String> = context.appSettingsStore.data.map { it[logLevelKey] ?: "warn" }
+
+    /**
+     * Wall-clock of the last PeriodicSyncWorker run (0 = never). The only signal
+     * that background sync CAN run at all: on MIUI the AutoStartManager silently
+     * rejects the job, so a stale/zero value while the app is days old means the
+     * system is blocking background work — there is no API to query that state.
+     */
+    val lastBackgroundSyncAt: Flow<Long> = context.appSettingsStore.data.map { it[lastBackgroundSyncAtKey] ?: 0L }
+
+    suspend fun setLastBackgroundSyncAt(nowMs: Long) {
+        context.appSettingsStore.edit { it[lastBackgroundSyncAtKey] = nowMs }
+    }
 
     suspend fun setTransportLogLevel(level: String) {
         context.appSettingsStore.edit { it[logLevelKey] = level }
