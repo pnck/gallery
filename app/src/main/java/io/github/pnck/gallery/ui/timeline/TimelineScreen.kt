@@ -99,6 +99,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.work.WorkInfo
+import io.github.pnck.gallery.work.AutostartProbeWorker
 import coil3.compose.AsyncImage
 import io.github.pnck.gallery.R
 import io.github.pnck.gallery.domain.MediaBucket
@@ -158,31 +159,22 @@ fun TimelineScreen(
     val buckets by viewModel.buckets.collectAsState()
     val authorized by viewModel.googleAuthorized.collectAsState()
     val scanSettled by viewModel.scanSettled.collectAsState()
-    val lastBackgroundSyncAt by viewModel.lastBackgroundSyncAt.collectAsState()
     val blindScanAt by viewModel.blindScanAt.collectAsState()
+    val probeScheduledAt by viewModel.autostartProbeScheduledAt.collectAsState()
+    val probeCompletedAt by viewModel.autostartProbeCompletedAt.collectAsState()
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
     val snackbarHost = remember { SnackbarHostState() }
     val systemDelete = rememberSystemDelete()
 
-    // Degradation probe for the autostart row (recomputed when the background-sync
-    // heartbeat moves — the fix row appears/disappears purely from state).
-    val autostartBlocked = remember(lastBackgroundSyncAt) {
-        if (!isMiui()) {
-            false
-        } else {
-            val installedAt = runCatching {
-                context.packageManager.getPackageInfo(context.packageName, 0).firstInstallTime
-            }.getOrDefault(Long.MAX_VALUE)
-            val ageMs = System.currentTimeMillis() - installedAt
-            val staleMs = System.currentTimeMillis() - lastBackgroundSyncAt
-            // Accuse the system only on STRONG evidence: overnight doze, job
-            // lateness and reinstalls all stretch the effective period far past
-            // 30 min, so a tight window false-alarms daily. A full day without a
-            // single background run on a day-old install means the job is dead.
-            val windowMs = 24 * 3600_000L
-            ageMs > windowMs && (lastBackgroundSyncAt == 0L || staleMs > windowMs)
-        }
+    // Autostart probe verdict (recomputed when either probe timestamp moves).
+    // An outstanding, overdue probe = the system demonstrably failed to deliver
+    // a constraint-free job in 3h — no clock-heuristic, an actual experiment.
+    val autostartBlocked = remember(probeScheduledAt, probeCompletedAt) {
+        isMiui() && probeScheduledAt > 0 &&
+            probeCompletedAt < probeScheduledAt &&
+            System.currentTimeMillis() >
+            probeScheduledAt + AutostartProbeWorker.PROBE_DELAY_MS + AutostartProbeWorker.GRACE_MS
     }
     // rememberSaveable (not plain remember): the grid leaves composition while the
     // detail viewer is open, and users expect to land back at the same scroll

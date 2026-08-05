@@ -26,8 +26,9 @@ class AppSettingsStore(private val context: Context) {
     private val sizeBackfilledKey = booleanPreferencesKey("size_backfilled_v3")
     private val initialScanDoneKey = booleanPreferencesKey("initial_scan_done")
     private val logLevelKey = stringPreferencesKey("transport_log_level")
-    private val lastBackgroundSyncAtKey = longPreferencesKey("last_background_sync_at")
     private val blindScanAtKey = longPreferencesKey("blind_scan_at")
+    private val probeScheduledAtKey = longPreferencesKey("autostart_probe_scheduled_at")
+    private val probeCompletedAtKey = longPreferencesKey("autostart_probe_completed_at")
 
     /** Name of the app's cloud folder that uploads are pinned to. */
     val remoteFolderName: Flow<String> = context.appSettingsStore.data.map { prefs ->
@@ -89,18 +90,6 @@ class AppSettingsStore(private val context: Context) {
     val transportLogLevel: Flow<String> = context.appSettingsStore.data.map { it[logLevelKey] ?: "warn" }
 
     /**
-     * Wall-clock of the last PeriodicSyncWorker run (0 = never). The only signal
-     * that background sync CAN run at all: on MIUI the AutoStartManager silently
-     * rejects the job, so a stale/zero value while the app is days old means the
-     * system is blocking background work — there is no API to query that state.
-     */
-    val lastBackgroundSyncAt: Flow<Long> = context.appSettingsStore.data.map { it[lastBackgroundSyncAtKey] ?: 0L }
-
-    suspend fun setLastBackgroundSyncAt(nowMs: Long) {
-        context.appSettingsStore.edit { it[lastBackgroundSyncAtKey] = nowMs }
-    }
-
-    /**
      * Wall-clock of the last BACKGROUND blind scan (0 = none observed): the
      * periodic worker found MediaStore empty while local-backed rows exist —
      * the definitive signature of foreground-restricted media access, which
@@ -115,6 +104,35 @@ class AppSettingsStore(private val context: Context) {
 
     suspend fun clearBlindScan() {
         context.appSettingsStore.edit { it.remove(blindScanAtKey) }
+    }
+
+    /**
+     * The autostart EXPERIMENT (see AutostartProbeWorker): when the current probe
+     * job was enqueued (0 = none) and when a probe last completed in the
+     * background (0 = never). Outstanding-and-overdue is the ONLY honest
+     * "background execution is blocked" signal — no API reports it.
+     */
+    val autostartProbeScheduledAt: Flow<Long> = context.appSettingsStore.data.map { it[probeScheduledAtKey] ?: 0L }
+    val autostartProbeCompletedAt: Flow<Long> = context.appSettingsStore.data.map { it[probeCompletedAtKey] ?: 0L }
+
+    /** Record a NEW probe's start — only when none is outstanding (the previous
+     *  one completed), so the timestamp always describes the live experiment.
+     *  @return true when a new experiment was recorded (caller should enqueue). */
+    suspend fun noteAutostartProbeScheduled(): Boolean {
+        var fresh = false
+        context.appSettingsStore.edit { prefs ->
+            val scheduled = prefs[probeScheduledAtKey] ?: 0L
+            val completed = prefs[probeCompletedAtKey] ?: 0L
+            if (scheduled <= completed) {
+                prefs[probeScheduledAtKey] = System.currentTimeMillis()
+                fresh = true
+            }
+        }
+        return fresh
+    }
+
+    suspend fun noteAutostartProbeCompleted() {
+        context.appSettingsStore.edit { it[probeCompletedAtKey] = System.currentTimeMillis() }
     }
 
     suspend fun setTransportLogLevel(level: String) {

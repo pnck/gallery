@@ -220,9 +220,11 @@ class TimelineViewModel @Inject constructor(
     val syncCounts: StateFlow<SyncCounts> = repo.observeSyncCounts()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SyncCounts(0, 0, 0, 0, 0))
 
-    /** Wall-clock of the last successful background sync (0 = never) — the only
-     *  observable proof that the system lets background work run at all. */
-    val lastBackgroundSyncAt: StateFlow<Long> = settings.lastBackgroundSyncAt
+    /** The autostart experiment's timestamps (0 = none): an outstanding probe
+     *  past its delivery window is the only honest "background blocked" signal. */
+    val autostartProbeScheduledAt: StateFlow<Long> = settings.autostartProbeScheduledAt
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
+    val autostartProbeCompletedAt: StateFlow<Long> = settings.autostartProbeCompletedAt
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
 
     /** Set when the periodic worker found MediaStore empty while local rows
