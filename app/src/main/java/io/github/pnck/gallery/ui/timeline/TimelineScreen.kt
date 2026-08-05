@@ -176,10 +176,11 @@ fun TimelineScreen(
             }.getOrDefault(Long.MAX_VALUE)
             val ageMs = System.currentTimeMillis() - installedAt
             val staleMs = System.currentTimeMillis() - lastBackgroundSyncAt
-            // Background sync never ran (or is stale beyond ~2 periods) on an
-            // older install: MIUI's AutoStartManager is almost certainly
-            // rejecting the job. Clears as soon as a run lands.
-            val windowMs = 70 * 60_000L
+            // Accuse the system only on STRONG evidence: overnight doze, job
+            // lateness and reinstalls all stretch the effective period far past
+            // 30 min, so a tight window false-alarms daily. A full day without a
+            // single background run on a day-old install means the job is dead.
+            val windowMs = 24 * 3600_000L
             ageMs > windowMs && (lastBackgroundSyncAt == 0L || staleMs > windowMs)
         }
     }
