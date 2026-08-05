@@ -821,7 +821,7 @@ private fun SelectionAppBar(
         title = { },
         actions = {
             // Primary batch actions (backup-first): Back up · Free up space · Delete.
-            // Save-to-device is secondary → overflow (docs/GALLERY-UX-INTERACTION.md §3).
+            // Save-to-device is secondary → overflow (docs/GALLERY-UX-INTERACTION.md §4).
             IconButton(onClick = onSelectAll) {
                 Icon(Icons.Default.SelectAll, contentDescription = stringResource(R.string.action_select_all))
             }

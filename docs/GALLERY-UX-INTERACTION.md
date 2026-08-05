@@ -1,102 +1,182 @@
-# Gallery UX & Interaction Model
+# Gallery UX & Interaction Design
 
-Reference for how the app's screens, app bars, menus and modes should be organized.
-Derived from the interaction conventions shared by well-regarded open-source galleries
-— **Aves** (deckerst/aves), **Fossify Gallery** (ex Simple Gallery), and the de-facto
-standard **Google Photos** — adapted to our backup-first product (see the priority
-`backup > sync > album`).
+The complete interaction language of the app — principles, per-surface specs, and a
+migration plan. Derived from the conventions of **Google Photos**, **Aves**, and
+**Fossify Gallery**, adapted to our backup-first priority (`backup > sync > album`).
 
-The goal of this doc: stop cramming every action into the top bar as loose icons, stop
-using the title as a menu, and give each screen a predictable structure.
+Supersedes the 2026-07 draft of the same file. Code comments citing this doc refer to
+section numbers of THIS revision.
 
 ---
 
-## 1. The three modes (every gallery has these)
+## 1. Design principles (non-negotiable)
+
+**P1 — Icons must be self-evident.**
+An icon-only action is allowed only when its metaphor is universal: select ☑, close ✕,
+delete 🗑, share ↗, cloud-upload ⬆☁, play/pause, back ←, overflow ⋮, drawer ≡.
+Anything app-specific (transport/tunnel, sync states, storage management) gets **text**
+(a menu item or a labelled row), never a bare icon. The photo corner badges stay icons
+— they *are* the established pattern — but the tunnel config entry must not be one.
+
+**P2 — At most 3 actions in any toolbar.**
+`[primary] [primary?] [⋮ overflow]`; overflow is a single flat text menu (§5).
+If a fourth candidate appears, the weakest one moves to overflow.
+
+**P3 — Menus are flat, ordered, grouped.**
+One level only (no submenus ever), most-used first, separator between semantic groups,
+destructive last. Max ~7 items before a group split is required.
+
+**P4 — Containers must behave like physical objects.**
+A drawer/sheet that slides in must (a) track the finger while dragging, (b) expose a
+visible drag handle, (c) have an unambiguous scroll owner at every moment, and (d)
+never let touches fall through to the content behind it ("操作穿透").
+System gestures win at screen edges: nothing scrollable or dismissible may sit where
+the system back-swipe (left/right edges) or home-swipe (bottom edge) lives, unless the
+container consumes the gesture intentionally (a drag handle is intentional).
+
+**P5 — Content is never shown half-cut.**
+If a surface's content doesn't fit its initial frame, the surface is the wrong shape.
+Scrollable or structured content (lists, status dashboards, pickers) is a **full
+screen**; a sheet is for short, single-purpose content only (§6).
+
+---
+
+## 2. The three modes
 
 | Mode | What it is | App bar |
 |------|-----------|---------|
-| **Browse** | The grid of photos (our timeline). | Normal top app bar. |
-| **Selection** | Entered by long-press or a Select action; multi-select for batch actions. | Contextual app bar (count + batch actions), replaces the normal bar. |
-| **Viewer** | Full-screen single photo (our detail). | Immersive; chrome toggles on tap. |
+| **Browse** | The photo grid. | Normal top bar, ≤3 actions (P2). |
+| **Selection** | Multi-select for batch actions. | Contextual bar replaces the normal bar. |
+| **Viewer** | Full-screen single photo. | Immersive; chrome toggles on tap. |
 
-These map to what we already have. The problem is the **Browse** app bar is overloaded.
-
-## 2. Top app bar rules (the core fix)
-
-The reference apps follow a strict hierarchy — **at most 2–3 primary icons, everything
-else under a single overflow "⋮" menu**:
+## 3. Browse app bar (timeline)
 
 ```
-[≡ nav]   Title            [primary action] [primary action] [⋮ overflow]
+[≡]   Photos  ⟳?            [☑ Select] [⋮]
+                                          ├ Sort & filter
+                                          ├ Back up now
+                                          ├─────────────
+                                          ├ Sync status
+                                          ├ Storage
+                                          └ Settings
 ```
 
-- **Navigation icon** (left): opens the side drawer (our My Photos / My Drive / …).
-- **Title**: a plain label ("Photos"). **Never a clickable menu.** Transient status
-  (scanning / uploading N) is shown as a small inline progress indicator or a subtitle,
-  NOT by hijacking the title.
-- **Primary actions** (max ~2): the most frequent, e.g. *Select*, and *Search* if present.
-- **Overflow "⋮"**: everything else as a text menu — sort/filter, sync now, sync status,
-  storage, settings. Text labels are self-describing (no guessing what an icon means).
+- **Title** — plain text, never clickable. Transient work shows as a small inline
+  spinner (`⟳`) next to it, nothing else.
+- **Select** — the single primary icon (universal metaphor, P1).
+- **Overflow** — flat, grouped (P3): view actions / sync actions / app actions.
+- The sync-status *detail* opens from the menu item, never from the title.
 
-Google Photos: bottom nav (Photos/Search/Library) + a small avatar; per-screen actions
-minimal. Aves/Fossify: a search bar up top, a sort/group control, and a "⋮" for the rest.
-Selection replaces the whole bar with a contextual one.
-
-## 3. Selection (contextual) app bar
-
-Entered by long-press on an item OR a *Select* action. Replaces the normal bar:
+## 4. Selection bar
 
 ```
-[✕ close]   "N selected"          [action] [action] [⋮ more]
+[✕]   N selected          [⬆☁] [🗑] [⋮]
+                                      ├ Free up space
+                                      ├ Save to device
+                                      └ Select all
 ```
 
-- Left: close (exit selection). Title: the count.
-- Show only the **most common batch actions** as icons (ours: Back up, Free up space,
-  Delete); push the rest (Save to device, Share, Select-all) into the "⋮".
-- Long-press = enter selection AND select that item; subsequent taps toggle.
+- Exactly 2 primary icons (P2): **Back up** (backup-first product) and **Delete**.
+- Free-up-space, Save-to-device, Select-all → overflow (text, self-describing).
+- Entry: long-press an item (also selects it) or ☑; exit: ✕ or system back.
 
-## 4. Sort / filter / group
+## 5. Overflow menu anatomy
 
-A single entry ("View options" / a sort chip) that opens a sheet — not scattered icons.
-Ours already does this (the Tune sheet: sort, sync-state filter, folders). Keep it, but
-reach it from the overflow menu, not a dedicated top-bar icon.
+Single column, three groups max, separators between groups. Text labels; an optional
+leading icon only when it *reinforces* the text (never carries meaning alone, P1).
 
-## 5. Viewer
+## 6. Sheet vs full screen (the bottom-sheet policy)
 
-Immersive, tap toggles chrome. Actions live in the top bar of the viewer + an info panel
-(EXIF/details) as a bottom sheet. Ours matches this; leave as-is.
+**Default answer for "should this be a sheet?" is NO.** Sheets are the exception.
 
-## 6. Side drawer / sections
+| Use a **sheet** only when ALL true | Use a **full screen** when ANY true |
+|---|---|
+| Content fits without scrolling | Content scrolls (lists, dashboards) |
+| One short decision/reading (info, confirm) | Structured sections / many actions |
+| Loses nothing if dismissed | User may want to stay / return |
 
-Top-level destinations only (our My Photos / My Drive / reserved). Not per-screen actions.
-Settings can live either in the drawer or the Browse overflow — we keep it in overflow +
-reachable from the account panel.
+Rules for the sheets that remain:
+1. `skipPartiallyExpanded = true` when content can exceed half the screen — a sheet
+   either shows its content whole or it doesn't exist (P5).
+2. Always a visible **drag handle**; dismiss = handle fling, scrim tap, or back.
+3. **One scroll owner.** When fully expanded, the inner list owns vertical drags;
+   the sheet itself moves only from the handle. (This is the folders-picker fix, §8.3.)
+4. Never stack a sheet over a sheet; a second level is a full screen.
+5. Bottom-sheet content must clear the system gesture bar (padding), and no
+   dismissible surface may rely on bottom-edge swipes alone (P4).
 
----
+Consequences for current surfaces:
 
-## 7. Our features mapped onto this model
+| Surface | Verdict |
+|---|---|
+| Sort & filter | Sheet OK (short, non-scrolling) — add `skipPartiallyExpanded`. |
+| Photo info | Sheet OK (fits; add drag handle + full expand). |
+| Sync status | **Full screen** ("Sync" destination) — dashboard + queue + fix rows will grow. |
+| Folders picker | **Full screen inside Settings** (§8.3) — scrollable multi-select list. |
+| Delete/clear confirms | Stay `AlertDialog` (not a sheet at all — dialogs are for decisions). |
 
-Current Browse (timeline) top bar is: `[≡] [title=sync-status, tap→sheet] [Tune][Select][Sync][Settings]`
-— four loose icons + title-as-menu. Reorganized:
+## 7. Drawer
 
-```
-[≡ drawer]   Photos   ⟳(when syncing)        [☑ Select]   [⋮]
-                                                            ├ Sort & filter
-                                                            ├ Back up now
-                                                            ├ Sync status
-                                                            ├ Storage
-                                                            └ Settings
-```
+The custom edge-drag drawer (finger-tracked, leading-edge-only, MD-width) is the
+reference implementation of P4 — keep it. Destinations only: **Photos**, **My Drive**.
+Settings is reachable from both the drawer (bottom, with ⚙ + label) and the timeline
+overflow; do not add per-screen actions to the drawer.
 
-- **Title** → plain "Photos". Sync status moves to: (a) a small progress spinner in the
-  bar while scanning/uploading, and (b) a "Sync status" overflow item that opens the
-  existing status sheet.
-- **Select** stays as the one primary icon (most common entry to batch ops; long-press
-  also works).
-- **Tune / Sync / Settings** icons → overflow text items ("Sort & filter", "Back up now",
-  "Settings"), plus "Sync status" and "Storage".
+## 8. Per-surface specs
 
-Selection bar keeps Back up / Free up space / Delete as icons; Save-to-device → overflow.
+### 8.1 Timeline (browse)
+As §3. The backup banner (Google-Photos-style progress) stays pinned above the grid —
+it is a *status*, not an action; its only buttons are Pause/Resume/Back-up-now (text
+buttons, P1-compliant).
 
-This is the target. Implementation lands incrementally; the Browse top-bar overflow is
-step 1.
+### 8.2 Sync status → "Sync" screen
+Today: half sheet with pills + queue + up to 3 buttons + 2 warning rows — exactly the
+"半幅卡片显示不完整" anti-pattern. Becomes a full-screen destination:
+header status line → degradation fix rows (media access / autostart) → counts →
+queue → actions (Sync now / Rebuild / Clear queue). Scrollable, back returns.
+
+### 8.3 Folders to include → Settings → "Library folders"
+**Moves out of view options.** It governs library *scope* (what the gallery shows AND
+what backs up) — a data-policy setting, not a view tweak.
+
+- Entry: Settings → "Library folders" (row with current scope summary: "All folders"
+  or "N of M folders").
+- Screen: header explains the effect in one sentence ("Photos in selected folders
+  appear in your gallery and are included in backup"), then the checkbox list with
+  folder **path + count** (already collected). No nested sheet, no nested scroll —
+  the screen scrolls as one list (fixes the scroll-owner fight).
+- An "IM folders" hint: folders are listed with their source app visible (QQ/WeChat
+  buckets are identifiable by path), letting the user trim IM noise deliberately.
+  Default stays *all folders* — silently excluding user media is worse — but a
+  restricted scope shows a small "filtered" chip on the timeline so scope is never
+  a hidden state.
+- Persistence: the allowlist survives updates; any version that resets it is a bug
+  (it lives in DataStore, outside the destructively-migrated DB — verify on upgrade).
+
+### 8.4 Settings home
+Plain rows with title + one-line subtitle (no icon-only rows): Account, Library
+folders, Backup folder name, Storage, Transport, My Drive access, About.
+Transport is a *row with a subtitle* ("Tunnel: connected via …"), never a bare icon.
+
+### 8.5 Viewer (detail)
+Immersive; chrome toggles on tap (already correct). Top bar: back, share, delete, ⋮
+(info, save-to-device, free-up). Info stays a sheet (fits §6 rules: add drag handle,
+skipPartiallyExpanded). EXIF/path rows already included (Folder, MediaStore id).
+
+### 8.6 My Drive
+Browser-style: breadcrumb top bar (back = up), file rows, ⋮ per row (details/rename?…
+only what exists). Details panel → full-screen row set (it scrolls).
+
+### 8.7 Sign-in / permissions
+Platform dialogs only: the system permission prompt, MIUI editor deep-links from the
+sync screen's fix rows. No explainer dialogs.
+
+## 9. Migration plan
+
+| Phase | Changes |
+|---|---|
+| **P0 (interaction debt, no new features)** | Folders picker → Settings full screen + scope chip on timeline; all remaining sheets get handle + `skipPartiallyExpanded` where content can overflow; selection bar down to 2 icons + overflow. |
+| **P1** | Sync status sheet → "Sync" full-screen destination; My Drive details → full screen; settings rows re-labelled per §8.4. |
+| **P2** | Viewer ⋮ grouping polish; drawer Settings row; IM-folder hint text in the folders screen. |
+
+Each phase is independently shippable; no phase changes behavior beyond layout.
