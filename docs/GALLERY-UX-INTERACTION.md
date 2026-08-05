@@ -1,182 +1,213 @@
-# Gallery UX & Interaction Design
+# Gallery Design Language
 
-The complete interaction language of the app — principles, per-surface specs, and a
-migration plan. Derived from the conventions of **Google Photos**, **Aves**, and
-**Fossify Gallery**, adapted to our backup-first priority (`backup > sync > album`).
-
-Supersedes the 2026-07 draft of the same file. Code comments citing this doc refer to
-section numbers of THIS revision.
+The product's complete UX design — vision, foundations, motion, gesture
+choreography, components, and per-surface specs. Opinionated by design; bounded by
+the owner's guardrails (Appendix A). References: Google Photos, Aves, Fossify
+Gallery, Material 3 (Expressive), adapted to a backup-first product.
 
 ---
 
-## 1. Design principles (non-negotiable)
+## 0. Product character
 
-**P1 — Icons must be self-evident.**
-An icon-only action is allowed only when its metaphor is universal: select ☑, close ✕,
-delete 🗑, share ↗, cloud-upload ⬆☁, play/pause, back ←, overflow ⋮, drawer ≡.
-Anything app-specific (transport/tunnel, sync states, storage management) gets **text**
-(a menu item or a labelled row), never a bare icon. The photo corner badges stay icons
-— they *are* the established pattern — but the tunnel config entry must not be one.
+**The wall is the product; backup is quiet infrastructure.**
 
-**P2 — At most 3 actions in any toolbar.**
-`[primary] [primary?] [⋮ overflow]`; overflow is a single flat text menu (§5).
-If a fourth candidate appears, the weakest one moves to overflow.
+Three feelings every screen must preserve:
 
-**P3 — Menus are flat, ordered, grouped.**
-One level only (no submenus ever), most-used first, separator between semantic groups,
-destructive last. Max ~7 items before a group split is required.
+1. **Immediate** — the wall renders from local data instantly, always. Nothing the
+   user sees first ever waits for network, account, or scheduler.
+2. **Honest** — every status is derived, never asserted. A badge, a count, a banner
+   says only what the data proves. When the app can't know (no account), it says so.
+3. **Calm** — backup happens in the background like plumbing. One banner maximum,
+   no dialogs for states, no badges shouting for attention. The loudest element on
+   any screen is the user's own photos.
 
-**P4 — Containers must behave like physical objects.**
-A drawer/sheet that slides in must (a) track the finger while dragging, (b) expose a
-visible drag handle, (c) have an unambiguous scroll owner at every moment, and (d)
-never let touches fall through to the content behind it ("操作穿透").
-System gestures win at screen edges: nothing scrollable or dismissible may sit where
-the system back-swipe (left/right edges) or home-swipe (bottom edge) lives, unless the
-container consumes the gesture intentionally (a drag handle is intentional).
+Vocabulary follows: photos are *backed up* (not "synced"), the queue is *waiting*,
+scope is *library folders*.
 
-**P5 — Content is never shown half-cut.**
-If a surface's content doesn't fit its initial frame, the surface is the wrong shape.
-Scrollable or structured content (lists, status dashboards, pickers) is a **full
-screen**; a sheet is for short, single-purpose content only (§6).
+## 1. Foundations
+
+### 1.1 Grid & density
+The timeline is an edge-to-edge square-crop grid. Three density steps on pinch
+(72 / 100 / 148 dp cells) with a 150 ms size interpolation; the anchor photo under
+the pinch centroid stays put. No headers inside the grid flow except year-month
+section labels (Google-Photos style), keyed and stable.
+
+### 1.2 Color & the badge language
+Sync state is communicated by **shape, not color** (monochrome white glyphs on a
+40%-black scrim circle, 15 dp, top-end corner of the cell). Color is reserved for
+*system* meaning: primary = action, error = failure/degradation, surface = content.
+Rationale: seven badges × five theme colors is noise; shapes read at 72 dp.
+
+Badge set (derived, never persisted): hourglass = checking, upload-arrow = not
+backed up, cloud-queue = waiting, cloud-sync = uploading, cloud-done = backed up,
+cloud = cloud-only, cloud-off = excluded.
+
+### 1.3 Typography & spacing
+M3 scale, used sparsely: titleLarge for screen titles, bodyLarge for status lines,
+bodyMedium for rows, labelMedium for captions/pills. 4 dp spacing rhythm; 16 dp
+screen margins, 24 dp for sheet/screen headers. One emphasis level per screen.
+
+### 1.4 Surfaces
+One elevation story: content sits on `surface`; temporary containers (banner, fix
+rows) use `primaryContainer` / `errorContainer` as *flush* blocks, no shadows.
+Sheets use `surfaceContainerLow`. Scrim at 32% black behind anything modal.
+
+## 2. Motion
+
+- **Springs, not curves**, for anything finger-connected (drawer, sheet, cell
+  long-press lift): critically damped, no overshoot on UI chrome; slight overshoot
+  (≈0.2) only on playful scale changes (selection check).
+- **Shared-axis Z** for destination changes (timeline ⇄ sync screen ⇄ settings):
+  fade + 8 dp scale, 250 ms. **Shared-axis X** for pager/viewer swipes (content-led).
+- **Predictive back** honored everywhere: back gesture previews the previous
+  destination; inside a sheet, back collapses first, exits second.
+- **State changes animate**: badge swaps crossfade 150 ms; count pills count-up on
+  change; the backup banner slides in/out, never pops.
+- Nothing loops. A spinner appears only while a *first* result is pending; progress
+  is determinate whenever a total exists.
+
+## 3. Gesture & scroll choreography
+
+This section is the contract for anything that slides — the place where "里面和
+外面谁滚动" is decided once, globally.
+
+### 3.1 The one-owner rule
+At every instant, exactly one layer owns the vertical drag axis. Ownership is
+decided by **anchor state + scroll position + drag origin**, never by heuristics:
+
+| Sheet anchor | Drag starts on | Owner |
+|---|---|---|
+| expanding (not full) | anywhere in sheet | the sheet |
+| fully expanded | drag handle (top 32 dp) | the sheet |
+| fully expanded | content, list **can** scroll up | the inner list |
+| fully expanded | content, list at top (`canScrollBackward=false`) | the sheet (collapse hand-off) |
+
+The hand-off is physical: when the list hits top and the finger keeps pulling, the
+sheet takes the finger mid-gesture (nested-scroll connection — the list's
+`canScrollBackward=false` releases the delta to the parent). No jump, no dead zone.
+
+### 3.2 Sheets have binary intent
+A sheet is either **dismissed or fully expanded**; half-expanded exists only while
+the finger is on it (see Appendix A — content is never half-cut, so a resting
+half-state is reserved for content that *fits* half a screen).
+Release behavior: positional threshold 40% of the travel decides expand-vs-dismiss;
+a fling (≥ 700 dp/s downward anywhere on the sheet, ≥ 400 dp/s on the handle)
+dismisses regardless of position. The sheet tracks the finger 1:1 — velocity
+inherits on release.
+
+### 3.3 No touch-through, ever
+Modal containers block the world behind them: scrim consumes all pointers (tap =
+dismiss), content behind is non-focusable and non-scrollable. The system back
+gesture is consumed by the topmost container only. Bottom-edge content padding ≥
+gesture inset + 16 dp so the home-swipe never races a control.
+
+### 3.4 Drawer
+The reference implementation (already shipped): finger-tracked edge drag from the
+leading 20 dp only, MD-width sheet, velocity-or-half release, hamburger guarded
+until the destination settles. Same physics as sheets (§3.2).
+
+## 4. Components
+
+### 4.1 Backup banner (the one allowed interruption)
+Pinned above the grid, flush `primaryContainer`, three states:
+- **Running**: thumbnail of the current file, "Backing up 12 / 1853", determinate
+  bar, pause icon.
+- **Waiting**: "N waiting to back up" + [Back up now] text button (the queue is
+  manual by design — this banner never appears from a scan alone).
+- **Paused**: "Backup paused · N waiting" + [Resume].
+Hidden otherwise. Never stacks with a second banner; degradations live on the
+sync screen, not here.
+
+### 4.2 Fix row
+The degradation component (media access / autostart): `errorContainer`, small
+body, single action button. Appears only from evidence (blind scan, failed
+probe), disappears the moment the evidence clears. Lives on the Sync screen —
+and once per app version may also surface as the banner when backup is provably
+broken (never both at once).
+
+### 4.3 Count pills
+Four quiet numbers (Waiting / Not backed up / Backed up / Cloud only),
+headlineSmall + labelMedium. Read-only; the screen's actions sit below them.
+
+### 4.4 Folder row
+Checkbox, folder **path** (`DCIM/Camera/`), photo count, and the source hint
+(tencent paths say QQ/WeChat in the path itself). 56 dp touch target, the whole
+row toggles — never a tiny checkbox hitbox.
+
+### 4.5 Fast scroller
+Right-edge scrubber: year-month bubble follows the thumb, haptic tick per year
+boundary (API <34; SegmentTick after), invisible until the grid flings.
+
+## 5. Surfaces
+
+### 5.1 Timeline (Browse)
+`[≡] Photos ⟳? [☑] [⋮]` — the title is inert; the overflow carries Sort & filter /
+Back up now / — / Sync / Storage / Settings (grouped, Appendix A.3).
+Empty library: one centered line + illustration, never a fake photo state; first
+scan in flight: a spinner instead (honest about "checking").
+Grid photos carry §1.2 badges; "checking" collapses to "not backed up" when no
+account is connected (classification can't happen — say the true thing).
+
+### 5.2 Selection
+The contextual bar replaces the top bar with a slight lift:
+`[✕] N selected [⬆☁] [🗑] [⋮]`.
+Cells dim + check (scale-spring on the check). Long-press enters and selects; tap
+toggles; the count sits in a centered pill under the bar (the bar holds actions,
+not text). Exit on ✕, back, or empty selection.
+
+### 5.3 Sync screen (full screen, ex-sheet)
+A `Sync` destination. Top: the honest status line (Idle/Scanning/Uploading/
+Failed/Not-connected, colored by severity). Fix rows next (media, autostart).
+Counts (§4.3). Queue (each chain: name + state). Actions at the bottom as
+full-width tonal buttons: Sync now · Rebuild · Clear queue (only when N>0).
+This is the app's instrument panel — density is fine here; it scrolls.
+
+### 5.4 Library folders (Settings child)
+One scrolling screen: a one-line purpose header ("Shown in your gallery and
+included in backup"), an "All folders" master row, then §4.4 rows. Applying a
+restricted scope shows a **"Filtered" chip on the timeline** (top-end, taps
+through to the screen) — scope is never hidden state.
+
+### 5.5 Settings
+A single column of labelled rows + one-line subtitles, grouped: Account · Library
+folders · Backup folder · Storage · Transport · My Drive access · About.
+No icon-only rows; the tunnel is a row with a state subtitle.
+
+### 5.6 Viewer
+Immersive; chrome fades on tap. Top: back, share, delete, ⋮ (info, save to
+device, free up space). Info is the one remaining sheet (short by nature):
+full-expand, drag handle, §3.1 scroll rules. Zoom: double-tap 2.5× anchored on
+the tap point, pinch beyond; pan settles with spring.
+
+### 5.7 Sign-in
+The device flow as a full-screen moment: the code in displayLarge, one action
+(open browser), live status. No WebView, no dialogs.
+
+## 6. States
+
+| State | Presentation |
+|---|---|
+| First scan | Spinner, never a fake "no photos" |
+| Empty library | One line + illustration |
+| No account | "Not connected — photos stay on this device" (grey, not error) |
+| Offline | Wall unchanged; banner hides; sync actions report on tap, not before |
+| Failed chain | Red status line on the Sync screen + banner offers Retry |
+| Degraded permission | Fix row (§4.2) — evidence-driven only |
+
+## 7. Migration
+
+P0: folders → Settings screen + timeline chip; sheet policy (handle, full-expand,
+one-owner) applied to every remaining sheet; selection bar to 2 icons + overflow.
+P1: Sync screen replaces the status sheet; My Drive details full-screen.
+P2: motion pass (badge crossfade, count-up, predictive back), info-sheet polish.
 
 ---
 
-## 2. The three modes
+## Appendix A · Owner guardrails (binding)
 
-| Mode | What it is | App bar |
-|------|-----------|---------|
-| **Browse** | The photo grid. | Normal top bar, ≤3 actions (P2). |
-| **Selection** | Multi-select for batch actions. | Contextual bar replaces the normal bar. |
-| **Viewer** | Full-screen single photo. | Immersive; chrome toggles on tap. |
-
-## 3. Browse app bar (timeline)
-
-```
-[≡]   Photos  ⟳?            [☑ Select] [⋮]
-                                          ├ Sort & filter
-                                          ├ Back up now
-                                          ├─────────────
-                                          ├ Sync status
-                                          ├ Storage
-                                          └ Settings
-```
-
-- **Title** — plain text, never clickable. Transient work shows as a small inline
-  spinner (`⟳`) next to it, nothing else.
-- **Select** — the single primary icon (universal metaphor, P1).
-- **Overflow** — flat, grouped (P3): view actions / sync actions / app actions.
-- The sync-status *detail* opens from the menu item, never from the title.
-
-## 4. Selection bar
-
-```
-[✕]   N selected          [⬆☁] [🗑] [⋮]
-                                      ├ Free up space
-                                      ├ Save to device
-                                      └ Select all
-```
-
-- Exactly 2 primary icons (P2): **Back up** (backup-first product) and **Delete**.
-- Free-up-space, Save-to-device, Select-all → overflow (text, self-describing).
-- Entry: long-press an item (also selects it) or ☑; exit: ✕ or system back.
-
-## 5. Overflow menu anatomy
-
-Single column, three groups max, separators between groups. Text labels; an optional
-leading icon only when it *reinforces* the text (never carries meaning alone, P1).
-
-## 6. Sheet vs full screen (the bottom-sheet policy)
-
-**Default answer for "should this be a sheet?" is NO.** Sheets are the exception.
-
-| Use a **sheet** only when ALL true | Use a **full screen** when ANY true |
-|---|---|
-| Content fits without scrolling | Content scrolls (lists, dashboards) |
-| One short decision/reading (info, confirm) | Structured sections / many actions |
-| Loses nothing if dismissed | User may want to stay / return |
-
-Rules for the sheets that remain:
-1. `skipPartiallyExpanded = true` when content can exceed half the screen — a sheet
-   either shows its content whole or it doesn't exist (P5).
-2. Always a visible **drag handle**; dismiss = handle fling, scrim tap, or back.
-3. **One scroll owner.** When fully expanded, the inner list owns vertical drags;
-   the sheet itself moves only from the handle. (This is the folders-picker fix, §8.3.)
-4. Never stack a sheet over a sheet; a second level is a full screen.
-5. Bottom-sheet content must clear the system gesture bar (padding), and no
-   dismissible surface may rely on bottom-edge swipes alone (P4).
-
-Consequences for current surfaces:
-
-| Surface | Verdict |
-|---|---|
-| Sort & filter | Sheet OK (short, non-scrolling) — add `skipPartiallyExpanded`. |
-| Photo info | Sheet OK (fits; add drag handle + full expand). |
-| Sync status | **Full screen** ("Sync" destination) — dashboard + queue + fix rows will grow. |
-| Folders picker | **Full screen inside Settings** (§8.3) — scrollable multi-select list. |
-| Delete/clear confirms | Stay `AlertDialog` (not a sheet at all — dialogs are for decisions). |
-
-## 7. Drawer
-
-The custom edge-drag drawer (finger-tracked, leading-edge-only, MD-width) is the
-reference implementation of P4 — keep it. Destinations only: **Photos**, **My Drive**.
-Settings is reachable from both the drawer (bottom, with ⚙ + label) and the timeline
-overflow; do not add per-screen actions to the drawer.
-
-## 8. Per-surface specs
-
-### 8.1 Timeline (browse)
-As §3. The backup banner (Google-Photos-style progress) stays pinned above the grid —
-it is a *status*, not an action; its only buttons are Pause/Resume/Back-up-now (text
-buttons, P1-compliant).
-
-### 8.2 Sync status → "Sync" screen
-Today: half sheet with pills + queue + up to 3 buttons + 2 warning rows — exactly the
-"半幅卡片显示不完整" anti-pattern. Becomes a full-screen destination:
-header status line → degradation fix rows (media access / autostart) → counts →
-queue → actions (Sync now / Rebuild / Clear queue). Scrollable, back returns.
-
-### 8.3 Folders to include → Settings → "Library folders"
-**Moves out of view options.** It governs library *scope* (what the gallery shows AND
-what backs up) — a data-policy setting, not a view tweak.
-
-- Entry: Settings → "Library folders" (row with current scope summary: "All folders"
-  or "N of M folders").
-- Screen: header explains the effect in one sentence ("Photos in selected folders
-  appear in your gallery and are included in backup"), then the checkbox list with
-  folder **path + count** (already collected). No nested sheet, no nested scroll —
-  the screen scrolls as one list (fixes the scroll-owner fight).
-- An "IM folders" hint: folders are listed with their source app visible (QQ/WeChat
-  buckets are identifiable by path), letting the user trim IM noise deliberately.
-  Default stays *all folders* — silently excluding user media is worse — but a
-  restricted scope shows a small "filtered" chip on the timeline so scope is never
-  a hidden state.
-- Persistence: the allowlist survives updates; any version that resets it is a bug
-  (it lives in DataStore, outside the destructively-migrated DB — verify on upgrade).
-
-### 8.4 Settings home
-Plain rows with title + one-line subtitle (no icon-only rows): Account, Library
-folders, Backup folder name, Storage, Transport, My Drive access, About.
-Transport is a *row with a subtitle* ("Tunnel: connected via …"), never a bare icon.
-
-### 8.5 Viewer (detail)
-Immersive; chrome toggles on tap (already correct). Top bar: back, share, delete, ⋮
-(info, save-to-device, free-up). Info stays a sheet (fits §6 rules: add drag handle,
-skipPartiallyExpanded). EXIF/path rows already included (Folder, MediaStore id).
-
-### 8.6 My Drive
-Browser-style: breadcrumb top bar (back = up), file rows, ⋮ per row (details/rename?…
-only what exists). Details panel → full-screen row set (it scrolls).
-
-### 8.7 Sign-in / permissions
-Platform dialogs only: the system permission prompt, MIUI editor deep-links from the
-sync screen's fix rows. No explainer dialogs.
-
-## 9. Migration plan
-
-| Phase | Changes |
-|---|---|
-| **P0 (interaction debt, no new features)** | Folders picker → Settings full screen + scope chip on timeline; all remaining sheets get handle + `skipPartiallyExpanded` where content can overflow; selection bar down to 2 icons + overflow. |
-| **P1** | Sync status sheet → "Sync" full-screen destination; My Drive details → full screen; settings rows re-labelled per §8.4. |
-| **P2** | Viewer ⋮ grouping polish; drawer Settings row; IM-folder hint text in the folders screen. |
-
-Each phase is independently shippable; no phase changes behavior beyond layout.
+1. Icons only for universal metaphors; app-specific concepts get text.
+2. ≤ 3 actions per toolbar; overflow is one flat menu.
+3. Menus: flat, ordered, grouped, destructive last.
+4. Containers behave like physical objects: finger-tracked, visible handle, one
+   scroll owner, zero touch-through; system gestures win at edges.
+5. Content is never shown half-cut.
