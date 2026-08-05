@@ -191,12 +191,18 @@ class PhotoRepositoryImpl(
             is ApiResult.Error -> return@withContext null
         }
 
+        // Restore to the ORIGINAL folder and name: the row carries the uploader's
+        // source path (appProperties at upload, re-ingested on downstream sync),
+        // and the cloud object keeps the original display name.
+        val cloudMeta = (provider.getFileMetadata(cloudId) as? ApiResult.Success)?.data
+        val displayName = cloudMeta?.name ?: "gallery-$cloudId.jpg"
+        val targetFolder = row.relativePath ?: cloudMeta?.sourcePath ?: Environment.DIRECTORY_PICTURES
+
         val values = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, "gallery-$cloudId.jpg")
+            put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
             put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                // Android's default Pictures folder (scoped storage, not DCIM — invariant #9).
-                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES)
+                put(MediaStore.Images.Media.RELATIVE_PATH, targetFolder)
                 put(MediaStore.Images.Media.IS_PENDING, 1)
             }
         }

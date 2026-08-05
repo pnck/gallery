@@ -142,6 +142,7 @@ class ReconcileProcessor(
                 sizeBytes = item.sizeBytes,
                 bucketId = item.bucketId,
                 bucketName = item.bucketName,
+                relativePath = item.relativePath,
             )
         }
 
@@ -153,6 +154,7 @@ class ReconcileProcessor(
                 width = it.width,
                 height = it.height,
                 thumbnailUrl = it.thumbnailUrl,
+                sourcePath = it.sourcePath,
             )
         }
 
@@ -240,6 +242,7 @@ data class LocalTruth(
     val sizeBytes: Long,
     val bucketId: String?,
     val bucketName: String?,
+    val relativePath: String? = null,
 )
 
 /** Cloud ground-truth item for [planReconcile] (a backup-folder file + its MD5). */
@@ -250,6 +253,8 @@ data class CloudTruth(
     val width: Int,
     val height: Int,
     val thumbnailUrl: String?,
+    /** appProperties.sourcePath — restore target folder, carried into the row. */
+    val sourcePath: String? = null,
 )
 
 /** The DB mutation the reconcile computed: rows to write, row ids to delete. */
@@ -333,6 +338,7 @@ fun planReconcile(
             sizeBytes = l.sizeBytes,
             bucketId = l.bucketId,
             bucketName = l.bucketName,
+            relativePath = l.relativePath,
             syncState = if (match != null || backedUpElsewhere) SyncState.SYNCED else SyncState.PENDING_UPLOAD,
             excluded = row?.excluded ?: false,
             // Classify, never enqueue: queue membership survives reconcile untouched.
@@ -368,6 +374,9 @@ fun planReconcile(
             sizeBytes = row?.sizeBytes ?: 0,
             bucketId = null,
             bucketName = null,
+            // The cloud object carries the uploader's source folder (appProperties)
+            // — restore targets it even though there is no local copy here.
+            relativePath = c.sourcePath ?: row?.relativePath,
             syncState = SyncState.CLOUD_ONLY,
             excluded = row?.excluded ?: false,
         )

@@ -85,11 +85,20 @@ class GoogleDriveProvider(
         mimeType: String,
         totalBytes: Long,
         expectedMd5: String?,
+        sourceProperties: Map<String, String>,
         sessions: UploadSessionStore,
         onProgress: (Int) -> Unit,
     ): ApiResult<CloudFile> {
-        val parents = ensureFolderId()?.let { listOf(it) }
-        val metadata = DriveUploadMetadata(name = displayNameOf(uri), mimeType = mimeType, parents = parents)
+        // Uploading to Drive root when the folder can't be resolved would scatter
+        // the library across locations — fail retryably instead (see ensureFolderId).
+        val folderId = ensureFolderId()
+            ?: return ApiResult.Error(-1, "backup folder unavailable — not uploading", retryable = true)
+        val metadata = DriveUploadMetadata(
+            name = displayNameOf(uri),
+            mimeType = mimeType,
+            parents = listOf(folderId),
+            appProperties = sourceProperties.ifEmpty { null },
+        )
         return when (
             val res = ResumableUploader(uploadApi).upload(
                 photoId = photoId,
@@ -169,11 +178,24 @@ class GoogleDriveProvider(
         }
 
     /**
-     * Find-or-create the app's own "BYOS Gallery" folder so uploads land in one
-     * visible place in the user's Drive instead of scattered in My Drive root.
-     * With the drive.file scope the app only ever sees this folder and its files.
-     * The id is cached; the Mutex avoids racing two first-time uploads into
-     * creating duplicate folders. A failure returns null → upload falls back to root.
+     * Find-or-create the app's own backup folder so uploads land in one visible
+     * place in the user's Drive instead of scattered in My Drive root.
+     *
+     * DUPLICATE-PREVENTION CONTRACT (a user's Drive must never grow a second
+     * same-named folder):
+     *  - a failed name search (transient network/4xx) ABORTS — it must never be
+     *    mistaken for "no folder" and trigger a create;
+     *  - a create happens ONLY after a successful search with zero results;
+     *  - if duplicates already exist (a past bug, or the user copied one), we
+     *    converge on the OLDEST one instead of adding another;
+     *  - callers fail the upload retryably when this returns null — uploading to
+     *    Drive root as a fallback is a third location and is forbidden.
+     *
+     * With the drive.file scope the app can only see folders created by THIS
+     * OAuth client id; folders created under a different client are invisible
+     * (and unwritable) by design of the scope — there is no API remedy, so the
+     * OAuth client id must stay stable across releases. Within one client this
+     * function guarantees a single folder.
      */
     private suspend fun ensureFolderId(): String? {
         val name = folderName()
@@ -183,19 +205,23 @@ class GoogleDriveProvider(
             cachedFolderId?.let { if (cachedFolderName == name) return it }
             val escaped = name.replace("'", "\\'")
             val query = "name = '$escaped' and mimeType = '$FOLDER_MIME' and trashed = false"
-            val existing = safeApiCall({ api.listFiles(query = query, pageToken = null) }) {
-                it.files.firstOrNull()?.id
+            when (val search = safeApiCall({ api.listFiles(query = query, pageToken = null) }) { it.files }) {
+                is ApiResult.Error -> null // NEVER create on a failed search
+                is ApiResult.Success -> {
+                    // Oldest wins when duplicates already exist — converges every
+                    // device onto ONE folder instead of minting another. RFC 3339
+                    // strings sort chronologically; nulls (shouldn't happen) last.
+                    val resolved = search.data.minByOrNull { it.createdTime ?: "￿" }?.id ?: run {
+                        val created = safeApiCall({
+                            api.createFile(DriveUploadMetadata(name = name, mimeType = FOLDER_MIME))
+                        }) { it.id }
+                        (created as? ApiResult.Success)?.data
+                    }
+                    cachedFolderId = resolved
+                    cachedFolderName = name
+                    resolved
+                }
             }
-            val found = (existing as? ApiResult.Success)?.data
-            val resolved = found ?: run {
-                val created = safeApiCall({
-                    api.createFile(DriveUploadMetadata(name = name, mimeType = FOLDER_MIME))
-                }) { it.id }
-                (created as? ApiResult.Success)?.data
-            }
-            cachedFolderId = resolved
-            cachedFolderName = name
-            resolved
         }
     }
 

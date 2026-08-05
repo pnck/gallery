@@ -23,6 +23,9 @@ data class LocalMediaItem(
     val bucketId: String?,
     /** Folder display name (BUCKET_DISPLAY_NAME). */
     val bucketName: String?,
+    /** MediaStore RELATIVE_PATH (e.g. "DCIM/Camera/") — the restore target folder,
+     *  written onto the cloud object at upload. API 29+; null below. */
+    val relativePath: String?,
 )
 
 /**
@@ -34,17 +37,19 @@ data class LocalMediaItem(
  */
 class LocalMediaScanner(private val resolver: ContentResolver) {
 
-    private val projection = arrayOf(
-        MediaStore.Images.Media._ID,
-        MediaStore.Images.Media.DATE_TAKEN,
-        MediaStore.Images.Media.DATE_ADDED,
-        MediaStore.Images.Media.DATE_MODIFIED,
-        MediaStore.Images.Media.WIDTH,
-        MediaStore.Images.Media.HEIGHT,
-        MediaStore.Images.Media.SIZE,
-        MediaStore.Images.Media.BUCKET_ID,
-        MediaStore.Images.Media.BUCKET_DISPLAY_NAME,
-    )
+    private val projection = buildList {
+        add(MediaStore.Images.Media._ID)
+        add(MediaStore.Images.Media.DATE_TAKEN)
+        add(MediaStore.Images.Media.DATE_ADDED)
+        add(MediaStore.Images.Media.DATE_MODIFIED)
+        add(MediaStore.Images.Media.WIDTH)
+        add(MediaStore.Images.Media.HEIGHT)
+        add(MediaStore.Images.Media.SIZE)
+        add(MediaStore.Images.Media.BUCKET_ID)
+        add(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
+        // RELATIVE_PATH exists only on API 29+ (below, the column is unknown).
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) add(MediaStore.Images.Media.RELATIVE_PATH)
+    }.toTypedArray()
 
     suspend fun scanIncremental(sinceDateModifiedSec: Long): List<LocalMediaItem> =
         withContext(Dispatchers.IO) {
@@ -69,6 +74,11 @@ class LocalMediaScanner(private val resolver: ContentResolver) {
                 val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE)
                 val bucketIdCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_ID)
                 val bucketNameCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
+                val relPathCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    cursor.getColumnIndexOrThrow(MediaStore.Images.Media.RELATIVE_PATH)
+                } else {
+                    -1
+                }
 
                 while (cursor.moveToNext()) {
                     val id = cursor.getLong(idCol)
@@ -86,6 +96,7 @@ class LocalMediaScanner(private val resolver: ContentResolver) {
                         sizeBytes = cursor.getLong(sizeCol),
                         bucketId = cursor.getString(bucketIdCol),
                         bucketName = cursor.getString(bucketNameCol),
+                        relativePath = if (relPathCol >= 0) cursor.getString(relPathCol) else null,
                     )
                 }
             }

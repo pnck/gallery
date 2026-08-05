@@ -37,6 +37,11 @@ data class CloudFile(
     val height: Int,
     /** Short-lived; for immediate rendering only — never persist long-term (PRD §8.3). */
     val thumbnailUrl: String?,
+    /** Original display name — restore uses it instead of a synthetic one. */
+    val name: String? = null,
+    /** appProperties.sourcePath: the device folder the photo was uploaded from
+     *  (e.g. "DCIM/Camera/") — the restore target on any device. */
+    val sourcePath: String? = null,
 )
 
 data class CloudPage(

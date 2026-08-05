@@ -38,7 +38,7 @@ interface DriveApiService {
         @Query("pageToken") pageToken: String?,
         @Query("pageSize") pageSize: Int = 100,
         @Query("fields") fields: String =
-            "nextPageToken, files(id, name, mimeType, size, md5Checksum, thumbnailLink, imageMediaMetadata)",
+            "nextPageToken, files(id, name, mimeType, size, md5Checksum, createdTime, appProperties, thumbnailLink, imageMediaMetadata)",
     ): Response<DriveFileListResponse>
 
     /** Which Google account this token belongs to — diagnoses account mismatch. */
@@ -55,21 +55,21 @@ interface DriveApiService {
     suspend fun listChanges(
         @Query("pageToken") pageToken: String,
         @Query("fields") fields: String =
-            "nextPageToken, newStartPageToken, changes(fileId, removed, file(id, name, size, md5Checksum, thumbnailLink, imageMediaMetadata))",
+            "nextPageToken, newStartPageToken, changes(fileId, removed, file(id, name, size, md5Checksum, createdTime, appProperties, thumbnailLink, imageMediaMetadata))",
     ): Response<DriveChangeListResponse>
 
     /** Create a file/folder from metadata only (used to make the app's own folder). */
     @POST("drive/v3/files")
     suspend fun createFile(
         @Body metadata: DriveUploadMetadata,
-        @Query("fields") fields: String = "id",
+        @Query("fields") fields: String = "id, createdTime",
     ): Response<DriveFileDTO>
 
     @GET("drive/v3/files/{fileId}")
     suspend fun getFile(
         @Path("fileId") fileId: String,
         @Query("fields") fields: String =
-            "id, name, size, md5Checksum, thumbnailLink, imageMediaMetadata",
+            "id, name, size, md5Checksum, createdTime, appProperties, thumbnailLink, imageMediaMetadata",
     ): Response<DriveFileDTO>
 
     /**
@@ -88,7 +88,7 @@ interface DriveApiService {
         // so md5Checksum must be requested here (not just on the PUT) — otherwise the
         // upload response carries no hash and the SYNCED row never stores its identity,
         // defeating the anti-state-machine-failure MD5 dedup (phantom CLOUD_ONLY rows).
-        @Query("fields") fields: String = "id, name, size, md5Checksum, imageMediaMetadata",
+        @Query("fields") fields: String = "id, name, size, md5Checksum, appProperties, imageMediaMetadata",
     ): Response<Unit>
 
     /**

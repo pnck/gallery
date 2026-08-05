@@ -70,6 +70,7 @@ class MediaReconciler(
                     sizeBytes = item.sizeBytes,
                     bucketId = item.bucketId,
                     bucketName = item.bucketName,
+                    relativePath = item.relativePath,
                     syncState = SyncState.PENDING_UPLOAD,
                 )
             } else if (existing.sizeBytes == 0L || existing.bucketId == null) {

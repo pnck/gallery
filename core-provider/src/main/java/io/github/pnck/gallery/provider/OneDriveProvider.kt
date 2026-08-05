@@ -33,6 +33,7 @@ class OneDriveProvider(
         mimeType: String,
         totalBytes: Long,
         expectedMd5: String?,
+        sourceProperties: Map<String, String>,
         sessions: UploadSessionStore,
         onProgress: (Int) -> Unit,
     ): ApiResult<CloudFile> {

@@ -43,6 +43,13 @@ data class PhotoEntity(
     val bucketId: String? = null,
     /** MediaStore BUCKET_DISPLAY_NAME — the folder label shown in the directory filter. */
     val bucketName: String? = null,
+    /**
+     * MediaStore RELATIVE_PATH of the local copy (e.g. "DCIM/Camera/"; API 29+, else
+     * null) — the restore target. Written onto the cloud object at upload
+     * (appProperties.sourcePath) and read back into cloud rows, so a restore on ANY
+     * device lands in the original folder.
+     */
+    val relativePath: String? = null,
     val syncState: SyncState,
     /**
      * User opted this photo out of automatic backup ("clear queue"): it stays local

@@ -156,8 +156,19 @@ class UploadBatchProcessor(
         val md5 = photo.contentHashValue.takeIf { photo.contentHashType == "MD5" && !it.isNullOrEmpty() }
             ?: computeMd5(uri)?.also { photoDao.setContentHash(photo.id, "MD5", it) }
 
+        // Provenance for future restores (ICloudStorageProvider.uploadFile docs):
+        // the folder the photo came from, its MediaStore id, and capture time —
+        // written onto the cloud object as app-private properties.
+        val sourceProperties = buildMap {
+            (photo.relativePath ?: photo.bucketName)?.let { put("sourcePath", it) }
+            photo.localUri?.substringAfterLast('/')?.let { put("mediaStoreId", it) }
+            if (photo.dateTaken > 0) put("dateTakenMs", photo.dateTaken.toString())
+        }
+
         return when (
-            val result = provider.uploadFile(photo.id, uri, mime, totalBytes, md5, sessions, onProgress)
+            val result = provider.uploadFile(
+                photo.id, uri, mime, totalBytes, md5, sourceProperties, sessions, onProgress,
+            )
         ) {
             is ApiResult.Success -> {
                 photoDao.markAsSynced(photo.id, result.data.id, result.data.provider.name)

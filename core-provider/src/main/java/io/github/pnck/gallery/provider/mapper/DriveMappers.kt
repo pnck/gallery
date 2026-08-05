@@ -42,5 +42,7 @@ object DriveMappers {
             width = dto.imageMediaMetadata?.width ?: 0,
             height = dto.imageMediaMetadata?.height ?: 0,
             thumbnailUrl = dto.thumbnailLink,
+            name = dto.name,
+            sourcePath = dto.appProperties?.get("sourcePath"),
         )
 }

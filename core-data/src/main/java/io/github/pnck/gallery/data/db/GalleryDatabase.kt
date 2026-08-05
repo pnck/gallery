@@ -8,7 +8,7 @@ import androidx.room.TypeConverters
 
 @Database(
     entities = [PhotoEntity::class, SyncKeyEntity::class, UploadSessionEntity::class],
-    version = 6,
+    version = 7,
     exportSchema = true,
 )
 @TypeConverters(SyncStateConverter::class)

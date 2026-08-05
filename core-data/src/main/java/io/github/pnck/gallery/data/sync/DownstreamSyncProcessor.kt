@@ -124,6 +124,8 @@ class DownstreamSyncProcessor(
             dateTaken = creationTime,
             width = width,
             height = height,
+            // appProperties.sourcePath — restore target folder, survives reinstalls.
+            relativePath = sourcePath,
             syncState = SyncState.CLOUD_ONLY,
         )
     }

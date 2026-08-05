@@ -39,6 +39,11 @@ interface ICloudStorageProvider {
      * @param totalBytes exact file size; the caller fails fast when unknown.
      * @param expectedMd5 local content hash when known — verified against the
      *   final cloud object; a mismatch deletes the object and retries.
+     * @param sourceProperties provider-agnostic provenance written onto the cloud
+     *   object (Drive appProperties): at minimum `sourcePath` (device folder the
+     *   photo came from) so a later restore lands in the RIGHT directory, plus
+     *   `mediaStoreId` for cross-device correlation. Never secrets, never paths
+     *   outside the media library.
      */
     suspend fun uploadFile(
         photoId: String,
@@ -46,6 +51,7 @@ interface ICloudStorageProvider {
         mimeType: String,
         totalBytes: Long,
         expectedMd5: String?,
+        sourceProperties: Map<String, String> = emptyMap(),
         sessions: UploadSessionStore,
         onProgress: (Int) -> Unit,
     ): ApiResult<CloudFile>

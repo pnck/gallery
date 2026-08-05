@@ -29,6 +29,10 @@ data class DriveFileDTO(
     val mimeType: String? = null,
     val size: Long? = null,
     val md5Checksum: String? = null,
+    /** RFC 3339 creation time — sorts chronologically as a raw string. */
+    val createdTime: String? = null,
+    /** App-private key/values written at upload (source folder etc., PRD §3.5). */
+    val appProperties: Map<String, String>? = null,
     /** Requires an Authorization: Bearer header to fetch (PRD §8.3). */
     val thumbnailLink: String? = null,
     val imageMediaMetadata: ImageMetadataDTO? = null,
@@ -68,4 +72,7 @@ data class DriveUploadMetadata(
     val mimeType: String? = null,
     /** Parent folder ids — pins uploads to the app's own "BYOS Gallery" folder. */
     val parents: List<String>? = null,
+    /** App-private provenance (sourcePath, mediaStoreId) — readable only by this
+     *  OAuth client, so a later restore can return the file to its source folder. */
+    val appProperties: Map<String, String>? = null,
 )
