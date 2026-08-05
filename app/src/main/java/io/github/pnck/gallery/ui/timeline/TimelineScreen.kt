@@ -168,13 +168,14 @@ fun TimelineScreen(
     val systemDelete = rememberSystemDelete()
 
     // Autostart probe verdict (recomputed when either probe timestamp moves).
-    // An outstanding, overdue probe = the system demonstrably failed to deliver
-    // a constraint-free job in 3h — no clock-heuristic, an actual experiment.
+    // The probe was fired the moment the app last went to background, so an
+    // outstanding one means the system held a zero-delay job through the whole
+    // background interval — blocked. The slack is only JobScheduler's physical
+    // delivery floor, not an accusation window.
     val autostartBlocked = remember(probeScheduledAt, probeCompletedAt) {
         isMiui() && probeScheduledAt > 0 &&
             probeCompletedAt < probeScheduledAt &&
-            System.currentTimeMillis() >
-            probeScheduledAt + AutostartProbeWorker.PROBE_DELAY_MS + AutostartProbeWorker.GRACE_MS
+            System.currentTimeMillis() > probeScheduledAt + AutostartProbeWorker.MIN_DELIVERY_SLACK_MS
     }
     // rememberSaveable (not plain remember): the grid leaves composition while the
     // detail viewer is open, and users expect to land back at the same scroll

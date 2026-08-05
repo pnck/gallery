@@ -45,14 +45,16 @@ class GalleryApp : Application(), Configuration.Provider, SingletonImageLoader.F
         super.onCreate()
         // Register the background incremental keep-up (T-304); KEEP is idempotent.
         SyncPipeline.schedulePeriodic(WorkManager.getInstance(this))
-        // Keep exactly one background-delivery probe outstanding (the only way to
-        // DETECT OEM job-killers; there is no query API — see AutostartProbeWorker).
-        appScope.launch { AutostartProbeWorker.schedule(WorkManager.getInstance(this@GalleryApp), settings) }
         trackForegroundForProbe()
     }
 
-    /** Probe runs that land while the app is visible prove nothing — visibility
-     *  is a plain activity-count flag (no lifecycle-process dependency needed). */
+    /**
+     * The autostart experiment is anchored to session boundaries (no clocks):
+     * every transition to background fires a fresh zero-delay probe; the next
+     * session reads the verdict from the probe timestamps (see TimelineScreen).
+     * Visibility is a plain activity-count flag — no lifecycle-process
+     * dependency needed for a counter this simple.
+     */
     private fun trackForegroundForProbe() {
         var started = 0
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
@@ -63,6 +65,11 @@ class GalleryApp : Application(), Configuration.Provider, SingletonImageLoader.F
             override fun onActivityStopped(activity: Activity) {
                 started = (started - 1).coerceAtLeast(0)
                 AutostartProbeWorker.appVisible = started > 0
+                if (started == 0) {
+                    appScope.launch {
+                        AutostartProbeWorker.fire(WorkManager.getInstance(this@GalleryApp), settings)
+                    }
+                }
             }
             override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
             override fun onActivityResumed(activity: Activity) = Unit

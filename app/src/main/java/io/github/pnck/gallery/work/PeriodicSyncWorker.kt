@@ -32,6 +32,12 @@ class PeriodicSyncWorker @AssistedInject constructor(
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
+        // Real BACKGROUND delivery is itself the capability proof — stamp the
+        // same completion the autostart probe uses (a run while the app is
+        // visible proves nothing; the probe job only covers idle periods).
+        if (!AutostartProbeWorker.appVisible) {
+            settings.noteAutostartProbeCompleted()
+        }
         // Local scan needs no account; permission loss just yields nothing.
         runCatching { reconciler.reconcile() }
         if (!authManager.isAuthorized()) return Result.success()
