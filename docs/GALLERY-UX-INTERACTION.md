@@ -201,6 +201,59 @@ one-owner) applied to every remaining sheet; selection bar to 2 icons + overflow
 P1: Sync screen replaces the status sheet; My Drive details full-screen.
 P2: motion pass (badge crossfade, count-up, predictive back), info-sheet polish.
 
+## 8. Refactoring plan (detailed)
+
+Scope basis: 4 screens totalling ~2.5k lines (`TimelineScreen` 1155, `MyDriveScreen`
+518, `PhotoDetailScreen` 412, `SettingsScreen` 400), 8 `ModalBottomSheet` call
+sites. Effort in ideal dev-days (d) for one engineer; each task ships green
+(build + unit tests + lint) and is verified on the MI 9 (MIUI) for gesture work.
+
+### P0 — interaction debt (no behavior changes beyond layout)
+
+| # | Task (doc §) | Changes & files | Effort |
+|---|---|---|---|
+| T1 | **Library folders screen** (§5.4) | New `ui/settings/folders/LibraryFoldersScreen.kt` (route + Scaffold + single LazyColumn: purpose header, All-folders master row, §4.4 folder rows); reuse `refreshBuckets`/`setScanFolders` (moved into a small `LibraryFoldersViewModel`); Settings entry row with scope summary; timeline **"Filtered" chip** (visible iff `scanBuckets` non-empty, taps through); delete `FoldersSheet` + its row in `ViewOptionsSheet`; strings. Risk: low — pure move; cursor-reset logic already lives in `setScanFolders`. | 1.5 d |
+| T2 | **Sheet policy pass** (§3, §6) | All remaining sheets: `rememberModalBottomSheetState(skipPartiallyExpanded = true)` where content can overflow, explicit drag handle, gesture-inset bottom padding, verify the one-owner hand-off on MIUI (M3's internal nested-scroll covers the list-top → sheet hand-off once always-expanded; only add a custom `NestedScrollConnection` if verification shows a dead zone). Files: `TimelineScreen.kt` (view options, status interim), `PhotoDetailScreen.kt` (info). | 0.5–1 d |
+| T3 | **Selection bar → 2 icons + overflow** (§4/§5.2) | `SelectionAppBar`: keep Back up + Delete icons; Free up space / Save to device / Select all become overflow text items. File: `TimelineScreen.kt`. | 0.25 d |
+
+**P0 total ≈ 2.5–3 d.**
+
+### P1 — destination upgrades
+
+| # | Task (doc §) | Changes & files | Effort |
+|---|---|---|---|
+| T4 | **Sync screen** (§5.3) | New `ui/sync/SyncScreen.kt` route: move status line, fix rows, count pills, queue, action buttons out of `SyncStatusSheet` into a Scaffold with back; overflow "Sync status" navigates instead of opening a sheet; delete the sheet. Most composables move verbatim — the work is framing + navigation + re-verifying the fix rows. | 1 d |
+| T5 | **My Drive details → full screen** (§5.6 today) | Details panel becomes a destination (row set scrolls); `MyDriveScreen.kt` + nav. | 0.5 d |
+| T6 | **Settings regrouping** (§5.5) | Group labelled rows (Account / Library / Backup / Storage / Transport / About) with one-line subtitles; no new logic. `SettingsScreen.kt`. | 0.5 d |
+
+**P1 total ≈ 2 d.**
+
+### P2 — polish
+
+| # | Task (doc §) | Changes & files | Effort |
+|---|---|---|---|
+| T7 | **Motion pass** (§2) | Badge crossfade + selection check spring; banner slide-in/out; count-pill count-up; predictive-back opt-in + verify on API 29 MIUI (falls back gracefully). Touches `TimelineScreen`, `PhotoDetailScreen`, theme/motion tokens. | 1 d |
+| T8 | **Viewer zoom & info sheet polish** (§5.6) | Double-tap anchor + pan settle (telephoto config), info-sheet drag/scroll verification. | 0.5 d |
+
+**P2 total ≈ 1.5 d.**
+
+### Estimate
+
+| Phase | Effort | Note |
+|---|---|---|
+| P0 | 2.5–3 d | biggest single item is T1 (new screen + nav + chip) |
+| P1 | 2 d | mostly moving composables into destinations |
+| P2 | 1.5 d | motion is cheap to add, slow to *tune* — timeboxed |
+| **Total** | **≈ 6 d (range 4.5–8)** | one engineer, CI-green per task, MIUI device verification included |
+
+Risks that could stretch the range: (a) the sheet/list hand-off on MIUI needing a
+custom nested-scroll connection (T2, +0.5 d); (b) predictive-back quirks on the
+API-29 test device (T7, +0.5 d); (c) nav-destination scaffolding cost if the
+drawer/nav guards need rework for the two new routes (T1/T4, +0.5 d).
+
+Explicitly **out of scope**: new features (search, albums, video), any sync/backup
+behavior change, OneDrive, and anything the owner hasn't approved in §0–§6.
+
 ---
 
 ## Appendix A · Owner guardrails (binding)
