@@ -72,6 +72,8 @@
     <!-- Account panel -->
     <string name="account_connected">Connected to Google Drive</string>
     <string name="account_disconnected">Not connected</string>
+    <string name="account_checking">Checking connection…</string>
+    <string name="account_unreachable">Signed in — can\'t reach Google Drive</string>
     <string name="account_sign_in">Sign in</string>
     <string name="account_sign_out">Sign out</string>
     <string name="account_sign_out_title">Sign out of Google Drive?</string>

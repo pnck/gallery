@@ -227,7 +227,9 @@ class PhotoRepositoryImpl(
         }
 
         // The freshly published uri becomes the row's local copy: CLOUD_ONLY → SYNCED.
-        photoDao.markAsSyncedWithLocal(id, uri.toString())
+        // adoptLocalCopy first removes any scan-created fresh row holding this uri
+        // (unique localUri index would otherwise reject the update).
+        photoDao.adoptLocalCopy(id, uri.toString())
         uri.toString()
     }
 

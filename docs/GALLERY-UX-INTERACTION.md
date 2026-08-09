@@ -254,6 +254,11 @@ drawer/nav guards need rework for the two new routes (T1/T4, +0.5 d).
 Explicitly **out of scope**: new features (search, albums, video), any sync/backup
 behavior change, OneDrive, and anything the owner hasn't approved in §0–§6.
 
+**Deferred requirements to fold into the 0.2.x refactor** (noted by the owner,
+alpha.104): there is currently NO way to force a full rescan — the Sync screen
+(§5.3) should gain a "Rescan library" action (cursor reset + full sweep), placed
+next to Rebuild; interaction TBD in P1.
+
 ---
 
 ## Appendix A · Owner guardrails (binding)

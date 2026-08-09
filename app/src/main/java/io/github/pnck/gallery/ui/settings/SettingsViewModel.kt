@@ -42,6 +42,13 @@ data class SettingsState(
     val signIn: SignInPhase = SignInPhase.Idle,
     /** Email of the signed-in account, so the user can spot an account mismatch. */
     val accountEmail: String? = null,
+    /**
+     * Whether the cloud is actually REACHABLE with the current grant — derived
+     * from a live `about()` probe, never from token existence. A held token with
+     * a dead tunnel is NOT "connected" (owner report: the panel showed Connected
+     * while nothing could reach Drive). null = probe in flight / not signed in.
+     */
+    val cloudReachable: Boolean? = null,
     /** The separate drive.readonly grant ("My Drive" browser) — managed here too. */
     val myDriveAuthorized: Boolean = false,
 )
@@ -107,15 +114,29 @@ class SettingsViewModel @Inject constructor(
     fun refreshAuthState() {
         viewModelScope.launch {
             val authorized = withContext(Dispatchers.IO) { googleAuthManager.isAuthorized() }
-            _state.value = _state.value.copy(googleAuthorized = authorized)
             if (authorized) {
-                // Show which account we're actually signed into (account-mismatch check).
-                val email = withContext(Dispatchers.IO) {
-                    (provider.getAccountEmail() as? ApiResult.Success)?.data
+                // Authority check: probe the cloud — "connected" is only true when
+                // Drive actually answers (the email doubles as the account-mismatch
+                // display). A dead tunnel flips this to reachable=false, honestly.
+                val probe = withContext(Dispatchers.IO) { provider.getAccountEmail() }
+                when (probe) {
+                    is ApiResult.Success -> _state.value = _state.value.copy(
+                        googleAuthorized = true,
+                        cloudReachable = true,
+                        accountEmail = probe.data,
+                    )
+                    is ApiResult.Error -> _state.value = _state.value.copy(
+                        googleAuthorized = true,
+                        cloudReachable = false,
+                        accountEmail = null,
+                    )
                 }
-                _state.value = _state.value.copy(accountEmail = email)
             } else {
-                _state.value = _state.value.copy(accountEmail = null)
+                _state.value = _state.value.copy(
+                    googleAuthorized = false,
+                    cloudReachable = null,
+                    accountEmail = null,
+                )
             }
         }
     }

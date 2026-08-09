@@ -9,6 +9,8 @@ import io.github.pnck.gallery.data.settings.AppSettingsStore
 import io.github.pnck.gallery.domain.SyncState
 import java.util.UUID
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * MediaStore → Room reconciliation (T-202, PRD §6.1).
@@ -31,8 +33,19 @@ class MediaReconciler(
     private val syncKeyDao: SyncKeyDao,
     private val settings: AppSettingsStore,
 ) {
+    /**
+     * One scan at a time, process-wide. The timeline entry fires reconcile()
+     * from up to three triggers at once (VM init inline scan, the screen's
+     * ForceSync inline scan, the worker chain's ScanWorker) — concurrent runs
+     * both see a new URI as unknown and BOTH insert it, doubling every photo
+     * on the wall (alpha.104 report: same media id, same path, twice).
+     * The unique index on localUri (v8) + INSERT OR IGNORE below are the
+     * second line of defense; this mutex is the first.
+     */
+    private val scanMutex = Mutex()
+
     /** @return number of newly discovered photos. */
-    suspend fun reconcile(): Int {
+    suspend fun reconcile(): Int = scanMutex.withLock {
         var since = syncKeyDao.get(SCAN_CURSOR_TARGET)?.deltaToken?.toLongOrNull() ?: 0L
         if (since > 0 && photoDao.count() == 0) {
             // A cursor without a library is a contradiction (backup/restore edge,
@@ -44,7 +57,7 @@ class MediaReconciler(
         // The scan QUERY succeeded (empty or not): the local library has loaded at
         // least once, so cloud truth may now enter the DB (ReconcileProcessor gate).
         settings.setInitialScanDone()
-        if (items.isEmpty()) return 0
+        if (items.isEmpty()) return@withLock 0
 
         // Scan allowlist (PRD §6.1): when non-empty, only import photos from the chosen
         // folders — this is what makes the directory filter "only scan these folders".
@@ -80,13 +93,13 @@ class MediaReconciler(
                 )
             }
         }
-        if (fresh.isNotEmpty()) photoDao.upsertAll(fresh)
+        if (fresh.isNotEmpty()) photoDao.insertIgnoreDuplicates(fresh)
 
         // Advance the cursor over EVERY scanned row (even ones filtered out), so an
         // unchanged allowlist doesn't re-scan them next time. Widening the allowlist
         // resets the cursor (see resetCursor) to force a one-time full re-import.
         writeCursor(maxOf(items.maxOf { it.dateModifiedSec }, since))
-        return fresh.size
+        return@withLock fresh.size
     }
 
     /** Force the next [reconcile] to re-scan the whole library — used when the scan

@@ -2,6 +2,8 @@ package io.github.pnck.gallery.data.db
 
 import androidx.paging.PagingSource
 import androidx.room.Dao
+import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.RawQuery
 import androidx.room.Transaction
@@ -134,7 +136,19 @@ interface PhotoDao {
     @Query("UPDATE photos SET localUri = NULL, syncState = 2 WHERE id IN (:ids)")
     suspend fun markAsCloudOnly(ids: List<String>)
 
-    /** "Save to device" re-materialised a local copy: CLOUD_ONLY → SYNCED (PRD §3.7). */
+    /** "Save to device" re-materialised a local copy: CLOUD_ONLY → SYNCED (PRD §3.7).
+     *  A scan may already hold a fresh row for the new localUri — remove it first
+     *  (it's an unclassified PENDING_UPLOAD artifact with no user state), otherwise
+     *  the unique localUri index rejects the update. */
+    @Transaction
+    suspend fun adoptLocalCopy(id: String, localUri: String) {
+        deleteByLocalUriExcept(localUri, id)
+        markAsSyncedWithLocal(id, localUri)
+    }
+
+    @Query("DELETE FROM photos WHERE localUri = :localUri AND id != :keepId")
+    suspend fun deleteByLocalUriExcept(localUri: String, keepId: String)
+
     @Query("UPDATE photos SET localUri = :localUri, syncState = 1 WHERE id = :id")
     suspend fun markAsSyncedWithLocal(id: String, localUri: String)
 
@@ -148,6 +162,12 @@ interface PhotoDao {
 
     @Upsert
     suspend fun upsertAll(items: List<PhotoEntity>)
+
+    /** Fresh scan rows only: a concurrent scan may have inserted the same localUri
+     *  first — IGNORE keeps the winner and drops the duplicate (the data would be
+     *  identical anyway). Classification updates go through [upsertAll] instead. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIgnoreDuplicates(items: List<PhotoEntity>)
 
     @Query("DELETE FROM photos WHERE cloudId IN (:cloudIds)")
     suspend fun deleteByCloudIds(cloudIds: List<String>)

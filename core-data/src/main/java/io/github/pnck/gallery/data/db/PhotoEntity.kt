@@ -15,7 +15,11 @@ import io.github.pnck.gallery.domain.SyncState
     indices = [
         Index(value = ["dateTaken"]),
         Index(value = ["provider", "cloudId"], unique = true),
-        Index(value = ["localUri"]),
+        // One row per local file, enforced by SQLite: concurrent scans race
+        // findByLocalUri→insert (alpha.104 doubled the whole wall); the index
+        // makes the loser's INSERT OR IGNORE a no-op instead of a duplicate.
+        // Multiple NULLs (cloud-only rows) are fine — SQLite distinctness skips NULL.
+        Index(value = ["localUri"], unique = true),
     ],
 )
 data class PhotoEntity(

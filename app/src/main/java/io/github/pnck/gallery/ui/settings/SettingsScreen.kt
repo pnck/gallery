@@ -178,8 +178,12 @@ fun SettingsScreen(
                     Text(
                         when {
                             busy -> stringResource(R.string.settings_google_connecting)
-                            state.googleAuthorized -> stringResource(R.string.settings_google_connected)
-                            else -> stringResource(R.string.settings_google_disconnected)
+                            !state.googleAuthorized -> stringResource(R.string.settings_google_disconnected)
+                            // "Connected" is only claimed after a live probe — a held
+                            // token with a dead tunnel is signed-in-but-offline.
+                            state.cloudReachable == false -> stringResource(R.string.account_unreachable)
+                            state.cloudReachable == null -> stringResource(R.string.account_checking)
+                            else -> stringResource(R.string.settings_google_connected)
                         },
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -222,11 +226,18 @@ fun SettingsScreen(
             )
         }
 
+        // Re-probe reachability every time the panel opens — the user checks it
+        // right after toggling the tunnel, so a stale verdict is worse than none.
+        LaunchedEffect(showAccount) {
+            if (showAccount) viewModel.refreshAuthState()
+        }
+
         if (showAccount) {
             AccountSheet(
                 authorized = state.googleAuthorized,
                 busy = busy,
                 accountEmail = state.accountEmail,
+                reachable = state.cloudReachable,
                 folderName = folderName,
                 myDriveAuthorized = state.myDriveAuthorized,
                 onMyDriveSignOut = viewModel::signOutMyDrive,
@@ -255,6 +266,8 @@ private fun AccountSheet(
     authorized: Boolean,
     busy: Boolean,
     accountEmail: String?,
+    /** null = probe in flight; false = signed in but the cloud doesn't answer. */
+    reachable: Boolean?,
     myDriveAuthorized: Boolean,
     onMyDriveSignOut: () -> Unit,
     folderName: String,
@@ -274,10 +287,12 @@ private fun AccountSheet(
             Text(
                 text = when {
                     busy -> stringResource(R.string.settings_google_connecting)
-                    authorized -> stringResource(R.string.account_connected)
-                    else -> stringResource(R.string.account_disconnected)
+                    !authorized -> stringResource(R.string.account_disconnected)
+                    reachable == false -> stringResource(R.string.account_unreachable)
+                    reachable == null -> stringResource(R.string.account_checking)
+                    else -> stringResource(R.string.account_connected)
                 },
-                color = if (authorized) {
+                color = if (authorized && reachable == true) {
                     androidx.compose.ui.graphics.Color(0xFF2E7D32)
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
