@@ -259,7 +259,35 @@ alpha.104): there is currently NO way to force a full rescan — the Sync screen
 (§5.3) should gain a "Rescan library" action (cursor reset + full sweep), placed
 next to Rebuild; interaction TBD in P1.
 
+### T9 · 0.2.x data-path realignment (owner's mental model, binding)
+
+The wall's data source must BE the local library, not a persisted projection of
+it. Every wall-integrity bug so far (double rows, phantom rows, cursor desync,
+prune-guard interplay) traces to one root: local photos are materialized into
+Room for display, and any persisted projection of MediaStore can diverge.
+
+Target (owner model: wall = local photos 1:1; cloud metadata merges in;
+cloud-only appends):
+
+- **Wall flow** = live MediaStore query → left-join cloud knowledge (by content
+  hash, falling back to localUri) → `TimelinePhoto`; cloud-only rows append from
+  the cloud-listing cache. Sort/filter evaluate over the merged stream (library
+  scale 10⁴ — fine in memory).
+- **Room keeps only cloud knowledge**: hash↔cloudId links, badge inputs, upload
+  queue bookkeeping (queued/excluded/attempts), sync_keys, upload_sessions.
+  **No local photo list is persisted at all.**
+- **Scan stops feeding display**; its only jobs are lazy hashing for
+  classification/upload eligibility and observing new media (ContentObserver).
+- Bug classes eliminated *by construction*: display duplicates (any cause,
+  including MediaStore reindex id churn), phantoms, cursor bugs, wipe fallout.
+
+Surfaces touched: `PhotoRepository.getTimeline`, the detail pager, badge
+derivation, selection/free-space keying. Estimated 2–3 d on top of the phases
+above. This is the 0.2.x centerpiece; the UX phases above ship first and are
+compatible with either data path.
+
 ---
+
 
 ## Appendix A · Owner guardrails (binding)
 

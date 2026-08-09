@@ -159,44 +159,42 @@ class ReconcileProcessor(
         }
 
         // 3. Pure derivation, 4. apply.
-        // Guard 3 — a (near-)EMPTY local truth while local-backed rows exist is
-        // never a real "user deleted everything": it's a blind scan (storage
-        // unmounted, MediaStore mid-reindex, foreground-restricted app-op, OEM
-        // query quirk — on 2026-07-27 it pruned 943 rows in one pass; on
-        // 2026-08-03 a MIUI foreground-only grant returned 1 of 1087). The cloud
-        // side already refuses to prune on a partial listing; the local side
-        // refuses below 5% of the known library. BlindScan is the degradation
-        // EVIDENCE the periodic worker records (the UI's warning row).
+        //
+        // THE OWNER'S MODEL: remote metadata MERGES into the local display
+        // stream — merging is a side-effect-free relabel of what the truths
+        // actually say, so it must NEVER be vetoed. Only DELETION is dangerous
+        // (a wrong prune loses state), so the guards below veto prune only:
+        //
+        //  - blind scan (<5% of the known library returned: storage unmounted,
+        //    MediaStore mid-reindex, foreground-restricted app-op — 2026-07-27
+        //    pruned 943 rows; 2026-08-03 MIUI returned 1 of 1087): BlindScan is
+        //    also the periodic worker's degradation EVIDENCE (UI warning row);
+        //  - mass prune (>half the local-backed rows in ONE pass): never a
+        //    legitimate cleanup, it's a partially blind scan. Lingering rows are
+        //    cheap — the next truthful scan prunes them one guarded pass later.
         Log.i(TAG, "reconcile: truth local=${local.size} cloud=${cloudTruth.size} existing=${existing.size}")
         val localBacked = existing.count { it.localUri != null }
-        if (localBacked > 0 && local.size * 20 < localBacked) {
-            Log.w(TAG, "reconcile: ABORT — local scan blind (${local.size} of $localBacked local rows); not pruning")
-            return@withContext Outcome.BlindScan
-        }
+        val blind = localBacked > 0 && local.size * 20 < localBacked
         val plan = planReconcile(local, cloudTruth, existing, provider.providerType.name)
-        // Guard 4 — cap mass-pruning: deleting local-backed rows for more than half
-        // the library in ONE pass is never a legitimate cleanup, it's a partially
-        // blind scan (MediaStore mid-reindex returns a subset, SD card unmounted).
-        // Linger is cheap (next reconcile self-heals); a wrong mass-prune is the
-        // "all my badges died" report.
         val existingById = existing.associateBy { it.id }
         val localBackedDeletes = plan.deleteIds.count { existingById[it]?.localUri != null }
-        if (localBackedDeletes > localBacked / 2 && localBackedDeletes > MASS_PRUNE_MIN) {
-            Log.w(
-                TAG,
-                "reconcile: ABORT — would prune $localBackedDeletes of $localBacked local-backed rows",
-            )
-            return@withContext Outcome.Skipped
+        val massPrune = localBackedDeletes > localBacked / 2 && localBackedDeletes > MASS_PRUNE_MIN
+        val deletes = if (blind || massPrune) {
+            Log.w(TAG, "reconcile: prune VETOED ($localBackedDeletes of $localBacked rows; blind=$blind) — merge still applies")
+            emptyList()
+        } else {
+            plan.deleteIds
         }
         // Atomic, prune-before-upsert: re-linking a local row to a cloudId that a
         // to-be-pruned phantom still holds must not hit UNIQUE(provider, cloudId).
-        photoDao.applyReconcilePlan(plan.upserts, plan.deleteIds)
+        photoDao.applyReconcilePlan(plan.upserts, deletes)
 
         val synced = plan.upserts.count { it.syncState == SyncState.SYNCED }
         val pending = plan.upserts.count { it.syncState == SyncState.PENDING_UPLOAD }
         val cloudOnly = plan.upserts.count { it.syncState == SyncState.CLOUD_ONLY }
-        Log.i(TAG, "reconcile: synced=$synced pendingUpload=$pending cloudOnly=$cloudOnly pruned=${plan.deleteIds.size}")
-        Outcome.Done(synced, pending, cloudOnly, plan.deleteIds.size)
+        Log.i(TAG, "reconcile: synced=$synced pendingUpload=$pending cloudOnly=$cloudOnly pruned=${deletes.size}")
+        if (blind) return@withContext Outcome.BlindScan
+        Outcome.Done(synced, pending, cloudOnly, deletes.size)
     }
 
     /** The media-read permission for this SDK level, including the API 34+ partial grant. */
