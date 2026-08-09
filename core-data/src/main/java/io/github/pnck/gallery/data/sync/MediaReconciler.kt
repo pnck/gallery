@@ -2,8 +2,6 @@ package io.github.pnck.gallery.data.sync
 
 import io.github.pnck.gallery.data.db.PhotoDao
 import io.github.pnck.gallery.data.db.PhotoEntity
-import io.github.pnck.gallery.data.db.SyncKeyDao
-import io.github.pnck.gallery.data.db.SyncKeyEntity
 import io.github.pnck.gallery.data.scanner.LocalMediaScanner
 import io.github.pnck.gallery.data.settings.AppSettingsStore
 import io.github.pnck.gallery.domain.SyncState
@@ -13,56 +11,49 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /**
- * MediaStore → Room reconciliation (T-202, PRD §6.1).
+ * MediaStore → Room reconciliation (T-202, PRD §6.1) — a FULL DIFF, not an
+ * incremental import.
  *
- * Incremental: the DATE_MODIFIED cursor persists in `sync_keys` (Room) so each run
- * only queries rows newer than the previous scan. The cursor deliberately lives in
- * the SAME cache it cursors over: the DB is a pure cache recreated by
- * `fallbackToDestructiveMigration` on schema bumps, and a cursor that outlives the
- * library it describes is a silent killer — the scan then only looks for photos
- * newer than the stale cursor, imports nothing, and the wall stays empty forever
- * (the "No photos yet after upgrade" report). Wiped together, they cannot desync.
+ * The owner's model: the wall shows each local photo exactly once, always.
+ * The only way a persisted projection can honour that is to be RE-DERIVED
+ * wholesale on every scan (derive, don't synchronize): insert what MediaStore
+ * has that we don't, refresh metadata, delete local-backed rows whose file is
+ * gone. There is no cursor — a cursor is precisely the synchronization state
+ * that desynced twice already ("empty wall after upgrade", and id-churn ghosts
+ * it can never see). A full MediaStore metadata query is sub-second at this
+ * library scale, so the "optimization" never paid for its risk.
  *
- * Unknown content URIs are inserted as PENDING_UPLOAD with a locally generated UUID
- * primary key (PRD §3.6 — never file hashes, which are computed lazily at upload
- * time).
+ * Two veto rules keep the diff honest:
+ *  - BLIND SCAN (returned <5% of the known local-backed rows: permission
+ *    revoked, storage unmounted, mid-reindex): apply inserts/updates, skip
+ *    deletions — absence of evidence is not evidence of absence;
+ *  - SCOPE: when a folder allowlist is set, deletions apply only within it —
+ *    out-of-scope rows are hidden by the wall filter, not deleted.
+ *
+ * One scan at a time process-wide (the timeline entry alone fires up to three
+ * triggers); UNIQUE(localUri) + INSERT OR IGNORE make a residual race a no-op.
+ * Unknown URIs are inserted as PENDING_UPLOAD with a locally generated UUID
+ * primary key (PRD §3.6 — hashes are computed lazily at upload time).
  */
 class MediaReconciler(
     private val scanner: LocalMediaScanner,
     private val photoDao: PhotoDao,
-    private val syncKeyDao: SyncKeyDao,
     private val settings: AppSettingsStore,
 ) {
-    /**
-     * One scan at a time, process-wide. The timeline entry fires reconcile()
-     * from up to three triggers at once (VM init inline scan, the screen's
-     * ForceSync inline scan, the worker chain's ScanWorker) — concurrent runs
-     * both see a new URI as unknown and BOTH insert it, doubling every photo
-     * on the wall (alpha.104 report: same media id, same path, twice).
-     * The unique index on localUri (v8) + INSERT OR IGNORE below are the
-     * second line of defense; this mutex is the first.
-     */
     private val scanMutex = Mutex()
 
     /** @return number of newly discovered photos. */
     suspend fun reconcile(): Int = scanMutex.withLock {
-        var since = syncKeyDao.get(SCAN_CURSOR_TARGET)?.deltaToken?.toLongOrNull() ?: 0L
-        if (since > 0 && photoDao.count() == 0) {
-            // A cursor without a library is a contradiction (backup/restore edge,
-            // partial data wipe): the cursor derives from the table, so trust the
-            // table and rescan from zero instead of trusting the cursor.
-            since = 0L
-        }
-        val items = scanner.scanIncremental(since)
+        val items = scanner.scanIncremental(0L)
         // The scan QUERY succeeded (empty or not): the local library has loaded at
         // least once, so cloud truth may now enter the DB (ReconcileProcessor gate).
         settings.setInitialScanDone()
-        if (items.isEmpty()) return@withLock 0
 
         // Scan allowlist (PRD §6.1): when non-empty, only import photos from the chosen
         // folders — this is what makes the directory filter "only scan these folders".
         val allowed = settings.scanBuckets.first()
         val inScope = if (allowed.isEmpty()) items else items.filter { it.bucketId in allowed }
+        val inScopeUris = inScope.mapTo(HashSet()) { it.contentUri }
 
         val fresh = mutableListOf<PhotoEntity>()
         for (item in inScope) {
@@ -95,27 +86,17 @@ class MediaReconciler(
         }
         if (fresh.isNotEmpty()) photoDao.insertIgnoreDuplicates(fresh)
 
-        // Advance the cursor over EVERY scanned row (even ones filtered out), so an
-        // unchanged allowlist doesn't re-scan them next time. Widening the allowlist
-        // resets the cursor (see resetCursor) to force a one-time full re-import.
-        writeCursor(maxOf(items.maxOf { it.dateModifiedSec }, since))
+        // Diff-delete: local-backed rows whose file is gone from MediaStore.
+        // Scope-aware: with an allowlist, only rows INSIDE it participate —
+        // a 2%-of-library allowlist is not a blind scan.
+        val existing = photoDao.getLocalBackedRows()
+        val scopedExisting = existing.filter { allowed.isEmpty() || it.bucketId in allowed || it.bucketId == null }
+        val blind = scopedExisting.isNotEmpty() && inScope.size * 20 < scopedExisting.size
+        if (!blind) {
+            val stale = scopedExisting.filter { row -> row.localUri !in inScopeUris }
+            // Chunked: SQLite's host-variable cap (999) bounds each IN(...).
+            stale.chunked(500).forEach { chunk -> photoDao.deleteByIds(chunk.map { it.id }) }
+        }
         return@withLock fresh.size
-    }
-
-    /** Force the next [reconcile] to re-scan the whole library — used when the scan
-     *  allowlist changes so newly-included folders get imported. */
-    suspend fun resetCursor() {
-        writeCursor(0L)
-    }
-
-    private suspend fun writeCursor(dateModifiedSec: Long) {
-        syncKeyDao.upsert(
-            SyncKeyEntity(SCAN_CURSOR_TARGET, nextPageToken = null, deltaToken = dateModifiedSec.toString()),
-        )
-    }
-
-    private companion object {
-        /** sync_keys target for the local-scan DATE_MODIFIED cursor (epoch seconds). */
-        const val SCAN_CURSOR_TARGET = "local_scan"
     }
 }

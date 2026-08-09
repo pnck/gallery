@@ -262,9 +262,8 @@ object AppModule {
     fun provideMediaReconciler(
         scanner: LocalMediaScanner,
         photoDao: PhotoDao,
-        syncKeyDao: SyncKeyDao,
         settings: AppSettingsStore,
-    ): MediaReconciler = MediaReconciler(scanner, photoDao, syncKeyDao, settings)
+    ): MediaReconciler = MediaReconciler(scanner, photoDao, settings)
 
     @Provides
     @Singleton

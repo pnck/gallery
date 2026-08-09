@@ -159,11 +159,10 @@ class TimelineViewModel @Inject constructor(
         // scheduling latency is what left the grid empty on launch).
         viewModelScope.launch { scanInline() }
         // One-time upgrade fix: rows created before the v3 size/bucket columns have
-        // sizeBytes=0 (breaks size sorting + the space-management totals). Force a full
-        // rescan once to backfill their metadata, then remember it's done.
+        // sizeBytes=0 (breaks size sorting + the space-management totals). The scan
+        // is a full diff now, so a plain chain kick backfills them — no cursor reset.
         viewModelScope.launch {
             if (!settings.sizeBackfilled.first()) {
-                reconciler.resetCursor()
                 SyncPipeline.enqueue(workManager)
                 settings.setSizeBackfilled()
             }
@@ -171,7 +170,7 @@ class TimelineViewModel @Inject constructor(
         watchRebuildResults()
     }
 
-    /** Local MediaStore → Room scan on the caller's coroutine (idempotent, cursor-based).
+    /** Local MediaStore → Room scan on the caller's coroutine (idempotent full diff).
      *  Also the permission-grant path: ForceSync runs this FIRST, then kicks the
      *  worker chain for the cloud side. */
     private suspend fun scanInline() {
@@ -199,13 +198,12 @@ class TimelineViewModel @Inject constructor(
     }
 
     /**
-     * Change the scan allowlist / directory filter. Widening it must re-import the
-     * newly-included folders, so we reset the scan cursor and kick a fresh sweep.
+     * Change the scan allowlist / directory filter. The scan is a full diff, so the
+     * next sweep imports newly-included folders (and hides removed ones) by itself.
      */
     fun setScanFolders(bucketIds: Set<String>) {
         viewModelScope.launch {
             settings.setScanBuckets(bucketIds)
-            reconciler.resetCursor()
             SyncPipeline.enqueue(workManager)
         }
     }

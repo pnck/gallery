@@ -256,35 +256,33 @@ behavior change, OneDrive, and anything the owner hasn't approved in §0–§6.
 
 **Deferred requirements to fold into the 0.2.x refactor** (noted by the owner,
 alpha.104): there is currently NO way to force a full rescan — the Sync screen
-(§5.3) should gain a "Rescan library" action (cursor reset + full sweep), placed
-next to Rebuild; interaction TBD in P1.
+(§5.3) should gain a "Rescan library" action (full sweep), placed next to
+Rebuild; interaction TBD in P1.
 
-### T9 · 0.2.x data-path realignment (owner's mental model, binding)
+### T9 · Wall-integrity realignment (SHIPPED for 0.1.x — full-diff projection)
 
-The wall's data source must BE the local library, not a persisted projection of
-it. Every wall-integrity bug so far (double rows, phantom rows, cursor desync,
-prune-guard interplay) traces to one root: local photos are materialized into
-Room for display, and any persisted projection of MediaStore can diverge.
+The owner's model: the wall shows each local photo exactly once, always; cloud
+knowledge merges in; cloud-only appends. Every wall-integrity bug (double rows,
+phantoms, cursor desync) traced to one root: the Room projection was synchronized
+*incrementally* (a scan cursor), and partial synchronization always desyncs.
 
-Target (owner model: wall = local photos 1:1; cloud metadata merges in;
-cloud-only appends):
+Options evaluated (implementation choice is ours; the outcome is the owner's):
 
-- **Wall flow** = live MediaStore query → left-join cloud knowledge (by content
-  hash, falling back to localUri) → `TimelinePhoto`; cloud-only rows append from
-  the cloud-listing cache. Sort/filter evaluate over the merged stream (library
-  scale 10⁴ — fine in memory).
-- **Room keeps only cloud knowledge**: hash↔cloudId links, badge inputs, upload
-  queue bookkeeping (queued/excluded/attempts), sync_keys, upload_sessions.
-  **No local photo list is persisted at all.**
-- **Scan stops feeding display**; its only jobs are lazy hashing for
-  classification/upload eligibility and observing new media (ContentObserver).
-- Bug classes eliminated *by construction*: display duplicates (any cause,
-  including MediaStore reindex id churn), phantoms, cursor bugs, wipe fallout.
+- **A′ — full-diff projection (CHOSEN, 0.1.x)**: the projection is RE-DERIVED
+  wholesale on every scan — insert new, refresh changed, delete local-backed rows
+  whose file vanished. No cursor at all. Guards: blind-scan veto on the delete
+  side only (<5% of known rows returned → apply inserts/updates, skip deletes);
+  allowlist-scoped deletion; process-wide scan mutex; UNIQUE(localUri) +
+  INSERT OR IGNORE as integrity constraints. After every scan the projection IS
+  MediaStore — duplicates and ghosts self-heal on the next scan, by construction.
+  Cost: a sub-second metadata query per trigger, unchanged from before.
+- **B — no persisted local list (deferred)**: wall = live MediaStore stream
+  left-joined with cloud-knowledge tables; Room holds links/queue/sessions only.
+  Cleanest end state but rewrites the repo/pager/counts/upload-queue path
+  (2–3 d) — disproportionate for the 0.1.x line. Revisit if A′ ever shows a
+  structural crack; the visible outcomes are identical.
 
-Surfaces touched: `PhotoRepository.getTimeline`, the detail pager, badge
-derivation, selection/free-space keying. Estimated 2–3 d on top of the phases
-above. This is the 0.2.x centerpiece; the UX phases above ship first and are
-compatible with either data path.
+0.2.x remains the UI revamp; T9 is 0.1.x stabilization, shipped.
 
 ---
 

@@ -47,6 +47,10 @@ interface PhotoDao {
     @Query("SELECT * FROM photos")
     suspend fun getAllRows(): List<PhotoEntity>
 
+    /** Local-backed rows for the scan's full-diff (rows whose file may have vanished). */
+    @Query("SELECT * FROM photos WHERE localUri IS NOT NULL")
+    suspend fun getLocalBackedRows(): List<PhotoEntity>
+
     /** Row count — the scan cursor's sanity check ("cursor > 0 with an empty library
      *  means the cache was wiped without the cursor: rescan from zero"). */
     @Query("SELECT COUNT(*) FROM photos")
