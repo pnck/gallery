@@ -91,11 +91,14 @@ jobs:
           fi
 
       # Release versioning:
-      #  - main push  → rolling pre-release vA.B.(C+1)-alpha.N, where the base
-      #    A.B.(C+1) comes from the newest stable vA.B.C tag and N counts ROLLING
-      #    RELEASES, not commits: highest existing alpha number for that base + 1
-      #    (one push = one roll, consecutive even for multi-commit pushes; pruned
-      #    old alphas don't break monotonicity). No stable tag yet → v0.1.0-alpha.N.
+      #  - main push  → rolling pre-release vBASE-alpha.N. BASE comes from the
+      #    repo-tracked file `release-next-base` when present (explicit line
+      #    transitions, e.g. 0.2.0 after the final 0.1.x tag); otherwise it is
+      #    derived from the newest stable vA.B.C tag as vA.B.(C+1). N counts
+      #    ROLLING RELEASES, not commits: highest existing alpha number for that
+      #    base + 1 (one push = one roll, consecutive even for multi-commit
+      #    pushes; pruned old alphas don't break monotonicity). A new base
+      #    restarts N at 1 automatically. No stable tag yet → v0.1.0-alpha.N.
       #  - tag push   → official release named after the tag (vA.B.C).
       - name: Compute release version
         id: ver
@@ -104,13 +107,17 @@ jobs:
           if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
             v="$GITHUB_REF_NAME"
           else
-            latest=$(git tag -l 'v*' --sort=-v:refname \
-              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)
-            if [ -n "$latest" ]; then
-              IFS=. read -r a b c <<< "${latest#v}"
-              base="v$a.$b.$((c+1))"
+            if [ -s release-next-base ]; then
+              base="v$(tr -d '[:space:]' < release-next-base)"
             else
-              base="v0.1.0"
+              latest=$(git tag -l 'v*' --sort=-v:refname \
+                | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)
+              if [ -n "$latest" ]; then
+                IFS=. read -r a b c <<< "${latest#v}"
+                base="v$a.$b.$((c+1))"
+              else
+                base="v0.1.0"
+              fi
             fi
             last=$(git tag -l "$base-alpha.*" --sort=-v:refname | head -1 || true)
             n=$(( ${last##*-alpha.} + 1 )) 2>/dev/null || n=1
