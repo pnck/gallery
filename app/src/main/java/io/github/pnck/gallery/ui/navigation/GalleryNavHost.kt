@@ -41,6 +41,7 @@ import io.github.pnck.gallery.ui.detail.PhotoDetailScreen
 import io.github.pnck.gallery.ui.mydrive.MyDriveScreen
 import io.github.pnck.gallery.ui.settings.SettingsScreen
 import io.github.pnck.gallery.ui.settings.TransportScreen
+import io.github.pnck.gallery.ui.settings.folders.LibraryFoldersScreen
 import io.github.pnck.gallery.ui.storage.SpaceManagementScreen
 import io.github.pnck.gallery.ui.timeline.TimelineScreen
 import kotlin.math.roundToInt
@@ -54,6 +55,7 @@ object Routes {
     const val TRANSPORT = "transport"
     const val STORAGE = "storage"
     const val DIAGNOSTICS = "diagnostics"
+    const val LIBRARY_FOLDERS = "library_folders"
     const val PHOTO_DETAIL = "photo/{photoId}"
 
     fun photoDetail(photoId: String) = "photo/$photoId"
@@ -123,6 +125,7 @@ fun GalleryNavHost() {
                 TimelineScreen(
                     onPhotoClick = { photoId -> navController.navigate(Routes.photoDetail(photoId)) },
                     onSettingsClick = { navController.navigate(Routes.SETTINGS) },
+                    onLibraryFoldersClick = { navController.navigate(Routes.LIBRARY_FOLDERS) },
                     onOpenDrawer = openDrawer,
                     drawerEnabled = topLevel,
                 )
@@ -149,7 +152,11 @@ fun GalleryNavHost() {
                     onTransportClick = { navController.navigate(Routes.TRANSPORT) },
                     onStorageClick = { navController.navigate(Routes.STORAGE) },
                     onDiagnosticsClick = { navController.navigate(Routes.DIAGNOSTICS) },
+                    onLibraryFoldersClick = { navController.navigate(Routes.LIBRARY_FOLDERS) },
                 )
+            }
+            composable(Routes.LIBRARY_FOLDERS) {
+                LibraryFoldersScreen(onBack = { navController.popBackStack() })
             }
             composable(Routes.TRANSPORT) {
                 TransportScreen(onBack = { navController.popBackStack() })

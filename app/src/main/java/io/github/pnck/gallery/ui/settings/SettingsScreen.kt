@@ -66,6 +66,7 @@ fun SettingsScreen(
     onTransportClick: () -> Unit,
     onStorageClick: () -> Unit,
     onDiagnosticsClick: () -> Unit,
+    onLibraryFoldersClick: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
@@ -184,6 +185,22 @@ fun SettingsScreen(
                             state.cloudReachable == false -> stringResource(R.string.account_unreachable)
                             state.cloudReachable == null -> stringResource(R.string.account_checking)
                             else -> stringResource(R.string.settings_google_connected)
+                        },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+            )
+            HorizontalDivider()
+            ListItem(
+                modifier = Modifier.clickable(onClick = onLibraryFoldersClick),
+                headlineContent = { Text(stringResource(R.string.library_folders_title)) },
+                supportingContent = {
+                    val scope by viewModel.scanBuckets.collectAsState()
+                    Text(
+                        if (scope.isEmpty()) {
+                            stringResource(R.string.folders_all)
+                        } else {
+                            stringResource(R.string.library_folders_some, scope.size)
                         },
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

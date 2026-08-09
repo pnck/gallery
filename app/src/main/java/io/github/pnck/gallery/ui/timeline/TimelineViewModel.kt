@@ -8,7 +8,6 @@ import android.util.Log
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.pnck.gallery.data.settings.AppSettingsStore
 import io.github.pnck.gallery.data.sync.MediaReconciler
-import io.github.pnck.gallery.domain.MediaBucket
 import io.github.pnck.gallery.domain.PhotoRepository
 import io.github.pnck.gallery.domain.SyncCounts
 import io.github.pnck.gallery.domain.SyncFilter
@@ -125,10 +124,6 @@ class TimelineViewModel @Inject constructor(
     val scanBuckets: StateFlow<Set<String>> = settings.scanBuckets
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
-    /** Device folders offered in the directory picker; loaded on demand. */
-    private val _buckets = MutableStateFlow<List<MediaBucket>>(emptyList())
-    val buckets: StateFlow<List<MediaBucket>> = _buckets.asStateFlow()
-
     /**
      * The whole ordered/filtered timeline (metadata only), PAIRED with the sort it
      * was actually ordered by. The grid groups it into date sections whose headers
@@ -190,22 +185,6 @@ class TimelineViewModel @Inject constructor(
 
     fun setSyncFilter(filter: SyncFilter) {
         queryHolder.setFilter(filter)
-    }
-
-    /** Load the device folder list (MediaStore buckets) for the directory picker. */
-    fun refreshBuckets() {
-        viewModelScope.launch { _buckets.value = repo.availableBuckets() }
-    }
-
-    /**
-     * Change the scan allowlist / directory filter. The scan is a full diff, so the
-     * next sweep imports newly-included folders (and hides removed ones) by itself.
-     */
-    fun setScanFolders(bucketIds: Set<String>) {
-        viewModelScope.launch {
-            settings.setScanBuckets(bucketIds)
-            SyncPipeline.enqueue(workManager)
-        }
     }
 
     /** Sync indicator for the TopAppBar (PRD §9.1), derived from the unique chain. */

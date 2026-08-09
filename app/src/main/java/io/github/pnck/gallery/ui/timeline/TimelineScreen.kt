@@ -54,6 +54,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -102,7 +103,6 @@ import androidx.work.WorkInfo
 import io.github.pnck.gallery.work.AutostartProbeWorker
 import coil3.compose.AsyncImage
 import io.github.pnck.gallery.R
-import io.github.pnck.gallery.domain.MediaBucket
 import io.github.pnck.gallery.domain.SyncBadge
 import io.github.pnck.gallery.domain.SyncCounts
 import io.github.pnck.gallery.domain.SyncFilter
@@ -133,6 +133,8 @@ import java.util.Locale
 fun TimelineScreen(
     onPhotoClick: (String) -> Unit,
     onSettingsClick: () -> Unit,
+    /** The timeline "Filtered" chip → Settings' library-folders screen (§5.4). */
+    onLibraryFoldersClick: () -> Unit = {},
     onOpenDrawer: () -> Unit = {},
     /** False until this destination has settled (RESUMED) — guards the hamburger. */
     drawerEnabled: Boolean = true,
@@ -156,7 +158,6 @@ fun TimelineScreen(
     val sort by viewModel.sort.collectAsState()
     val syncFilter by viewModel.syncFilter.collectAsState()
     val scanBuckets by viewModel.scanBuckets.collectAsState()
-    val buckets by viewModel.buckets.collectAsState()
     val authorized by viewModel.googleAuthorized.collectAsState()
     val scanSettled by viewModel.scanSettled.collectAsState()
     val blindScanAt by viewModel.blindScanAt.collectAsState()
@@ -188,7 +189,6 @@ fun TimelineScreen(
     var showStatus by remember { mutableStateOf(false) }
     var showClearConfirm by remember { mutableStateOf(false) }
     var showViewOptions by remember { mutableStateOf(false) }
-    var showFolders by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
 
     // Pinch to change thumbnail density (Google-Photos grid zoom).
@@ -357,6 +357,18 @@ fun TimelineScreen(
                 onPause = viewModel::pauseBackup,
                 onResume = viewModel::resumeBackup,
             )
+            // A restricted library scope is never hidden state (§5.4): the chip
+            // shows whenever folders are limited and taps through to the picker.
+            if (scanBuckets.isNotEmpty()) {
+                Box(Modifier.fillMaxWidth().padding(vertical = 2.dp), contentAlignment = Alignment.Center) {
+                    AssistChip(
+                        onClick = onLibraryFoldersClick,
+                        label = {
+                            Text(stringResource(R.string.library_filtered_chip, scanBuckets.size))
+                        },
+                    )
+                }
+            }
             if (photos.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     if (!scanSettled) {
@@ -476,21 +488,8 @@ fun TimelineScreen(
             ViewOptionsSheet(
                 sort = sort,
                 filter = syncFilter,
-                folderCount = scanBuckets.size,
                 onSortChange = viewModel::setSort,
                 onFilterChange = viewModel::setSyncFilter,
-                onFoldersClick = { showViewOptions = false; showFolders = true },
-            )
-        }
-    }
-
-    if (showFolders) {
-        LaunchedEffect(Unit) { viewModel.refreshBuckets() }
-        ModalBottomSheet(onDismissRequest = { showFolders = false }) {
-            FoldersSheet(
-                buckets = buckets,
-                selected = scanBuckets,
-                onApply = { ids -> viewModel.setScanFolders(ids); showFolders = false },
             )
         }
     }
@@ -500,10 +499,8 @@ fun TimelineScreen(
 private fun ViewOptionsSheet(
     sort: TimelineSort,
     filter: SyncFilter,
-    folderCount: Int,
     onSortChange: (TimelineSort) -> Unit,
     onFilterChange: (SyncFilter) -> Unit,
-    onFoldersClick: () -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 8.dp)) {
         Text(stringResource(R.string.sort_title), style = MaterialTheme.typography.titleMedium)
@@ -533,24 +530,6 @@ private fun ViewOptionsSheet(
         filters.forEach { (value, label) ->
             OptionRow(selected = filter == value, label = stringResource(label)) { onFilterChange(value) }
         }
-
-        Spacer(Modifier.height(12.dp))
-        HorizontalDivider()
-        ListItem(
-            modifier = Modifier.clickable(onClick = onFoldersClick),
-            leadingContent = { Icon(Icons.Default.Folder, contentDescription = null) },
-            headlineContent = { Text(stringResource(R.string.folders_row)) },
-            supportingContent = {
-                Text(
-                    if (folderCount == 0) {
-                        stringResource(R.string.folders_all)
-                    } else {
-                        stringResource(R.string.folders_selected, folderCount)
-                    },
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            },
-        )
         Spacer(Modifier.height(16.dp))
     }
 }
@@ -565,74 +544,6 @@ private fun OptionRow(selected: Boolean, label: String, onClick: () -> Unit) {
         Spacer(Modifier.width(8.dp))
         Text(label, style = MaterialTheme.typography.bodyLarge)
     }
-}
-
-/**
- * Directory picker = the scan allowlist (PRD §6.1). No folders checked means "all
- * folders"; checking a subset restricts both the grid AND what the scanner imports
- * and backs up. A local, editable copy is applied on confirm.
- */
-@Composable
-private fun FoldersSheet(
-    buckets: List<MediaBucket>,
-    selected: Set<String>,
-    onApply: (Set<String>) -> Unit,
-) {
-    var working by remember(selected) { mutableStateOf(selected) }
-    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp).padding(bottom = 16.dp)) {
-        Text(
-            stringResource(R.string.folders_title),
-            style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-        )
-        Text(
-            stringResource(R.string.folders_hint),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 16.dp),
-        )
-        Spacer(Modifier.height(8.dp))
-        LazyColumn(Modifier.fillMaxWidth().height(360.dp)) {
-            item {
-                FolderRow(
-                    name = stringResource(R.string.folders_all),
-                    subtitle = null,
-                    checked = working.isEmpty(),
-                    onToggle = { working = emptySet() },
-                )
-            }
-            items(buckets, key = { it.id }) { bucket ->
-                val path = bucket.path
-                FolderRow(
-                    name = bucket.name,
-                    subtitle = if (path != null) {
-                        stringResource(R.string.folders_path_count, path, bucket.count)
-                    } else {
-                        stringResource(R.string.folders_photo_count, bucket.count)
-                    },
-                    checked = bucket.id in working,
-                    onToggle = {
-                        working = working.toMutableSet().apply { if (!add(bucket.id)) remove(bucket.id) }
-                    },
-                )
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        FilledTonalButton(
-            onClick = { onApply(working) },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-        ) { Text(stringResource(R.string.folders_apply)) }
-    }
-}
-
-@Composable
-private fun FolderRow(name: String, subtitle: String?, checked: Boolean, onToggle: () -> Unit) {
-    ListItem(
-        modifier = Modifier.clickable(onClick = onToggle),
-        leadingContent = { Checkbox(checked = checked, onCheckedChange = { onToggle() }) },
-        headlineContent = { Text(name) },
-        supportingContent = subtitle?.let { { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
-    )
 }
 
 /** A row in the sectioned timeline grid: a full-width date header or one photo. */

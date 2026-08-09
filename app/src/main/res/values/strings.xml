@@ -196,14 +196,16 @@
     <string name="filter_not_backed">Not backed up</string>
     <string name="filter_backed">Backed up</string>
     <string name="filter_cloud">Cloud only</string>
-    <string name="folders_row">Folders</string>
     <string name="folders_all">All folders</string>
-    <string name="folders_selected">%1$d selected</string>
-    <string name="folders_title">Folders to include</string>
-    <string name="folders_hint">Only photos in the selected folders are shown and backed up. Choosing none includes every folder.</string>
     <string name="folders_photo_count">%1$d photos</string>
     <string name="folders_path_count">%1$s · %2$d photos</string>
-    <string name="folders_apply">Apply</string>
+
+    <!-- Library folders (scope picker, settings child — docs/GALLERY-UX-INTERACTION.md §5.4) -->
+    <string name="library_folders_title">Library folders</string>
+    <string name="library_folders_purpose">Photos in selected folders are shown in your gallery and included in backup. Select none to include every folder.</string>
+    <string name="library_folders_some">%1$d folders</string>
+    <string name="library_folders_loading">Loading folders…</string>
+    <string name="library_filtered_chip">Filtered · %1$d folders</string>
 
     <!-- Space management (T-302) -->
     <string name="storage_title">Storage</string>

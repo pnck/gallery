@@ -76,6 +76,10 @@ class SettingsViewModel @Inject constructor(
     val remoteFolderName: StateFlow<String> = settings.remoteFolderName
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AppSettingsStore.DEFAULT_FOLDER_NAME)
 
+    /** Library scope allowlist (empty = all folders) — drives the row summary. */
+    val scanBuckets: StateFlow<Set<String>> = settings.scanBuckets
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
     fun updateRemoteFolderName(name: String) {
         viewModelScope.launch { settings.setRemoteFolderName(name) }
     }
