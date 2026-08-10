@@ -133,8 +133,6 @@ import java.util.Locale
 fun TimelineScreen(
     onPhotoClick: (String) -> Unit,
     onSettingsClick: () -> Unit,
-    /** The timeline "Filtered" chip → Settings' library-folders screen (§5.4). */
-    onLibraryFoldersClick: () -> Unit = {},
     onOpenDrawer: () -> Unit = {},
     /** False until this destination has settled (RESUMED) — guards the hamburger. */
     drawerEnabled: Boolean = true,
@@ -157,7 +155,6 @@ fun TimelineScreen(
     val backupState by viewModel.backupState.collectAsState()
     val sort by viewModel.sort.collectAsState()
     val syncFilter by viewModel.syncFilter.collectAsState()
-    val scanBuckets by viewModel.scanBuckets.collectAsState()
     val authorized by viewModel.googleAuthorized.collectAsState()
     val scanSettled by viewModel.scanSettled.collectAsState()
     val blindScanAt by viewModel.blindScanAt.collectAsState()
@@ -357,14 +354,25 @@ fun TimelineScreen(
                 onPause = viewModel::pauseBackup,
                 onResume = viewModel::resumeBackup,
             )
-            // A restricted library scope is never hidden state (§5.4): the chip
-            // shows whenever folders are limited and taps through to the picker.
-            if (scanBuckets.isNotEmpty()) {
+            // On-wall indicators are for TEMPORARY view state only — the sync-state
+            // filter changes per session, so an active one gets a chip (tap = change
+            // it). The folder scope is durable config: it lives in Settings and has
+            // no business floating over the wall.
+            if (syncFilter != SyncFilter.ALL) {
                 Box(Modifier.fillMaxWidth().padding(vertical = 2.dp), contentAlignment = Alignment.Center) {
                     AssistChip(
-                        onClick = onLibraryFoldersClick,
+                        onClick = { showViewOptions = true },
                         label = {
-                            Text(stringResource(R.string.library_filtered_chip, scanBuckets.size))
+                            Text(
+                                stringResource(
+                                    when (syncFilter) {
+                                        SyncFilter.NOT_BACKED_UP -> R.string.filter_not_backed
+                                        SyncFilter.BACKED_UP -> R.string.filter_backed
+                                        SyncFilter.CLOUD_ONLY -> R.string.filter_cloud
+                                        SyncFilter.ALL -> R.string.filter_all
+                                    },
+                                ),
+                            )
                         },
                     )
                 }
@@ -866,7 +874,8 @@ private fun SyncStatusSheet(
 
         Spacer(Modifier.height(16.dp))
         FilledTonalButton(onClick = onSyncNow, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.force_sync))
+            // Same action as the overflow menu — one action, one name ("Back up now").
+            Text(stringResource(R.string.backup_now))
         }
         Spacer(Modifier.height(8.dp))
         TextButton(onClick = onRebuild, modifier = Modifier.fillMaxWidth()) {

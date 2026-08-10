@@ -43,7 +43,6 @@
     <string name="more">More</string>
     <string name="timeline_empty">No photos yet — sign in to your cloud storage in Settings to get started.</string>
 
-    <string name="force_sync">Sync now</string>
     <string name="sync_scanning">Scanning library…</string>
     <string name="sync_uploading">Uploading %1$d/%2$d…</string>
 
@@ -205,7 +204,6 @@
     <string name="library_folders_purpose">Photos in selected folders are shown in your gallery and included in backup. Select none to include every folder.</string>
     <string name="library_folders_some">%1$d folders</string>
     <string name="library_folders_loading">Loading folders…</string>
-    <string name="library_filtered_chip">Filtered · %1$d folders</string>
 
     <!-- Space management (T-302) -->
     <string name="storage_title">Storage</string>

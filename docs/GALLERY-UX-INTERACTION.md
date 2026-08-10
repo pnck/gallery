@@ -159,14 +159,16 @@ not text). Exit on ✕, back, or empty selection.
 A `Sync` destination. Top: the honest status line (Idle/Scanning/Uploading/
 Failed/Not-connected, colored by severity). Fix rows next (media, autostart).
 Counts (§4.3). Queue (each chain: name + state). Actions at the bottom as
-full-width tonal buttons: Sync now · Rebuild · Clear queue (only when N>0).
+full-width tonal buttons: Back up now · Rebuild · Clear queue (only when N>0).
 This is the app's instrument panel — density is fine here; it scrolls.
 
 ### 5.4 Library folders (Settings child)
 One scrolling screen: a one-line purpose header ("Shown in your gallery and
-included in backup"), an "All folders" master row, then §4.4 rows. Applying a
-restricted scope shows a **"Filtered" chip on the timeline** (top-end, taps
-through to the screen) — scope is never hidden state.
+included in backup"), an "All folders" master row, then §4.4 rows. Scope is
+durable configuration — it surfaces in the settings row summary, NOT on the
+wall. On-wall indicators are reserved for *temporary* view state: an active
+sync-state filter (≠ All) gets a small chip that opens view options; the folder
+scope never does.
 
 ### 5.5 Settings
 A single column of labelled rows + one-line subtitles, grouped: Account · Library

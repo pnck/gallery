@@ -125,7 +125,6 @@ fun GalleryNavHost() {
                 TimelineScreen(
                     onPhotoClick = { photoId -> navController.navigate(Routes.photoDetail(photoId)) },
                     onSettingsClick = { navController.navigate(Routes.SETTINGS) },
-                    onLibraryFoldersClick = { navController.navigate(Routes.LIBRARY_FOLDERS) },
                     onOpenDrawer = openDrawer,
                     drawerEnabled = topLevel,
                 )
