@@ -8,10 +8,6 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import androidx.core.content.FileProvider
-import androidx.paging.Pager
-import androidx.paging.PagingConfig
-import androidx.paging.PagingData
-import androidx.paging.map
 import androidx.sqlite.db.SimpleSQLiteQuery
 import androidx.sqlite.db.SupportSQLiteQuery
 import io.github.pnck.gallery.data.db.PhotoDao
@@ -50,12 +46,6 @@ class PhotoRepositoryImpl(
     private val provider: ICloudStorageProvider,
     private val resolver: ContentResolver,
 ) : PhotoRepository {
-
-    override fun getPagedTimelinePhotos(query: TimelineQuery): Flow<PagingData<TimelinePhoto>> =
-        Pager(
-            config = PagingConfig(pageSize = 90, enablePlaceholders = true),
-            pagingSourceFactory = { photoDao.getPhotosPaged(buildTimelineQuery(query)) },
-        ).flow.map { paging -> paging.map { it.toTimelinePhoto() } }
 
     override fun getTimeline(query: TimelineQuery): Flow<List<TimelinePhoto>> =
         photoDao.observePhotos(buildTimelineQuery(query)).map { rows -> rows.map { it.toTimelinePhoto() } }

@@ -1,6 +1,5 @@
 package io.github.pnck.gallery.domain
 
-import androidx.paging.PagingData
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -9,9 +8,6 @@ import kotlinx.coroutines.flow.Flow
  * Implementations live in :core-data (Room-backed PagingSource + RemoteMediator).
  */
 interface PhotoRepository {
-    /** Paged timeline, ordered and filtered per [query] (sort / sync-state / folders). */
-    fun getPagedTimelinePhotos(query: TimelineQuery): Flow<PagingData<TimelinePhoto>>
-
     /** Device media folders available for the scan-allowlist / directory filter (PRD §6.1). */
     suspend fun availableBuckets(): List<MediaBucket>
 

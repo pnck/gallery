@@ -1,16 +1,12 @@
-package io.github.pnck.gallery.ui.mydrive
+package io.github.pnck.gallery.provider.driveread
 
 import android.content.Context
 import android.content.Intent
 import android.util.Base64
 import android.util.Log
-import androidx.core.net.toUri
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.squareup.moshi.Moshi
-import dagger.hilt.android.qualifiers.ApplicationContext
-import io.github.pnck.gallery.BuildConfig
-import io.github.pnck.gallery.di.AuthClient
 import io.github.pnck.gallery.provider.DriveEntry
 import io.github.pnck.gallery.provider.DriveListing
 import io.github.pnck.gallery.provider.dto.DriveFileListResponse
@@ -20,8 +16,6 @@ import java.net.ServerSocket
 import java.net.URLEncoder
 import java.security.MessageDigest
 import java.security.SecureRandom
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,7 +34,7 @@ import org.json.JSONObject
  * (`http://127.0.0.1:<port>`), exactly like rclone — the system browser opens Google's
  * consent page, Google redirects to a tiny local server we bind, and we exchange the
  * code for a `drive.readonly` token. This needs a "Desktop app" OAuth client
- * (BuildConfig.GOOGLE_DESKTOP_CLIENT_ID), because the device-flow client the BACKUP path
+ * (desktopClientId), because the device-flow client the BACKUP path
  * uses cannot request `drive.readonly` (invalid_scope).
  *
  * Kept fully apart from the backup path: its token lives in its own encrypted store and
@@ -48,11 +42,14 @@ import org.json.JSONObject
  * adds no Bearer of its own), so backup keeps using its least-privilege drive.file token.
  * Read-only, so the drive.file "per-client file ownership" issue never arises.
  */
-@Singleton
-class DriveReadAccess @Inject constructor(
-    @ApplicationContext private val context: Context,
-    @AuthClient private val client: OkHttpClient,
+class DriveReadAccess(
+    private val context: Context,
+    private val client: OkHttpClient,
     private val moshi: Moshi,
+    /** The "Desktop app" OAuth client id (the backup device-flow client cannot
+     *  request drive.readonly) — supplied by the app's BuildConfig at the DI edge. */
+    private val desktopClientId: String,
+    private val desktopClientSecret: String,
 ) {
     @Suppress("DEPRECATION")
     private val prefs by lazy {
@@ -66,7 +63,7 @@ class DriveReadAccess @Inject constructor(
         )
     }
 
-    val configured: Boolean get() = BuildConfig.GOOGLE_DESKTOP_CLIENT_ID.isNotBlank()
+    val configured: Boolean get() = desktopClientId.isNotBlank()
 
     fun isAuthorized(): Boolean = prefs.getString(REFRESH, null) != null
 
@@ -96,14 +93,14 @@ class DriveReadAccess @Inject constructor(
                 server.soTimeout = AUTH_TIMEOUT_MS
                 val redirect = "http://127.0.0.1:${server.localPort}"
                 val authUrl = "https://accounts.google.com/o/oauth2/v2/auth" +
-                    "?client_id=${enc(BuildConfig.GOOGLE_DESKTOP_CLIENT_ID)}" +
+                    "?client_id=${enc(desktopClientId)}" +
                     "&redirect_uri=${enc(redirect)}" +
                     "&response_type=code" +
                     "&scope=${enc(io.github.pnck.gallery.provider.OAuthConfig.Google.SCOPE_DRIVE_READ)}" +
                     "&code_challenge=$challenge&code_challenge_method=S256" +
                     "&access_type=offline&prompt=consent"
                 context.startActivity(
-                    Intent(Intent.ACTION_VIEW, authUrl.toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    Intent(Intent.ACTION_VIEW, android.net.Uri.parse(authUrl)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 )
                 val code = server.accept().use { readCode(it) }
                     ?: return@runCatching "No authorization code returned."
@@ -227,8 +224,8 @@ class DriveReadAccess @Inject constructor(
     private fun exchangeCode(code: String, verifier: String, redirect: String): String? {
         val form = FormBody.Builder()
             .add("code", code)
-            .add("client_id", BuildConfig.GOOGLE_DESKTOP_CLIENT_ID)
-            .add("client_secret", BuildConfig.GOOGLE_DESKTOP_CLIENT_SECRET)
+            .add("client_id", desktopClientId)
+            .add("client_secret", desktopClientSecret)
             .add("redirect_uri", redirect)
             .add("grant_type", "authorization_code")
             .add("code_verifier", verifier)
@@ -238,8 +235,8 @@ class DriveReadAccess @Inject constructor(
 
     private fun refresh(refreshToken: String): String? {
         val form = FormBody.Builder()
-            .add("client_id", BuildConfig.GOOGLE_DESKTOP_CLIENT_ID)
-            .add("client_secret", BuildConfig.GOOGLE_DESKTOP_CLIENT_SECRET)
+            .add("client_id", desktopClientId)
+            .add("client_secret", desktopClientSecret)
             .add("refresh_token", refreshToken)
             .add("grant_type", "refresh_token")
             .build()

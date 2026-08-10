@@ -47,6 +47,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import io.github.pnck.gallery.BuildConfig
 import io.github.pnck.gallery.R
+import io.github.pnck.gallery.transport.TransportForm
 import io.github.pnck.gallery.transport.WireguardTools
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation

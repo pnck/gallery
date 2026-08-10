@@ -7,7 +7,7 @@ import coil3.ImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import com.squareup.moshi.Moshi
 import io.github.pnck.gallery.ui.coil.ProviderUriFetcher
-import io.github.pnck.gallery.ui.mydrive.DriveReadAccess
+import io.github.pnck.gallery.provider.driveread.DriveReadAccess
 import io.github.pnck.gallery.ui.mydrive.DriveReadUrlFetcher
 import dagger.Module
 import dagger.Provides
@@ -30,7 +30,10 @@ import io.github.pnck.gallery.data.sync.UploadBatchProcessor
 import io.github.pnck.gallery.domain.PhotoRepository
 import io.github.pnck.gallery.network.SharedHttpClient
 import io.github.pnck.gallery.network.transport.OutboundRouter
+import io.github.pnck.gallery.transport.SrvEndpointResolver
 import io.github.pnck.gallery.transport.SystemVpnMonitor
+import io.github.pnck.gallery.transport.TransportConfigStore
+import io.github.pnck.gallery.transport.TransportConnector
 import io.github.pnck.gallery.transport.TransportController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -111,6 +114,26 @@ object AppModule {
             onRouteRebind = { SharedHttpClient.evictAll() }
         }
 
+    // Transport helpers live in :core-transport (plain constructors); Hilt wires them here.
+    @Provides
+    @Singleton
+    fun provideTransportConfigStore(@ApplicationContext context: Context): TransportConfigStore =
+        TransportConfigStore(context)
+
+    @Provides
+    @Singleton
+    fun provideSrvEndpointResolver(@AuthClient client: OkHttpClient): SrvEndpointResolver =
+        SrvEndpointResolver(client)
+
+    @Provides
+    @Singleton
+    fun provideTransportConnector(
+        controller: TransportController,
+        configStore: TransportConfigStore,
+        srvResolver: SrvEndpointResolver,
+        client: OkHttpClient,
+    ): TransportConnector = TransportConnector(controller, configStore, srvResolver, client)
+
     @Provides
     @Singleton
     fun provideOutboundRouter(controller: TransportController): OutboundRouter = controller.router
@@ -179,6 +202,21 @@ object AppModule {
             }
             .build()
 
+    /** The opt-in drive.readonly client for "My Drive" (core-provider; secrets via BuildConfig). */
+    @Provides
+    @Singleton
+    fun provideDriveReadAccess(
+        @ApplicationContext context: Context,
+        @AuthClient bareClient: OkHttpClient,
+        moshi: Moshi,
+    ): DriveReadAccess = DriveReadAccess(
+        context,
+        bareClient,
+        moshi,
+        BuildConfig.GOOGLE_DESKTOP_CLIENT_ID,
+        BuildConfig.GOOGLE_DESKTOP_CLIENT_SECRET,
+    )
+
     @Provides
     @Singleton
     fun provideDeviceAuthApiService(@AuthClient client: OkHttpClient, moshi: Moshi): DeviceAuthApiService =
@@ -187,8 +225,7 @@ object AppModule {
             .baseUrl("https://oauth2.googleapis.com/")
             .client(client)
             .addConverterFactory(MoshiConverterFactory.create(moshi))
-            .build()
-            .create(DeviceAuthApiService::class.java)
+            .build()            .create(DeviceAuthApiService::class.java)
 
     @Provides
     @Singleton

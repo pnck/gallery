@@ -1,6 +1,5 @@
 package io.github.pnck.gallery.data.db
 
-import androidx.paging.PagingSource
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
@@ -17,15 +16,6 @@ import kotlinx.coroutines.flow.Flow
  */
 @Dao
 interface PhotoDao {
-
-    /**
-     * Timeline page source with a caller-built ORDER BY / WHERE (sort + sync-state +
-     * folder allowlist). The query string is assembled in the repository from a
-     * closed set of columns/keywords — never user text — so there is no injection
-     * surface (PRD §9.1).
-     */
-    @RawQuery(observedEntities = [PhotoEntity::class])
-    fun getPhotosPaged(query: SupportSQLiteQuery): PagingSource<Int, PhotoEntity>
 
     /**
      * Ordered/filtered snapshot for the detail-view pager (PRD §9.1) — same caller-built

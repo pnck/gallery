@@ -52,6 +52,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     // The Android-mode UniFFI cleaner is annotated @RequiresApi(33).
     implementation(libs.androidx.annotation)
+    implementation(libs.androidx.security.crypto)
 
     // UniFFI bindings call the Rust core through JNA. The @aar variant bundles
     // JNA's own per-ABI native lib; the plain jar would crash at load on device.
@@ -59,6 +60,8 @@ dependencies {
         artifact { type = "aar" }
     }
 
+    // Real org.json for local unit tests (the framework one is a throwing stub).
+    testImplementation(libs.org.json)
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
 }

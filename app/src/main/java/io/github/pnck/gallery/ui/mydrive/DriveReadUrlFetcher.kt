@@ -1,6 +1,7 @@
 package io.github.pnck.gallery.ui.mydrive
 
 import coil3.ImageLoader
+import io.github.pnck.gallery.provider.driveread.DriveReadAccess
 import coil3.decode.DataSource
 import coil3.decode.ImageSource
 import coil3.fetch.FetchResult

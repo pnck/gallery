@@ -1,13 +1,11 @@
-package io.github.pnck.gallery.discovery
+package io.github.pnck.gallery.transport
 
 import android.annotation.SuppressLint
 import android.net.DnsResolver
 import android.os.Build
 import android.os.CancellationSignal
 import androidx.annotation.RequiresApi
-import io.github.pnck.gallery.di.AuthClient
 import io.github.pnck.gallery.network.transport.Endpoint
-import javax.inject.Inject
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.Dispatchers
@@ -34,8 +32,8 @@ import org.json.JSONObject
  * The lookup is deliberate pre-tunnel traffic and, in the DoH fallback, uses the
  * [AuthClient] bare client so it never carries a Bearer or depends on sign-in.
  */
-class SrvEndpointResolver @Inject constructor(
-    @AuthClient private val client: OkHttpClient,
+class SrvEndpointResolver(
+    private val client: OkHttpClient,
 ) {
     /**
      * Resolve [srvName] (e.g. "_wireguard._udp.example.com") to an [Endpoint].

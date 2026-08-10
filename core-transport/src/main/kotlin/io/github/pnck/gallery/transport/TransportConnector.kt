@@ -1,14 +1,12 @@
-package io.github.pnck.gallery.ui.settings
+package io.github.pnck.gallery.transport
 
-import io.github.pnck.gallery.discovery.SrvEndpointResolver
+
 import io.github.pnck.gallery.network.transport.Cred
 import io.github.pnck.gallery.network.transport.Endpoint
 import io.github.pnck.gallery.network.transport.TransportConfig
 import io.github.pnck.gallery.network.transport.WgConfig
 import io.github.pnck.gallery.transport.TransportController
 import java.util.concurrent.atomic.AtomicBoolean
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -19,8 +17,7 @@ import okhttp3.OkHttpClient
  * has no long-lived connection to keep alive — reconnecting is cheap — so if the
  * user last left it ON we bring it back up on start (EPIC-5).
  */
-@Singleton
-class TransportConnector @Inject constructor(
+class TransportConnector(
     private val controller: TransportController,
     private val configStore: TransportConfigStore,
     private val srvResolver: SrvEndpointResolver,

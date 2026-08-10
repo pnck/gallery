@@ -1,12 +1,9 @@
-package io.github.pnck.gallery.ui.settings
+package io.github.pnck.gallery.transport
 
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
-import dagger.hilt.android.qualifiers.ApplicationContext
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /** Persisted transport form + the derived public key (shown after reload). */
 data class SavedTransport(val form: TransportForm, val publicKey: String)
@@ -17,9 +14,8 @@ data class SavedTransport(val form: TransportForm, val publicKey: String)
  * (PRD §8.4.6), so the whole set lives in EncryptedSharedPreferences — never in
  * Room, never logged.
  */
-@Singleton
-class TransportConfigStore @Inject constructor(
-    @ApplicationContext appContext: Context,
+class TransportConfigStore(
+    appContext: Context,
 ) {
     @Suppress("DEPRECATION") // EncryptedSharedPreferences deprecated w/o a 1:1 replacement
     private val prefs: SharedPreferences by lazy {

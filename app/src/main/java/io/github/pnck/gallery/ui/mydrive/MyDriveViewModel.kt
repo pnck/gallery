@@ -15,6 +15,8 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.pnck.gallery.provider.DriveEntry
+import io.github.pnck.gallery.provider.driveread.DriveFileDetails
+import io.github.pnck.gallery.provider.driveread.DriveReadAccess
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job

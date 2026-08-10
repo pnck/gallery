@@ -1,4 +1,4 @@
-package io.github.pnck.gallery.discovery
+package io.github.pnck.gallery.transport
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull

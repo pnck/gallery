@@ -61,7 +61,7 @@ class SettingsViewModel @Inject constructor(
     private val googleAuthManager: AuthManager,
     private val settings: AppSettingsStore,
     private val provider: ICloudStorageProvider,
-    private val driveRead: io.github.pnck.gallery.ui.mydrive.DriveReadAccess,
+    private val driveRead: io.github.pnck.gallery.provider.driveread.DriveReadAccess,
     private val workManager: WorkManager,
     transportController: TransportController,
 ) : ViewModel() {

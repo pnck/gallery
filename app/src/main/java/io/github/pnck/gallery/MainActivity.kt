@@ -9,7 +9,7 @@ import androidx.lifecycle.lifecycleScope
 import dagger.hilt.android.AndroidEntryPoint
 import io.github.pnck.gallery.data.settings.AppSettingsStore
 import io.github.pnck.gallery.ui.navigation.GalleryNavHost
-import io.github.pnck.gallery.ui.settings.TransportConnector
+import io.github.pnck.gallery.transport.TransportConnector
 import io.github.pnck.gallery.ui.theme.GalleryTheme
 import io.github.pnck.gallery.ui.util.AppLocale
 import javax.inject.Inject

@@ -17,8 +17,6 @@ kotlin {
 
 dependencies {
     api(libs.kotlinx.coroutines.core)
-    // paging-common is JVM/KMP-safe; exposes PagingData/PagingSource to the domain contract
-    api(libs.androidx.paging.common)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
