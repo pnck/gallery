@@ -1,5 +1,6 @@
 package io.github.pnck.gallery
 
+import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -10,6 +11,7 @@ import io.github.pnck.gallery.data.settings.AppSettingsStore
 import io.github.pnck.gallery.ui.navigation.GalleryNavHost
 import io.github.pnck.gallery.ui.settings.TransportConnector
 import io.github.pnck.gallery.ui.theme.GalleryTheme
+import io.github.pnck.gallery.ui.util.AppLocale
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -25,6 +27,11 @@ class MainActivity : ComponentActivity() {
 
     @Inject
     lateinit var settings: AppSettingsStore
+
+    // In-app locale override (Settings → Language); identity when following system.
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(AppLocale.wrap(newBase))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

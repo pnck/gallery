@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import android.app.Activity
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -25,6 +26,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -52,6 +54,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.pnck.gallery.R
+import io.github.pnck.gallery.ui.util.AppLocale
 import io.github.pnck.gallery.ui.util.showAppToast
 import kotlinx.coroutines.launch
 
@@ -204,6 +207,51 @@ fun SettingsScreen(
                     )
                 },
             )
+            HorizontalDivider()
+            // In-app language override; recreates the activity to apply.
+            var showLanguage by remember { mutableStateOf(false) }
+            val languageTag = AppLocale.current(context)
+            ListItem(
+                modifier = Modifier.clickable { showLanguage = true },
+                headlineContent = { Text(stringResource(R.string.settings_language)) },
+                supportingContent = {
+                    Text(
+                        AppLocale.label(languageTag).ifBlank { stringResource(R.string.language_system) },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+            )
+            if (showLanguage) {
+                AlertDialog(
+                    onDismissRequest = { showLanguage = false },
+                    title = { Text(stringResource(R.string.settings_language)) },
+                    text = {
+                        Column {
+                            listOf(
+                                AppLocale.FOLLOW_SYSTEM to stringResource(R.string.language_system),
+                                "en" to AppLocale.label("en"),
+                                "zh-CN" to AppLocale.label("zh-CN"),
+                            ).forEach { (tag, label) ->
+                                Row(
+                                    Modifier.fillMaxWidth().clickable {
+                                        showLanguage = false
+                                        if (tag != languageTag) {
+                                            AppLocale.set(context, tag)
+                                            (context as? Activity)?.recreate()
+                                        }
+                                    }.padding(vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    RadioButton(selected = tag == languageTag, onClick = null)
+                                    Spacer(Modifier.width(12.dp))
+                                    Text(label)
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {},
+                )
+            }
             HorizontalDivider()
             ListItem(
                 modifier = Modifier.clickable(onClick = onStorageClick),

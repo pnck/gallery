@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="settings">设置</string>
+    <string name="settings_language">语言</string>
+    <string name="language_system">跟随系统</string>
     <string name="back">返回</string>
     <string name="open_drawer">打开导航</string>
     <string name="timeline_title">照片</string>
