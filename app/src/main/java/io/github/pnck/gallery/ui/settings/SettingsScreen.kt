@@ -30,8 +30,6 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -54,6 +52,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.pnck.gallery.R
+import io.github.pnck.gallery.ui.util.showAppToast
 import kotlinx.coroutines.launch
 
 /**
@@ -73,7 +72,6 @@ fun SettingsScreen(
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val snackbarHost = remember { SnackbarHostState() }
     val folderUnavailable = stringResource(R.string.account_folder_unavailable)
 
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -155,7 +153,6 @@ fun SettingsScreen(
     }
 
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHost) },
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.settings)) },
@@ -269,7 +266,7 @@ fun SettingsScreen(
                         if (link != null) {
                             context.startActivity(Intent(Intent.ACTION_VIEW, link.toUri()))
                         } else {
-                            snackbarHost.showSnackbar(folderUnavailable)
+                            showAppToast(context, folderUnavailable)
                         }
                     }
                 },

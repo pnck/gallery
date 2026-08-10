@@ -114,6 +114,7 @@ import io.github.pnck.gallery.ui.util.FastScroller
 import io.github.pnck.gallery.ui.util.ScrubModel
 import io.github.pnck.gallery.ui.util.pinchToStep
 import io.github.pnck.gallery.ui.util.rememberSystemDelete
+import io.github.pnck.gallery.ui.util.showAppToast
 import io.github.pnck.gallery.ui.util.hasFullMediaAccess
 import io.github.pnck.gallery.ui.util.isMiui
 import io.github.pnck.gallery.ui.util.mediaPermission
@@ -163,9 +164,6 @@ fun TimelineScreen(
     val probeCompletedAt by viewModel.autostartProbeCompletedAt.collectAsState()
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
-    val snackbarHost = remember { SnackbarHostState() }
-    val sheetSnackbarHost = remember { SnackbarHostState() }
-    var pendingSheetMessage by remember { mutableStateOf<String?>(null) }
     val systemDelete = rememberSystemDelete()
 
     // Autostart probe verdict (recomputed when either probe timestamp moves).
@@ -263,31 +261,16 @@ fun TimelineScreen(
         )
         null -> null
     }
-    // The toast is an APP-LEVEL surface: sheet actions dismiss first so their
-    // feedback lands on the scaffold host (and survives), and a background event
-    // that arrived while the sheet was open is re-shown on the main host when
-    // the sheet closes — a toast never dies with a sheet.
-    LaunchedEffect(eventMessage, showStatus) {
+    // The toast is its OWN top window (ui/util/AppToast.kt): above any sheet,
+    // alive across sheet dismissals — no routing, no handoff.
+    LaunchedEffect(eventMessage) {
         eventMessage?.let {
-            if (showStatus) {
-                pendingSheetMessage = it
-                sheetSnackbarHost.showSnackbar(it)
-            } else {
-                snackbarHost.showSnackbar(it)
-            }
+            showAppToast(context, it)
             pendingEvent = null
         }
     }
-    LaunchedEffect(showStatus) {
-        if (!showStatus && sheetSnackbarHost.currentSnackbarData != null) {
-            sheetSnackbarHost.currentSnackbarData?.dismiss()
-            pendingSheetMessage?.let { snackbarHost.showSnackbar(it) }
-        }
-        if (!showStatus) pendingSheetMessage = null
-    }
 
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHost) },
         topBar = {
             if (selectionMode) {
                 SelectionAppBar(
@@ -488,12 +471,10 @@ fun TimelineScreen(
                 accountConnected = authorized,
                 fullMediaAccess = fullMediaAccess,
                 autostartBlocked = autostartBlocked,
-                snackbarHostState = sheetSnackbarHost,
                 onFixMediaAccess = { openPermissionEditor(context) },
                 onFixAutostart = { (context as? Activity)?.let { openAutostartSettings(it) } },
-                // The sheet STAYS OPEN on actions: the toast pops above the sheet
-                // content (the sheet's own window is the topmost layer), and the
-                // close-handoff below moves it to the main host if it's still alive.
+                // The sheet stays open on actions; the toast floats above it on
+                // its own window (ui/util/AppToast.kt), unaffected by dismissal.
                 onSyncNow = viewModel::backupNow,
                 onRebuild = viewModel::rebuildSyncState,
                 onClearQueue = { showStatus = false; showClearConfirm = true },
@@ -836,16 +817,13 @@ private fun SyncStatusSheet(
     fullMediaAccess: Boolean,
     /** MIUI autostart is (almost certainly) rejecting the periodic sync job. */
     autostartBlocked: Boolean,
-    /** Sheet-local host — scaffold snackbars render UNDER this modal surface. */
-    snackbarHostState: SnackbarHostState,
     onFixMediaAccess: () -> Unit,
     onFixAutostart: () -> Unit,
     onSyncNow: () -> Unit,
     onRebuild: () -> Unit,
     onClearQueue: () -> Unit,
 ) {
-    Box(Modifier.fillMaxWidth()) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {
         Text(stringResource(R.string.sync_status_title), style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(4.dp))
         Text(
@@ -926,11 +904,6 @@ private fun SyncStatusSheet(
             }
         }
         Spacer(Modifier.height(24.dp))
-        }
-        SnackbarHost(
-            hostState = snackbarHostState,
-            modifier = Modifier.align(Alignment.BottomCenter),
-        )
     }
 }
 
