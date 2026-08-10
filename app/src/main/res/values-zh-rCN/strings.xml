@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="settings">设置</string>
+    <string name="settings_group_account">账号</string>
+    <string name="settings_group_library">图库与备份</string>
+    <string name="settings_group_general">通用</string>
+    <string name="settings_group_network">网络</string>
+    <string name="settings_group_developer">开发者</string>
     <string name="settings_language">语言</string>
     <string name="language_system">跟随系统</string>
     <string name="back">返回</string>

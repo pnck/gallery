@@ -171,6 +171,7 @@ fun SettingsScreen(
         val folderName by viewModel.remoteFolderName.collectAsState()
         var showAccount by remember { mutableStateOf(false) }
         Column(Modifier.fillMaxSize().padding(padding)) {
+            SettingsGroupHeader(stringResource(R.string.settings_group_account))
             ListItem(
                 // Tap opens the account panel — sign-out is a deliberate action there,
                 // not a one-tap on the row.
@@ -191,7 +192,7 @@ fun SettingsScreen(
                     )
                 },
             )
-            HorizontalDivider()
+            SettingsGroupHeader(stringResource(R.string.settings_group_library))
             ListItem(
                 modifier = Modifier.clickable(onClick = onLibraryFoldersClick),
                 headlineContent = { Text(stringResource(R.string.library_folders_title)) },
@@ -207,7 +208,12 @@ fun SettingsScreen(
                     )
                 },
             )
-            HorizontalDivider()
+            ListItem(
+                modifier = Modifier.clickable(onClick = onStorageClick),
+                headlineContent = { Text(stringResource(R.string.settings_storage)) },
+                supportingContent = { Text(stringResource(R.string.settings_storage_hint)) },
+            )
+            SettingsGroupHeader(stringResource(R.string.settings_group_general))
             // In-app language override; recreates the activity to apply.
             var showLanguage by remember { mutableStateOf(false) }
             val languageTag = AppLocale.current(context)
@@ -252,21 +258,7 @@ fun SettingsScreen(
                     confirmButton = {},
                 )
             }
-            HorizontalDivider()
-            ListItem(
-                modifier = Modifier.clickable(onClick = onStorageClick),
-                headlineContent = { Text(stringResource(R.string.settings_storage)) },
-                supportingContent = { Text(stringResource(R.string.settings_storage_hint)) },
-            )
-            if (BuildConfig.DIAGNOSTICS_ENABLED) {
-                HorizontalDivider()
-                ListItem(
-                    modifier = Modifier.clickable(onClick = onDiagnosticsClick),
-                    headlineContent = { Text(stringResource(R.string.diagnostics_title)) },
-                    supportingContent = { Text(stringResource(R.string.diagnostics_hint)) },
-                )
-            }
-            HorizontalDivider()
+            SettingsGroupHeader(stringResource(R.string.settings_group_network))
             val transportState by viewModel.transportState.collectAsState()
             val transportConnected = transportState is io.github.pnck.gallery.network.transport.TransportState.Connected
             ListItem(
@@ -287,6 +279,14 @@ fun SettingsScreen(
                     )
                 },
             )
+            if (BuildConfig.DIAGNOSTICS_ENABLED) {
+                SettingsGroupHeader(stringResource(R.string.settings_group_developer))
+                ListItem(
+                    modifier = Modifier.clickable(onClick = onDiagnosticsClick),
+                    headlineContent = { Text(stringResource(R.string.diagnostics_title)) },
+                    supportingContent = { Text(stringResource(R.string.diagnostics_hint)) },
+                )
+            }
         }
 
         // Re-probe reachability every time the panel opens — the user checks it
@@ -322,6 +322,17 @@ fun SettingsScreen(
             )
         }
     }
+}
+
+/** Group label above a settings section (M3 settings pattern: primary, small). */
+@Composable
+private fun SettingsGroupHeader(title: String) {
+    Text(
+        title,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 4.dp),
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
