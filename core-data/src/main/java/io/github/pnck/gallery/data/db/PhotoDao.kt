@@ -122,9 +122,9 @@ interface PhotoDao {
     @Query("UPDATE photos SET queued = 0 WHERE queued = 1")
     suspend fun dequeueAll()
 
-    /** "Back up now": queue every classified pending photo for the next sweep. */
-    @Query("UPDATE photos SET queued = 1 WHERE syncState = 0 AND excluded = 0")
-    suspend fun queueAllPending()
+    /** Size of the manually built queue (syncState=0, not excluded, queued). */
+    @Query("SELECT COUNT(*) FROM photos WHERE syncState = 0 AND excluded = 0 AND queued = 1")
+    suspend fun queuedCount(): Int
 
     /** Put photos back in the queue — e.g. the user explicitly selects them to sync. */
     @Query("UPDATE photos SET excluded = 0, queued = 1 WHERE id IN (:ids)")

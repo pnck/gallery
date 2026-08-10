@@ -40,9 +40,8 @@ interface PhotoRepository {
     /** Drop every waiting photo out of automatic backup (kept visible in the grid). */
     suspend fun clearBackupQueue()
 
-    /** "Back up now": queue every classified pending photo (the bulk manual include —
-     *  sync is never automatic, queueing is always an explicit user action). */
-    suspend fun queueAllPending()
+    /** Size of the manually built backup queue (0 = "Back up now" sends nothing). */
+    suspend fun queuedCount(): Int
 
     /** Put photos back in the backup queue (e.g. the user selected them to sync). */
     suspend fun includeForBackup(ids: List<String>)

@@ -123,6 +123,30 @@ class DriveReadAccess @Inject constructor(
         refresh(refresh)
     }
 
+    /**
+     * Live grant check (tri-state): a stored refresh token proves NOTHING — the
+     * grant may have been revoked server-side weeks ago (owner report: the panel
+     * kept offering "revoke" for a long-dead grant). true = Drive answered;
+     * false = server rejected the grant (401/403); null = couldn't tell (offline).
+     */
+    suspend fun probe(): Boolean? = withContext(Dispatchers.IO) {
+        if (!isAuthorized()) return@withContext false
+        val token = validToken() ?: return@withContext null
+        val req = Request.Builder()
+            .url("https://www.googleapis.com/drive/v3/about?fields=user")
+            .header("Authorization", "Bearer $token")
+            .build()
+        runCatching {
+            client.newCall(req).execute().use { resp ->
+                when {
+                    resp.isSuccessful -> true
+                    resp.code == 401 || resp.code == 403 -> false
+                    else -> null
+                }
+            }
+        }.getOrNull()
+    }
+
     suspend fun signOut() = withContext(Dispatchers.IO) {
         prefs.edit().clear().apply()
         _authorized.value = false

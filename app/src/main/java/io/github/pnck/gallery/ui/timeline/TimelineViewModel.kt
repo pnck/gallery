@@ -59,6 +59,9 @@ sealed interface SyncStatus {
 /** One-shot feedback for the timeline (rendered as a snackbar). */
 sealed interface TimelineEvent {
     data class SyncQueued(val count: Int) : TimelineEvent
+
+    /** "Back up now" pressed with an EMPTY queue — zero photos go out, by design. */
+    data object NothingQueued : TimelineEvent
     data class SaveStarted(val count: Int) : TimelineEvent
     data class Deleted(val count: Int) : TimelineEvent
     /** Selected photos weren't backed up yet — queued for backup before space can be freed. */
@@ -255,13 +258,19 @@ class TimelineViewModel @Inject constructor(
         }
     }
 
-    /** Explicit "Back up now" / "Sync now": the bulk manual include — queue all
-     *  classified pendings, un-pause, and force-restart the chain so a stuck
-     *  (retrying) sweep doesn't swallow the request via KEEP. */
+    /**
+     * "Back up now" RUNS THE EXISTING QUEUE — it never builds one. Queue
+     * membership is explicit user intent only (select photos → back up); an
+     * empty queue means zero photos go out, and we say so (owner's model:
+     * unknown → local-only → queued → uploading; nothing auto-queues).
+     */
     fun backupNow() {
         viewModelScope.launch {
+            if (repo.queuedCount() == 0) {
+                events.send(TimelineEvent.NothingQueued)
+                return@launch
+            }
             settings.setBackupPaused(false)
-            repo.queueAllPending()
             SyncPipeline.enqueue(workManager, force = true)
         }
     }

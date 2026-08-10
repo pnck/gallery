@@ -31,6 +31,7 @@
     <string name="mydrive_account_row">My Drive browsing (read access)</string>
     <string name="mydrive_account_on">Enabled — can read your whole Drive</string>
     <string name="mydrive_account_off">Not enabled</string>
+    <string name="mydrive_account_expired">Grant expired or revoked — revoke and re-enable</string>
     <string name="mydrive_account_revoke">Revoke</string>
     <string name="mydrive_error">Couldn\'t load Drive: %1$s</string>
     <string name="mydrive_empty">Nothing here</string>
@@ -102,6 +103,7 @@
     <string name="action_free_selected">Free up space</string>
     <string name="action_delete_selected">Delete</string>
     <string name="sync_queued">Backup queued for %1$d photo(s)</string>
+    <string name="nothing_queued">Nothing queued — select photos to queue them for backup</string>
     <string name="save_started">Saving %1$d photo(s)…</string>
     <string name="photos_deleted">Deleted %1$d photo(s)</string>
     <string name="space_freed">Freed space from %1$d photo(s)</string>

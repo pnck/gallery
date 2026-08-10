@@ -258,6 +258,7 @@ fun SettingsScreen(
                 reachable = state.cloudReachable,
                 folderName = folderName,
                 myDriveAuthorized = state.myDriveAuthorized,
+                myDriveReachable = state.myDriveReachable,
                 onMyDriveSignOut = viewModel::signOutMyDrive,
                 onSignIn = { showAccount = false; viewModel.signInGoogle() },
                 onSignOut = { showAccount = false; viewModel.signOutGoogle() },
@@ -287,6 +288,9 @@ private fun AccountSheet(
     /** null = probe in flight; false = signed in but the cloud doesn't answer. */
     reachable: Boolean?,
     myDriveAuthorized: Boolean,
+    /** The separate drive.readonly grant ("My Drive" browser): null = probing/offline,
+     *  false = the server says the grant is dead (expired/revoked). */
+    myDriveReachable: Boolean?,
     onMyDriveSignOut: () -> Unit,
     folderName: String,
     onSignIn: () -> Unit,
@@ -344,16 +348,25 @@ private fun AccountSheet(
                 )
                 HorizontalDivider()
             }
-            // The separate drive.readonly grant ("My Drive" browser) is managed in
-            // the same panel — revoking it never touches the backup grant above.
+            // The separate drive.readonly grant ("My Drive") is managed in the same
+            // panel — revoking it never touches the backup grant above. The status is
+            // probe-derived: a stored token alone says nothing about server-side death.
             ListItem(
                 headlineContent = { Text(stringResource(R.string.mydrive_account_row)) },
                 supportingContent = {
                     Text(
                         stringResource(
-                            if (myDriveAuthorized) R.string.mydrive_account_on else R.string.mydrive_account_off,
+                            when {
+                                !myDriveAuthorized -> R.string.mydrive_account_off
+                                myDriveReachable == false -> R.string.mydrive_account_expired
+                                else -> R.string.mydrive_account_on
+                            },
                         ),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (myDriveAuthorized && myDriveReachable == false) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
                     )
                 },
                 trailingContent = if (myDriveAuthorized) {

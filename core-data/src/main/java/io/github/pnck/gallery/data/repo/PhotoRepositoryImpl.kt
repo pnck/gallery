@@ -90,8 +90,8 @@ class PhotoRepositoryImpl(
         photoDao.dequeueAll()
     }
 
-    override suspend fun queueAllPending() = withContext(Dispatchers.IO) {
-        photoDao.queueAllPending()
+    override suspend fun queuedCount(): Int = withContext(Dispatchers.IO) {
+        photoDao.queuedCount()
     }
 
     override suspend fun includeForBackup(ids: List<String>) = withContext(Dispatchers.IO) {

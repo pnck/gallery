@@ -51,6 +51,9 @@ data class SettingsState(
     val cloudReachable: Boolean? = null,
     /** The separate drive.readonly grant ("My Drive" browser) — managed here too. */
     val myDriveAuthorized: Boolean = false,
+    /** Live probe of the My Drive grant: true = Drive answered, false = server
+     *  rejected (revoked/expired), null = not probed / offline-unknown. */
+    val myDriveReachable: Boolean? = null,
 )
 
 @HiltViewModel
@@ -102,9 +105,14 @@ class SettingsViewModel @Inject constructor(
             googleAuthManager.authorized.collect { refreshAuthState() }
         }
         // The My Drive (drive.readonly) grant, same treatment — one panel manages both.
+        // A stored refresh token is NOT proof of life (server-side revocation is
+        // invisible until a call fails), so the panel probes on open.
         viewModelScope.launch {
             driveRead.authorized.collect { myDrive ->
-                _state.value = _state.value.copy(myDriveAuthorized = myDrive)
+                _state.value = _state.value.copy(myDriveAuthorized = myDrive, myDriveReachable = null)
+                if (myDrive) {
+                    _state.value = _state.value.copy(myDriveReachable = driveRead.probe())
+                }
             }
         }
     }
@@ -141,6 +149,11 @@ class SettingsViewModel @Inject constructor(
                     cloudReachable = null,
                     accountEmail = null,
                 )
+            }
+            // Same honesty for the My Drive grant: probe on every refresh so an
+            // expired/revoked grant never presents as healthy.
+            if (_state.value.myDriveAuthorized) {
+                _state.value = _state.value.copy(myDriveReachable = driveRead.probe())
             }
         }
     }

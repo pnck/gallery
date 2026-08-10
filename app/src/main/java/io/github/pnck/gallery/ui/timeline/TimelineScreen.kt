@@ -251,6 +251,7 @@ fun TimelineScreen(
     LaunchedEffect(Unit) { viewModel.eventFlow.collect { pendingEvent = it } }
     val eventMessage = when (val event = pendingEvent) {
         is TimelineEvent.SyncQueued -> stringResource(R.string.sync_queued, event.count)
+        is TimelineEvent.NothingQueued -> stringResource(R.string.nothing_queued)
         is TimelineEvent.SaveStarted -> stringResource(R.string.save_started, event.count)
         is TimelineEvent.Deleted -> stringResource(R.string.photos_deleted, event.count)
         is TimelineEvent.FreeQueued -> stringResource(R.string.free_queued, event.count)
@@ -313,10 +314,8 @@ fun TimelineScreen(
                                 text = { Text(stringResource(R.string.view_options)) },
                                 onClick = { showMenu = false; showViewOptions = true },
                             )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.backup_now)) },
-                                onClick = { showMenu = false; viewModel.backupNow() },
-                            )
+                            // No "Back up now" here — it lives on the Sync screen
+                            // (one action, one home); the menu stays navigation-level.
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.sync_status_title)) },
                                 onClick = { showMenu = false; showStatus = true },
