@@ -491,10 +491,11 @@ fun TimelineScreen(
                 snackbarHostState = sheetSnackbarHost,
                 onFixMediaAccess = { openPermissionEditor(context) },
                 onFixAutostart = { (context as? Activity)?.let { openAutostartSettings(it) } },
-                // Sheet actions dismiss FIRST: their feedback toast belongs to the
-                // app-level surface, alive after the sheet is gone.
-                onSyncNow = { showStatus = false; viewModel.backupNow() },
-                onRebuild = { showStatus = false; viewModel.rebuildSyncState() },
+                // The sheet STAYS OPEN on actions: the toast pops above the sheet
+                // content (the sheet's own window is the topmost layer), and the
+                // close-handoff below moves it to the main host if it's still alive.
+                onSyncNow = viewModel::backupNow,
+                onRebuild = viewModel::rebuildSyncState,
                 onClearQueue = { showStatus = false; showClearConfirm = true },
             )
         }
