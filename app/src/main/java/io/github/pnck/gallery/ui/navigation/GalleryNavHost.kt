@@ -90,10 +90,12 @@ fun GalleryNavHost() {
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val density = LocalDensity.current
-        // MD3 modal drawer width: full width capped at the 360.dp ContainerWidth token.
+        // MD modal drawer width: at most the 360.dp token AND always leaving a
+        // ≥56.dp content/scrim sliver (the visible tap-to-close target) — on a
+        // 392.dp phone that yields 336.dp instead of a nearly full-width sheet.
         val sheetWidthPx = minOf(
             with(density) { DrawerDefaults.MaximumDrawerWidth.toPx() },
-            constraints.maxWidth.toFloat(),
+            constraints.maxWidth.toFloat() - with(density) { 56.dp.toPx() },
         )
         val closedX = -sheetWidthPx
         val offset = remember { Animatable(closedX) }

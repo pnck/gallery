@@ -9,7 +9,6 @@
     <!-- Side navigation panel -->
     <string name="drawer_my_photos">My Photos</string>
     <string name="drawer_my_drive">My Drive</string>
-    <string name="drawer_reserved">More (coming soon)</string>
     <string name="mydrive_gate_title">Browse your whole Drive</string>
     <string name="mydrive_gate_body">See and open every file and folder in your Drive — not just photos. This is separate from backup: it asks for read access to your whole Drive, while backup only ever touches its own folder. Handy for files added outside the app or moved between accounts, and for re-syncing photos by content.</string>
     <string name="mydrive_enable">Enable Drive browsing</string>

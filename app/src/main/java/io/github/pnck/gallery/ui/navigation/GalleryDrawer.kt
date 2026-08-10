@@ -5,9 +5,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudQueue
-import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -41,7 +41,9 @@ fun GalleryDrawer(
     onMyPhotos: () -> Unit,
     onMyDrive: () -> Unit,
 ) {
-    Column(Modifier.fillMaxSize()) {
+    // statusBarsPadding first: MD3 keeps drawer content clear of the system bar
+    // (the title previously sat almost against it).
+    Column(Modifier.fillMaxSize().statusBarsPadding()) {
         Spacer(Modifier.height(12.dp))
         Text(
             stringResource(R.string.app_name),
@@ -60,14 +62,6 @@ fun GalleryDrawer(
             label = { Text(stringResource(R.string.drawer_my_drive)) },
             selected = selected == Routes.MY_DRIVE,
             onClick = { if (interactionsEnabled) onMyDrive() },
-            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
-        )
-        NavigationDrawerItem(
-            icon = { Icon(Icons.Default.MoreHoriz, contentDescription = null) },
-            label = { Text(stringResource(R.string.drawer_reserved)) },
-            selected = false,
-            onClick = {},
-            // Reserved slot — not yet a destination.
             modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
         )
     }

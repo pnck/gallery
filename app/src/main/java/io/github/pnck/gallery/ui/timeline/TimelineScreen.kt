@@ -164,6 +164,7 @@ fun TimelineScreen(
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
     val snackbarHost = remember { SnackbarHostState() }
+    val sheetSnackbarHost = remember { SnackbarHostState() }
     val systemDelete = rememberSystemDelete()
 
     // Autostart probe verdict (recomputed when either probe timestamp moves).
@@ -261,9 +262,12 @@ fun TimelineScreen(
         )
         null -> null
     }
-    LaunchedEffect(eventMessage) {
+    LaunchedEffect(eventMessage, showStatus) {
         eventMessage?.let {
-            snackbarHost.showSnackbar(it)
+            // A ModalBottomSheet renders ABOVE the Scaffold — a snackbar emitted to
+            // the scaffold host while the sync sheet is open is invisible behind it.
+            // Route by surface: sheet open → the sheet's own host, else the scaffold's.
+            (if (showStatus) sheetSnackbarHost else snackbarHost).showSnackbar(it)
             pendingEvent = null
         }
     }
@@ -470,6 +474,7 @@ fun TimelineScreen(
                 accountConnected = authorized,
                 fullMediaAccess = fullMediaAccess,
                 autostartBlocked = autostartBlocked,
+                snackbarHostState = sheetSnackbarHost,
                 onFixMediaAccess = { openPermissionEditor(context) },
                 onFixAutostart = { (context as? Activity)?.let { openAutostartSettings(it) } },
                 onSyncNow = viewModel::backupNow,
@@ -814,13 +819,16 @@ private fun SyncStatusSheet(
     fullMediaAccess: Boolean,
     /** MIUI autostart is (almost certainly) rejecting the periodic sync job. */
     autostartBlocked: Boolean,
+    /** Sheet-local host — scaffold snackbars render UNDER this modal surface. */
+    snackbarHostState: SnackbarHostState,
     onFixMediaAccess: () -> Unit,
     onFixAutostart: () -> Unit,
     onSyncNow: () -> Unit,
     onRebuild: () -> Unit,
     onClearQueue: () -> Unit,
 ) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {
+    Box(Modifier.fillMaxWidth()) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {
         Text(stringResource(R.string.sync_status_title), style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(4.dp))
         Text(
@@ -901,6 +909,11 @@ private fun SyncStatusSheet(
             }
         }
         Spacer(Modifier.height(24.dp))
+        }
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
     }
 }
 
