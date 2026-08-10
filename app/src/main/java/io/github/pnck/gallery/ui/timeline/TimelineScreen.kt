@@ -68,6 +68,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -454,7 +455,11 @@ fun TimelineScreen(
     }
 
     if (showStatus) {
-        ModalBottomSheet(onDismissRequest = { showStatus = false }) {
+        // §3.2 binary intent: fully expanded or gone — never a half-cut card.
+        ModalBottomSheet(
+            onDismissRequest = { showStatus = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        ) {
             // AppOps probe at sheet-open time (a binder read — too costly for every
             // timeline recomposition). On some MIUI builds it under-reports, so the
             // background blind-scan evidence (blindScanAt) is the primary signal.
@@ -492,7 +497,10 @@ fun TimelineScreen(
     }
 
     if (showViewOptions) {
-        ModalBottomSheet(onDismissRequest = { showViewOptions = false }) {
+        ModalBottomSheet(
+            onDismissRequest = { showViewOptions = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        ) {
             ViewOptionsSheet(
                 sort = sort,
                 filter = syncFilter,
@@ -728,20 +736,13 @@ private fun SelectionAppBar(
                 Icon(Icons.Default.Close, contentDescription = stringResource(R.string.selection_clear))
             }
         },
-        // No title: the count lives in the centered banner below the bar — with five
-        // batch-action icons, a title here crowds and wraps.
+        // No title: the count lives in the centered banner below the bar.
         title = { },
         actions = {
-            // Primary batch actions (backup-first): Back up · Free up space · Delete.
-            // Save-to-device is secondary → overflow (docs/GALLERY-UX-INTERACTION.md §4).
-            IconButton(onClick = onSelectAll) {
-                Icon(Icons.Default.SelectAll, contentDescription = stringResource(R.string.action_select_all))
-            }
+            // Two primary icons max (docs §4): Back up (backup-first) and Delete —
+            // both universal metaphors. Everything else is overflow text.
             IconButton(onClick = onSync) {
                 Icon(Icons.Default.CloudUpload, contentDescription = stringResource(R.string.action_sync_selected))
-            }
-            IconButton(onClick = onFreeSpace) {
-                Icon(Icons.Default.DeleteSweep, contentDescription = stringResource(R.string.action_free_selected))
             }
             IconButton(onClick = onDelete) {
                 Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.action_delete_selected))
@@ -751,6 +752,14 @@ private fun SelectionAppBar(
                 Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more))
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.action_select_all)) },
+                    onClick = { menu = false; onSelectAll() },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.action_free_selected)) },
+                    onClick = { menu = false; onFreeSpace() },
+                )
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.action_save_selected)) },
                     onClick = { menu = false; onSave() },

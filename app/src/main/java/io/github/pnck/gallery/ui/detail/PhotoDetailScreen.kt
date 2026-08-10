@@ -38,6 +38,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -326,7 +327,10 @@ fun PhotoDetailScreen(
     }
 
     info?.let { data ->
-        ModalBottomSheet(onDismissRequest = viewModel::dismissInfo) {
+        ModalBottomSheet(
+            onDismissRequest = viewModel::dismissInfo,
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        ) {
             PhotoInfoSheet(data)
         }
     }
