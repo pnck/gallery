@@ -6,6 +6,7 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import android.util.Log
 import dagger.hilt.android.lifecycle.HiltViewModel
+import io.github.pnck.gallery.R
 import io.github.pnck.gallery.data.settings.AppSettingsStore
 import io.github.pnck.gallery.data.sync.MediaReconciler
 import io.github.pnck.gallery.domain.PhotoRepository
@@ -75,8 +76,8 @@ sealed interface TimelineEvent {
     data class Rebuilt(val synced: Int, val pendingUpload: Int, val cloudOnly: Int, val pruned: Int) : TimelineEvent
 }
 
-/** A named entry in the sync-queue view (PRD §9.1). */
-data class SyncJob(val name: String, val state: WorkInfo.State)
+/** A named entry in the sync-queue view (PRD §9.1) — the label is a resource so it localizes. */
+data class SyncJob(val labelRes: Int, val state: WorkInfo.State)
 
 /** Drives the Google-Photos-style backup banner at the top of the timeline. */
 sealed interface BackupState {
@@ -283,10 +284,10 @@ class TimelineViewModel @Inject constructor(
         workManager.getWorkInfosForUniqueWorkFlow(SyncPipeline.RECONCILE_NAME),
     ) { pipeline, targeted, periodic, reconcile ->
         listOfNotNull(
-            pipeline.activeState()?.let { SyncJob("Full sync", it) },
-            targeted.activeState()?.let { SyncJob("Selected upload", it) },
-            periodic.activeState()?.let { SyncJob("Background sync", it) },
-            reconcile.activeState()?.let { SyncJob("Rebuild sync state", it) },
+            pipeline.activeState()?.let { SyncJob(R.string.job_full_sync, it) },
+            targeted.activeState()?.let { SyncJob(R.string.job_targeted_upload, it) },
+            periodic.activeState()?.let { SyncJob(R.string.job_background_sync, it) },
+            reconcile.activeState()?.let { SyncJob(R.string.rebuild_sync, it) },
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 

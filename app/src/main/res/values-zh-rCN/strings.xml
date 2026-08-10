@@ -1,0 +1,239 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings">设置</string>
+    <string name="back">返回</string>
+    <string name="open_drawer">打开导航</string>
+    <string name="timeline_title">照片</string>
+
+    <!-- Side navigation panel -->
+    <string name="drawer_my_photos">我的照片</string>
+    <string name="drawer_my_drive">我的云盘</string>
+    <string name="mydrive_gate_title">浏览你的整个云盘</string>
+    <string name="mydrive_gate_body">查看并打开云盘里的所有文件和文件夹——不限于照片。这与备份相互独立：它请求整个云盘的读取权限，而备份永远只碰自己的文件夹。适合查看在应用外添加或在账号间移动过的文件，以及按内容重新匹配照片。</string>
+    <string name="mydrive_enable">启用云盘浏览</string>
+    <string name="mydrive_not_configured">此构建未配置云盘浏览（缺少桌面端 OAuth client)。</string>
+    <string name="mydrive_auth_title">在浏览器中授权</string>
+    <string name="mydrive_auth_body">在刚打开的浏览器里批准读取权限，然后回到这里。</string>
+    <string name="mydrive_download">下载</string>
+    <string name="mydrive_downloaded">已下载 %1$d 个文件，%2$d 个失败，%3$d 个跳过</string>
+    <string name="mydrive_saved_downloads">已保存 %1$d 个文件到「下载」(%2$d 个失败，%3$d 个跳过)</string>
+    <string name="mydrive_details">详情</string>
+    <string name="mydrive_detail_type">类型</string>
+    <string name="mydrive_detail_size">大小</string>
+    <string name="mydrive_detail_extension">扩展名</string>
+    <string name="mydrive_detail_created">创建时间</string>
+    <string name="mydrive_detail_modified">修改时间</string>
+    <string name="mydrive_detail_md5">MD5</string>
+    <string name="mydrive_detail_owner">所有者</string>
+    <string name="mydrive_detail_id">云盘 ID</string>
+    <string name="mydrive_account_row">我的云盘浏览（读取权限）</string>
+    <string name="mydrive_account_on">已启用——可读取整个云盘</string>
+    <string name="mydrive_account_off">未启用</string>
+    <string name="mydrive_account_expired">授权已过期或被撤销——请撤销后重新启用</string>
+    <string name="mydrive_account_revoke">撤销</string>
+    <string name="mydrive_error">无法加载云盘:%1$s</string>
+    <string name="mydrive_empty">这里什么都没有</string>
+    <string name="mydrive_filter_all">全部</string>
+    <string name="mydrive_filter_images">图片</string>
+    <string name="mydrive_filter_videos">视频</string>
+    <string name="mydrive_filter_docs">文档</string>
+    <string name="mydrive_filter_audio">音频</string>
+    <string name="mydrive_filter_other">其他</string>
+    <string name="more">更多</string>
+    <string name="timeline_empty">还没有照片——在设置中登录你的云存储开始使用。</string>
+
+    <string name="sync_scanning">正在扫描图库…</string>
+    <string name="sync_uploading">正在上传 %1$d/%2$d…</string>
+
+    <string name="settings_google_account">Google 云端硬盘账号</string>
+    <string name="settings_google_connected">已连接——点按管理账号</string>
+    <string name="settings_google_disconnected">未连接——点按登录（无需 GMS)</string>
+    <string name="cancel">取消</string>
+    <string name="close">关闭</string>
+
+    <!-- Device flow (ADR-0001) -->
+    <string name="auth_device_title">连接 Google 云端硬盘</string>
+    <string name="auth_device_body">在任意能访问 Google 的设备上打开:\n\n%2$s\n\n并输入此代码:\n\n%1$s\n\n等待批准…</string>
+    <string name="auth_device_open">在此设备上打开</string>
+    <string name="auth_requesting_title">正在连接…</string>
+    <string name="auth_requesting_body">正在向 Google 请求登录代码。</string>
+    <string name="auth_error_title">登录失败</string>
+    <string name="auth_retry">重试</string>
+    <string name="auth_network_hint">无法连接 Google。如果你使用 WireGuard 隧道，请先开启「网络加速」再重试。</string>
+    <string name="settings_google_connecting">正在连接…</string>
+    <string name="settings_storage">存储空间</string>
+    <string name="settings_storage_hint">查看图库占用并释放空间</string>
+    <string name="settings_folder">云端备份文件夹</string>
+    <string name="folder_dialog_title">备份文件夹名称</string>
+    <string name="save">保存</string>
+
+    <!-- Account panel -->
+    <string name="account_connected">已连接 Google 云端硬盘</string>
+    <string name="account_disconnected">未连接</string>
+    <string name="account_checking">正在检查连接…</string>
+    <string name="account_unreachable">已登录——无法连接 Google 云端硬盘</string>
+    <string name="account_sign_in">登录</string>
+    <string name="account_sign_out">退出登录</string>
+    <string name="account_sign_out_title">退出 Google 云端硬盘?</string>
+    <string name="account_sign_out_message">你的照片会保留在云端,随时可以重新登录。</string>
+    <string name="account_signed_in_as">已登录为 %1$s</string>
+    <string name="account_open_folder">在云盘中打开备份文件夹</string>
+    <string name="account_open_folder_hint">在 Google 云端硬盘中浏览已上传的照片</string>
+    <string name="account_folder_unavailable">无法打开文件夹——请同步后再试。</string>
+    <string name="settings_transport">网络加速</string>
+    <string name="settings_transport_hint">通过 WireGuard 或 SOCKS 代理转发流量</string>
+    <string name="settings_transport_connected">已连接——加速生效中</string>
+
+    <!-- Sync-state badges (PRD §3.7 / §9.1) -->
+    <string name="badge_unknown">正在检查备份状态…</string>
+    <string name="badge_pending_upload">未备份</string>
+    <string name="badge_queued">在备份队列中</string>
+    <string name="badge_uploading">正在备份…</string>
+    <string name="badge_synced">已备份</string>
+    <string name="badge_cloud_only">仅云端</string>
+    <string name="badge_excluded">已从备份排除</string>
+
+    <!-- Multi-select (PRD §9.1) -->
+    <string name="selection_count">已选 %1$d 项</string>
+    <string name="selection_clear">清除选择</string>
+    <string name="action_sync_selected">备份</string>
+    <string name="action_save_selected">保存到设备</string>
+    <string name="action_free_selected">释放空间</string>
+    <string name="action_delete_selected">删除</string>
+    <string name="sync_queued">已将 %1$d 张照片加入备份队列</string>
+    <string name="nothing_queued">队列为空——先选择照片加入备份队列</string>
+    <string name="save_started">正在保存 %1$d 张照片…</string>
+    <string name="photos_deleted">已删除 %1$d 张照片</string>
+    <string name="space_freed">已释放 %1$d 张照片的空间</string>
+    <string name="free_queued">先备份 %1$d 张照片——完成后再释放空间</string>
+    <string name="free_space_none">没有可释放的内容</string>
+    <string name="action_select">选择</string>
+    <string name="action_select_all">全选</string>
+
+    <!-- Delete confirmation (PRD §3.7) -->
+    <string name="delete_confirm_title">删除 %1$d 张照片?</string>
+    <string name="delete_confirm_message">云端副本也会被删除,此操作无法撤销。</string>
+    <string name="delete_confirm_unsynced">其中 %1$d 张尚未备份——将被永久删除。</string>
+    <string name="delete_confirm_button">删除</string>
+
+    <!-- Sync status panel (PRD §9.1) -->
+    <string name="job_full_sync">完整同步</string>
+    <string name="job_targeted_upload">所选上传</string>
+    <string name="job_background_sync">后台同步</string>
+    <string name="sync_status_title">同步状态</string>
+    <string name="sync_status_idle">已是最新</string>
+    <string name="sync_status_failed">上次同步失败——点按「立即备份」重试</string>
+    <string name="sync_status_not_connected">未连接——照片仅保留在本设备</string>
+    <string name="media_access_degraded">照片只能在应用打开时读取——后台扫描和备份已停用</string>
+    <string name="media_access_fix">去允许</string>
+    <string name="autostart_blocked">后台同步正被系统阻止</string>
+    <string name="autostart_fix">打开设置</string>
+    <string name="sync_count_queued">等待中</string>
+    <string name="sync_count_pending">未备份</string>
+    <string name="sync_count_synced">已备份</string>
+    <string name="sync_count_cloud">仅云端</string>
+    <string name="sync_queue_title">队列</string>
+    <string name="sync_queue_empty">没有正在运行的任务</string>
+    <string name="rebuild_sync">重建同步状态</string>
+    <string name="rebuild_done">重建完成:%1$d 已备份 · %2$d 待备份 · %3$d 仅云端 · %4$d 已清理</string>
+    <string name="rebuild_sync_hint">按内容将每张照片与云端重新核对并修正错误的角标,不会删除照片。</string>
+    <string name="clear_queue">清空备份队列</string>
+    <string name="clear_queue_title">清空备份队列?</string>
+    <string name="clear_queue_message">%1$d 张排队照片将移出备份队列。它们会保留在设备上,随时可以重新加入队列。</string>
+    <string name="clear_queue_confirm">清空</string>
+    <string name="work_running">运行中</string>
+    <string name="work_enqueued">排队中</string>
+    <string name="work_blocked">等待中</string>
+
+    <!-- Backup banner (Google-Photos style) -->
+    <string name="backup_running">正在备份 %1$d / %2$d</string>
+    <string name="backup_pending">%1$d 张等待备份</string>
+    <string name="backup_pending_failed">%1$d 张等待 · %2$d 张失败</string>
+    <string name="backup_now">立即备份</string>
+    <string name="backup_retry">重试</string>
+    <string name="backup_pause">暂停</string>
+    <string name="backup_paused">备份已暂停 · %1$d 张等待</string>
+    <string name="backup_resume">继续</string>
+
+    <!-- Detail viewer actions (PRD §9.1, T-403) -->
+    <string name="detail_rotate">旋转</string>
+    <string name="detail_edit">编辑</string>
+    <string name="detail_share">分享</string>
+    <string name="detail_save">保存到设备</string>
+    <string name="detail_download_failed">无法下载原图。</string>
+    <string name="detail_saved">已保存到你的相册</string>
+    <string name="detail_save_failed">无法保存照片。</string>
+    <string name="detail_share_title">分享照片</string>
+    <string name="detail_no_editor">没有可编辑此照片的应用。</string>
+    <string name="detail_delete">删除</string>
+    <string name="detail_deleted">已删除</string>
+
+    <!-- Photo details panel (T-403) -->
+    <string name="detail_info">详情</string>
+    <string name="info_title">照片详情</string>
+    <string name="info_dimensions">尺寸</string>
+    <string name="info_date">拍摄时间</string>
+    <string name="info_size">文件大小</string>
+    <string name="info_state">备份状态</string>
+    <string name="info_storage">云端</string>
+    <string name="info_folder">文件夹</string>
+    <string name="info_media_id">MediaStore id</string>
+    <string name="info_camera">相机</string>
+    <string name="info_aperture">光圈</string>
+    <string name="info_shutter">快门</string>
+    <string name="info_iso">ISO</string>
+    <string name="info_focal">焦距</string>
+    <string name="info_location">位置</string>
+    <string name="info_hash">内容哈希</string>
+
+    <!-- Timeline view options: sort / filter / folders -->
+    <string name="view_options">视图选项</string>
+    <string name="sort_title">排序方式</string>
+    <string name="sort_date_desc">最新在前</string>
+    <string name="sort_date_asc">最旧在前</string>
+    <string name="sort_size_desc">最大在前</string>
+    <string name="sort_size_asc">最小在前</string>
+    <string name="filter_title">显示</string>
+    <string name="filter_all">全部照片</string>
+    <string name="filter_not_backed">未备份</string>
+    <string name="filter_backed">已备份</string>
+    <string name="filter_cloud">仅云端</string>
+    <string name="folders_all">全部文件夹</string>
+    <string name="folders_photo_count">%1$d 张照片</string>
+    <string name="folders_path_count">%1$s · %2$d 张</string>
+
+    <!-- Library folders (scope picker, settings child — docs/GALLERY-UX-INTERACTION.md §5.4) -->
+    <string name="library_folders_title">图库文件夹</string>
+    <string name="library_folders_purpose">所选文件夹中的照片会显示在图库中并纳入备份。一个不选即包含所有文件夹。</string>
+    <string name="library_folders_some">%1$d 个文件夹</string>
+    <string name="library_folders_loading">正在加载文件夹…</string>
+
+    <!-- Space management (T-302) -->
+    <string name="storage_title">存储空间</string>
+    <string name="storage_device_title">本设备</string>
+    <string name="storage_device_total">共 %1$s</string>
+    <string name="storage_legend_app">你的照片</string>
+    <string name="storage_legend_other">其他应用占用</string>
+    <string name="storage_legend_free">可用</string>
+    <string name="storage_app_title">本设备上的图库</string>
+    <string name="storage_app_total">设备上共 %1$d 张照片</string>
+    <string name="storage_app_freeable">%1$d 张已备份 · 可释放</string>
+    <string name="storage_app_not_backed">尚未备份</string>
+    <string name="storage_app_cloud_only">仅云端(无本地副本)</string>
+    <string name="storage_photo_count">%1$d 张照片</string>
+    <string name="storage_free_button">释放 %1$s</string>
+    <string name="storage_free_none">没有可释放的内容</string>
+    <string name="storage_free_explainer">仅释放已备份的照片。确认云端副本存在后才删除本地副本,时间线中保留云端预览。</string>
+    <string name="storage_free_confirm_title">释放空间?</string>
+    <string name="storage_free_confirm_message">将删除 %1$d 张已备份照片(%2$s)的本地副本。它们保留在云端,仍可在时间线中查看。</string>
+    <string name="storage_free_confirm_button">释放空间</string>
+
+    <!-- Transport / diagnostics screens -->
+    <string name="transport_generate_keypair">生成密钥对</string>
+    <string name="transport_public_key_label">你的公钥(派生)——必须与服务器对端的 PublicKey 一致</string>
+    <string name="transport_export">导出</string>
+    <string name="transport_import">导入</string>
+    <string name="transport_disconnect">断开连接</string>
+    <string name="diagnostics_title">诊断</string>
+    <string name="diagnostics_hint">日志级别、连通性探测、隧道转储</string>
+</resources>

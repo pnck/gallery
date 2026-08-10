@@ -877,7 +877,7 @@ private fun SyncStatusSheet(
                     Modifier.fillMaxWidth().padding(vertical = 4.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Text(job.name)
+                    Text(stringResource(job.labelRes))
                     Text(workStateLabel(job.state), color = MaterialTheme.colorScheme.primary)
                 }
             }

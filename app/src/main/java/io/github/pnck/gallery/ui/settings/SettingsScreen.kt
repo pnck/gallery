@@ -214,8 +214,8 @@ fun SettingsScreen(
                 HorizontalDivider()
                 ListItem(
                     modifier = Modifier.clickable(onClick = onDiagnosticsClick),
-                    headlineContent = { Text("Diagnostics") },
-                    supportingContent = { Text("Log level, reachability probe, transport dump") },
+                    headlineContent = { Text(stringResource(R.string.diagnostics_title)) },
+                    supportingContent = { Text(stringResource(R.string.diagnostics_hint)) },
                 )
             }
             HorizontalDivider()

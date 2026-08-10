@@ -28,6 +28,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -45,6 +46,7 @@ import io.github.pnck.gallery.network.transport.WgQuickConfig
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import io.github.pnck.gallery.BuildConfig
+import io.github.pnck.gallery.R
 import io.github.pnck.gallery.transport.WireguardTools
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -175,10 +177,10 @@ fun TransportScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Network acceleration") },
+                title = { Text(stringResource(R.string.settings_transport)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                     }
                 },
             )
@@ -203,7 +205,7 @@ fun TransportScreen(
                 ) {
                     OutlinedButton(
                         onClick = { viewModel.generateKeypair { kp -> privateKey = kp.privateKey } },
-                    ) { Text("Generate keypair") }
+                    ) { Text(stringResource(R.string.transport_generate_keypair)) }
                     Text(
                         "creates a new client key",
                         style = MaterialTheme.typography.bodySmall,
@@ -216,7 +218,7 @@ fun TransportScreen(
                         value = publicKey,
                         onValueChange = {},
                         readOnly = true,
-                        label = { Text("Your public key (derived) — must match the server's peer PublicKey") },
+                        label = { Text(stringResource(R.string.transport_public_key_label)) },
                         modifier = Modifier.fillMaxWidth(),
                     )
                 } else if (privateKey.isNotBlank()) {
@@ -266,11 +268,11 @@ fun TransportScreen(
                     OutlinedButton(
                         onClick = { exportConfLauncher.launch("gallery-wg.conf") },
                         modifier = Modifier.weight(1f),
-                    ) { Text("Export") }
+                    ) { Text(stringResource(R.string.transport_export)) }
                     OutlinedButton(
                         onClick = { importLauncher.launch(arrayOf("*/*")) },
                         modifier = Modifier.weight(1f),
-                    ) { Text("Import") }
+                    ) { Text(stringResource(R.string.transport_import)) }
                 }
                 Text(
                     "Export: a single wg-quick .conf the official app imports. " +
@@ -321,7 +323,7 @@ fun TransportScreen(
                     onClick = viewModel::disconnect,
                     enabled = (active || state is TransportState.Failed) && !vpnActive,
                     modifier = Modifier.weight(1f),
-                ) { Text("Disconnect") }
+                ) { Text(stringResource(R.string.transport_disconnect)) }
             }
             if (vpnActive) {
                 Text(
