@@ -126,6 +126,11 @@ fun TransportScreen(
     // Interop with the official WireGuard app via standard wg-quick .conf files.
     val context = LocalContext.current
     var ioMessage by remember { mutableStateOf<String?>(null) }
+    val exportedMsg = stringResource(R.string.transport_exported)
+    val exportFailedFmt = stringResource(R.string.transport_export_failed)
+    val importedZipFmt = stringResource(R.string.transport_imported_zip)
+    val importedMsg = stringResource(R.string.transport_imported)
+    val importFailedFmt = stringResource(R.string.transport_import_failed)
     fun currentConf(): WgQuickConfig = WgQuickConfig(
         privateKey = privateKey.trim(),
         address = interfaceAddress.trim(),
@@ -147,8 +152,8 @@ fun TransportScreen(
         if (uri != null) {
             runCatching {
                 context.contentResolver.openOutputStream(uri)?.use { it.write(currentConf().serialize().toByteArray()) }
-            }.onSuccess { ioMessage = "Exported WireGuard config (.conf)" }
-                .onFailure { ioMessage = "Export failed: ${it.message}" }
+            }.onSuccess { ioMessage = exportedMsg }
+                .onFailure { ioMessage = exportFailedFmt.format(it.message) }
         }
     }
     val importLauncher = rememberLauncherForActivityResult(
@@ -166,11 +171,11 @@ fun TransportScreen(
                 interfaceAddress = c.address; dns = c.dns
                 mtu = c.mtu?.toString().orEmpty(); keepalive = c.persistentKeepalive?.toString() ?: "25"
                 ioMessage = if (entryName != null) {
-                    "Imported '$entryName' from zip (first tunnel) — review and Connect"
+                    importedZipFmt.format(entryName)
                 } else {
-                    "Imported — review and Connect"
+                    importedMsg
                 }
-            }.onFailure { ioMessage = "Import failed: ${it.message}" }
+            }.onFailure { ioMessage = importFailedFmt.format(it.message) }
         }
     }
 
@@ -196,7 +201,7 @@ fun TransportScreen(
         ) {
             MonitorCard(state = state, health = health, error = error, vpnActive = vpnActive)
 
-            toggleRow("WireGuard tunnel", wgEnabled) { wgEnabled = it }
+            toggleRow(stringResource(R.string.transport_wg_tunnel), wgEnabled) { wgEnabled = it }
             if (wgEnabled) {
                 Row(
                     Modifier.fillMaxWidth(),
@@ -207,12 +212,12 @@ fun TransportScreen(
                         onClick = { viewModel.generateKeypair { kp -> privateKey = kp.privateKey } },
                     ) { Text(stringResource(R.string.transport_generate_keypair)) }
                     Text(
-                        "creates a new client key",
+                        stringResource(R.string.transport_keypair_hint),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                field(privateKey, { privateKey = it }, "Private key (base64)")
+                field(privateKey, { privateKey = it }, stringResource(R.string.transport_private_key))
                 if (publicKey.isNotBlank()) {
                     OutlinedTextField(
                         value = publicKey,
@@ -223,41 +228,39 @@ fun TransportScreen(
                     )
                 } else if (privateKey.isNotBlank()) {
                     Text(
-                        "⚠ private key invalid (can't derive public key)",
+                        stringResource(R.string.transport_private_key_invalid),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
                 }
-                field(peerPublicKey, { peerPublicKey = it }, "Peer (server) public key (base64)")
-                field(presharedKey, { presharedKey = it }, "Preshared key (optional)")
+                field(peerPublicKey, { peerPublicKey = it }, stringResource(R.string.transport_peer_public_key))
+                field(presharedKey, { presharedKey = it }, stringResource(R.string.transport_preshared_key))
 
                 // Endpoint: hand-typed host:port, or "subscribed" from a DNS SRV
                 // record (re-resolved on every connect, so the server can move).
-                toggleRow("Endpoint from SRV record", useSrv) { useSrv = it }
+                toggleRow(stringResource(R.string.transport_use_srv), useSrv) { useSrv = it }
                 if (useSrv) {
-                    field(srvName, { srvName = it }, "SRV name (e.g. _wireguard._udp.example.com)")
+                    field(srvName, { srvName = it }, stringResource(R.string.transport_srv_name))
                     Text(
-                        "Resolved fresh on each connect via system DNS (DoH fallback).",
+                        stringResource(R.string.transport_srv_hint),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
-                    field(endpoint, { endpoint = it }, "WG endpoint (host:port, e.g. vpn.example.com:51820)")
+                    field(endpoint, { endpoint = it }, stringResource(R.string.transport_endpoint))
                 }
 
-                field(interfaceAddress, { interfaceAddress = it }, "Interface address (e.g. 10.0.0.2/32)")
-                field(dns, { dns = it }, "DNS servers (WgOnly, comma-separated, e.g. 10.0.0.1)")
+                field(interfaceAddress, { interfaceAddress = it }, stringResource(R.string.transport_interface_address))
+                field(dns, { dns = it }, stringResource(R.string.transport_dns))
                 Text(
-                    "Used only in WG-only mode to resolve names over the tunnel. " +
-                        "Empty → local resolver (leaks DNS). WG+SOCKS resolves at the SOCKS exit.",
+                    stringResource(R.string.transport_dns_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                field(keepalive, { keepalive = it }, "Keepalive seconds", number = true)
-                field(mtu, { mtu = it }, "MTU (blank = 1280)", number = true)
+                field(keepalive, { keepalive = it }, stringResource(R.string.transport_keepalive), number = true)
+                field(mtu, { mtu = it }, stringResource(R.string.transport_mtu), number = true)
                 Text(
-                    "Tunnel MTU. Blank/0 uses 1280 (safe for cellular/nested paths). Lower it if " +
-                        "large transfers stall despite a good handshake; raise toward 1420 on clean links.",
+                    stringResource(R.string.transport_mtu_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -275,8 +278,7 @@ fun TransportScreen(
                     ) { Text(stringResource(R.string.transport_import)) }
                 }
                 Text(
-                    "Export: a single wg-quick .conf the official app imports. " +
-                        "Import: every official format — bare .conf or its \"export tunnels to zip\".",
+                    stringResource(R.string.transport_io_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -285,17 +287,17 @@ fun TransportScreen(
                 }
             }
 
-            toggleRow("Upstream SOCKS5", socksEnabled) { socksEnabled = it }
+            toggleRow(stringResource(R.string.transport_socks), socksEnabled) { socksEnabled = it }
             if (socksEnabled) {
                 Text(
-                    if (wgEnabled) "Reached through the tunnel (in-tunnel IP)" else "Reached directly",
+                    stringResource(if (wgEnabled) R.string.transport_socks_via_tunnel else R.string.transport_socks_direct),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                field(socksHost, { socksHost = it }, "SOCKS host")
-                field(socksPort, { socksPort = it }, "SOCKS port", number = true)
-                field(socksUser, { socksUser = it }, "SOCKS username (optional)")
-                field(socksPass, { socksPass = it }, "SOCKS password (optional)", password = true)
+                field(socksHost, { socksHost = it }, stringResource(R.string.transport_socks_host))
+                field(socksPort, { socksPort = it }, stringResource(R.string.transport_socks_port), number = true)
+                field(socksUser, { socksUser = it }, stringResource(R.string.transport_socks_user))
+                field(socksPass, { socksPass = it }, stringResource(R.string.transport_socks_pass), password = true)
             }
 
             val connected = state is TransportState.Connected
@@ -316,7 +318,7 @@ fun TransportScreen(
                     if (trying) {
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                     } else {
-                        Text(if (connected) "Connected" else "Connect")
+                        Text(stringResource(if (connected) R.string.transport_state_connected else R.string.transport_connect))
                     }
                 }
                 OutlinedButton(
@@ -327,8 +329,7 @@ fun TransportScreen(
             }
             if (vpnActive) {
                 Text(
-                    "Connect/disconnect is disabled while a system VPN is active; " +
-                        "the tunnel yields automatically and Diagnostics stays available.",
+                    stringResource(R.string.transport_vpn_active_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -368,13 +369,13 @@ private fun MonitorCard(state: TransportState, health: TransportHealth?, error: 
     // noise is suppressed upstream while yielding, so Connected is truthful here.)
     val yielding = vpnActive && state !is TransportState.Disconnected
     val (label, labelColor) = when {
-        yielding -> "Yielding to system VPN" to MaterialTheme.colorScheme.tertiary
+        yielding -> stringResource(R.string.transport_state_yielding) to MaterialTheme.colorScheme.tertiary
         else -> when (state) {
-            is TransportState.Disconnected -> "Disconnected" to MaterialTheme.colorScheme.onSurfaceVariant
-            is TransportState.Connecting -> "Connecting…" to MaterialTheme.colorScheme.primary
-            is TransportState.Connected -> "Connected" to Color(0xFF2E7D32)
-            is TransportState.Degraded -> "Degraded" to MaterialTheme.colorScheme.tertiary
-            is TransportState.Failed -> "Failed" to MaterialTheme.colorScheme.error
+            is TransportState.Disconnected -> stringResource(R.string.transport_state_disconnected) to MaterialTheme.colorScheme.onSurfaceVariant
+            is TransportState.Connecting -> stringResource(R.string.transport_state_connecting) to MaterialTheme.colorScheme.primary
+            is TransportState.Connected -> stringResource(R.string.transport_state_connected) to Color(0xFF2E7D32)
+            is TransportState.Degraded -> stringResource(R.string.transport_state_degraded) to MaterialTheme.colorScheme.tertiary
+            is TransportState.Failed -> stringResource(R.string.transport_state_failed) to MaterialTheme.colorScheme.error
         }
     }
 
@@ -384,14 +385,14 @@ private fun MonitorCard(state: TransportState, health: TransportHealth?, error: 
 
             if (yielding) {
                 Text(
-                    "A system VPN is active — traffic goes direct until it disconnects.",
+                    stringResource(R.string.transport_yielding_hint),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             if (vpnActive && state is TransportState.Disconnected) {
                 Text(
-                    "System VPN active — the built-in tunnel is disabled while it runs.",
+                    stringResource(R.string.transport_yielding_disabled),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -410,17 +411,17 @@ private fun MonitorCard(state: TransportState, health: TransportHealth?, error: 
             if (state is TransportState.Connected && !yielding) {
                 val port = (state as TransportState.Connected).localSocksPort
                 Text(
-                    "Local SOCKS5: 127.0.0.1:$port",
+                    stringResource(R.string.transport_local_socks, port),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (health?.viaTunnel == true) {
                     Text(
-                        "Transfer: ↓ ${formatBytes(health.rxBytes)}  ↑ ${formatBytes(health.txBytes)}",
+                        stringResource(R.string.transport_transfer, formatBytes(health.rxBytes), formatBytes(health.txBytes)),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Text(
-                        "Latest handshake: ${relativeTime(health.lastHandshakeEpoch, nowSec)}",
+                        stringResource(R.string.transport_handshake, relativeTimeText(health.lastHandshakeEpoch, nowSec)),
                         style = MaterialTheme.typography.bodyMedium,
                         color = if (health.handshakeOk) {
                             MaterialTheme.colorScheme.onSurface
@@ -448,14 +449,15 @@ private fun formatBytes(bytes: Long?): String {
     return "%.2f GiB".format(mib / 1024.0)
 }
 
-private fun relativeTime(epochSec: Long?, nowSec: Long): String {
-    if (epochSec == null || epochSec <= 0) return "never"
+@Composable
+private fun relativeTimeText(epochSec: Long?, nowSec: Long): String {
+    if (epochSec == null || epochSec <= 0) return stringResource(R.string.time_never)
     val d = (nowSec - epochSec).coerceAtLeast(0)
     return when {
-        d < 2 -> "just now"
-        d < 60 -> "${d}s ago"
-        d < 3600 -> "${d / 60}m ${d % 60}s ago"
-        else -> "${d / 3600}h ${(d % 3600) / 60}m ago"
+        d < 2 -> stringResource(R.string.time_just_now)
+        d < 60 -> stringResource(R.string.time_s_ago, d)
+        d < 3600 -> stringResource(R.string.time_ms_ago, d / 60, d % 60)
+        else -> stringResource(R.string.time_hm_ago, d / 3600, (d % 3600) / 60)
     }
 }
 

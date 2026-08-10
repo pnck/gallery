@@ -33,9 +33,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import io.github.pnck.gallery.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -76,10 +78,10 @@ fun DiagnosticsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Diagnostics") },
+                title = { Text(stringResource(R.string.diagnostics_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                     }
                 },
             )
@@ -94,7 +96,7 @@ fun DiagnosticsScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(viewModel.buildInfo, style = MaterialTheme.typography.bodySmall)
-            Text("Transport: $transportState", style = MaterialTheme.typography.bodySmall)
+            Text(stringResource(R.string.diagnostics_transport_state, transportState), style = MaterialTheme.typography.bodySmall)
             health?.let { h ->
                 Text(
                     buildString {
@@ -108,7 +110,7 @@ fun DiagnosticsScreen(
                 )
             }
 
-            Text("Transport log level (gallery-wg)", style = MaterialTheme.typography.titleSmall)
+            Text(stringResource(R.string.diagnostics_log_level), style = MaterialTheme.typography.titleSmall)
             Row(
                 modifier = Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -125,7 +127,7 @@ fun DiagnosticsScreen(
             OutlinedTextField(
                 value = target,
                 onValueChange = { target = it },
-                label = { Text("Diag target (URL or host:port)") },
+                label = { Text(stringResource(R.string.diagnostics_target)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -134,15 +136,15 @@ fun DiagnosticsScreen(
                     onClick = { viewModel.runDiag(target) },
                     enabled = !running,
                     modifier = Modifier.weight(1f),
-                ) { Text(if (running) "Running…" else "Run diagnostics") }
+                ) { Text(stringResource(if (running) R.string.diagnostics_running else R.string.diagnostics_run)) }
                 OutlinedButton(onClick = viewModel::dumpTransport, modifier = Modifier.weight(1f)) {
-                    Text("Dump transport")
+                    Text(stringResource(R.string.diagnostics_dump))
                 }
             }
             OutlinedButton(
                 onClick = { exportLauncher.launch("gallery-diagnostics.txt") },
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("Export diagnostics bundle") }
+            ) { Text(stringResource(R.string.diagnostics_export)) }
 
             if (output.isNotBlank()) {
                 Text(
