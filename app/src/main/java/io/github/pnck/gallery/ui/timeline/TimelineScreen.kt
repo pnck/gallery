@@ -165,6 +165,7 @@ fun TimelineScreen(
     val haptics = LocalHapticFeedback.current
     val snackbarHost = remember { SnackbarHostState() }
     val sheetSnackbarHost = remember { SnackbarHostState() }
+    var pendingSheetMessage by remember { mutableStateOf<String?>(null) }
     val systemDelete = rememberSystemDelete()
 
     // Autostart probe verdict (recomputed when either probe timestamp moves).
@@ -262,14 +263,27 @@ fun TimelineScreen(
         )
         null -> null
     }
+    // The toast is an APP-LEVEL surface: sheet actions dismiss first so their
+    // feedback lands on the scaffold host (and survives), and a background event
+    // that arrived while the sheet was open is re-shown on the main host when
+    // the sheet closes — a toast never dies with a sheet.
     LaunchedEffect(eventMessage, showStatus) {
         eventMessage?.let {
-            // A ModalBottomSheet renders ABOVE the Scaffold — a snackbar emitted to
-            // the scaffold host while the sync sheet is open is invisible behind it.
-            // Route by surface: sheet open → the sheet's own host, else the scaffold's.
-            (if (showStatus) sheetSnackbarHost else snackbarHost).showSnackbar(it)
+            if (showStatus) {
+                pendingSheetMessage = it
+                sheetSnackbarHost.showSnackbar(it)
+            } else {
+                snackbarHost.showSnackbar(it)
+            }
             pendingEvent = null
         }
+    }
+    LaunchedEffect(showStatus) {
+        if (!showStatus && sheetSnackbarHost.currentSnackbarData != null) {
+            sheetSnackbarHost.currentSnackbarData?.dismiss()
+            pendingSheetMessage?.let { snackbarHost.showSnackbar(it) }
+        }
+        if (!showStatus) pendingSheetMessage = null
     }
 
     Scaffold(
@@ -477,7 +491,9 @@ fun TimelineScreen(
                 snackbarHostState = sheetSnackbarHost,
                 onFixMediaAccess = { openPermissionEditor(context) },
                 onFixAutostart = { (context as? Activity)?.let { openAutostartSettings(it) } },
-                onSyncNow = viewModel::backupNow,
+                // Sheet actions dismiss FIRST: their feedback toast belongs to the
+                // app-level surface, alive after the sheet is gone.
+                onSyncNow = { showStatus = false; viewModel.backupNow() },
                 onRebuild = { showStatus = false; viewModel.rebuildSyncState() },
                 onClearQueue = { showStatus = false; showClearConfirm = true },
             )

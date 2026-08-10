@@ -4,7 +4,9 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -106,21 +108,32 @@ fun GalleryNavHost() {
         val openDrawer: () -> Unit = { scope.launch { offset.animateTo(0f, tween(300)) } }
         val closeDrawer: () -> Unit = { scope.launch { offset.animateTo(closedX, tween(250)) } }
 
-        /** Finger-tracked horizontal drag driving the shared offset; settles by position. */
-        fun Modifier.drawerDrag() = pointerInput(sheetWidthPx) {
-            detectHorizontalDragGestures(
-                onHorizontalDrag = { change, dragAmount ->
-                    change.consume()
-                    scope.launch { offset.snapTo((offset.value + dragAmount).coerceIn(closedX, 0f)) }
-                },
-                onDragEnd = {
-                    scope.launch {
-                        val target = if (offset.value > closedX / 2f) 0f else closedX
-                        offset.animateTo(target, tween(200))
+        /**
+         * Finger-tracked horizontal drag driving the shared offset, settled by
+         * MOMENTUM first (a fast fling closes/opens from any position — position-
+         * only settling made even a hard fling on the far half bounce back),
+         * position only for slow drags. Used by the sheet, the scrim (content-side
+         * left-drag closes, per MD modal-drawer behavior) and the edge strip.
+         */
+        val flingVelocityPx = with(density) { 400.dp.toPx() }
+        @Composable
+        fun Modifier.drawerDrag(): Modifier = draggable(
+            orientation = Orientation.Horizontal,
+            state = rememberDraggableState { delta ->
+                scope.launch { offset.snapTo((offset.value + delta).coerceIn(closedX, 0f)) }
+            },
+            onDragStopped = { velocity ->
+                scope.launch {
+                    val target = when {
+                        velocity < -flingVelocityPx -> closedX
+                        velocity > flingVelocityPx -> 0f
+                        offset.value > closedX / 2f -> 0f
+                        else -> closedX
                     }
-                },
-            )
-        }
+                    offset.animateTo(target, tween(200))
+                }
+            },
+        )
 
         NavHost(navController = navController, startDestination = Routes.TIMELINE) {
             composable(Routes.TIMELINE) {
@@ -170,12 +183,14 @@ fun GalleryNavHost() {
             }
         }
 
-        // Scrim: fades with the same offset fraction; a tap on it closes the drawer.
+        // Scrim: fades with the same offset fraction; tap closes, and a leftward
+        // drag/fling anywhere on it drives the same momentum physics as the sheet.
         if (fraction > 0f) {
             Box(
                 Modifier
                     .fillMaxSize()
                     .background(Color.Black.copy(alpha = 0.32f * fraction))
+                    .drawerDrag()
                     .pointerInput(settledOpen) {
                         if (settledOpen) detectTapGestures { closeDrawer() }
                     },
