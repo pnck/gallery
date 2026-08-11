@@ -75,6 +75,8 @@ class MediaReconciler(
                     bucketId = item.bucketId,
                     bucketName = item.bucketName,
                     relativePath = item.relativePath,
+                    isVideo = item.isVideo,
+                    durationMs = item.durationMs,
                     syncState = SyncState.PENDING_UPLOAD,
                 )
             } else if (existing.sizeBytes == 0L || existing.bucketId == null) {

@@ -41,6 +41,10 @@ data class TimelinePhoto(
     val queued: Boolean = true,
     /** Batch attempts so far; > 0 marks the photo as actively uploading/retrying. */
     val uploadAttempts: Int = 0,
+    /** Video item — the grid shows a film badge with duration, the viewer a player. */
+    val isVideo: Boolean = false,
+    /** Video duration in ms; 0 for images/unknown. */
+    val durationMs: Long = 0,
 ) {
     /** True when only the cloud copy remains (PRD §3.7); the grid keeps a cloud badge. */
     val showCloudIcon: Boolean get() = syncState == SyncState.CLOUD_ONLY

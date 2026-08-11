@@ -161,6 +161,9 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
     implementation(libs.telephoto.zoomable.coil3)
+    // Video playback in the detail viewer (controls-only: play/pause/seek/rotate).
+    implementation(libs.media3.exoplayer)
+    implementation(libs.media3.ui)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

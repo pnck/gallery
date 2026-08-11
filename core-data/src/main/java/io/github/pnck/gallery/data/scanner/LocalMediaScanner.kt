@@ -26,6 +26,10 @@ data class LocalMediaItem(
     /** MediaStore RELATIVE_PATH (e.g. "DCIM/Camera/") — the restore target folder,
      *  written onto the cloud object at upload. API 29+; null below. */
     val relativePath: String?,
+    /** True for MediaStore.Video rows — drives the film+duration badge and the player. */
+    val isVideo: Boolean = false,
+    /** Video duration in ms; 0 for images/unknown. */
+    val durationMs: Long = 0,
 )
 
 /**
@@ -37,6 +41,8 @@ data class LocalMediaItem(
  */
 class LocalMediaScanner(private val resolver: ContentResolver) {
 
+    // Same column names on both volumes (MediaStore.Images.* ≡ MediaStore.Video.*);
+    // DURATION exists only on the Video volume.
     private val projection = buildList {
         add(MediaStore.Images.Media._ID)
         add(MediaStore.Images.Media.DATE_TAKEN)
@@ -51,6 +57,10 @@ class LocalMediaScanner(private val resolver: ContentResolver) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) add(MediaStore.Images.Media.RELATIVE_PATH)
     }.toTypedArray()
 
+    private val videoProjection = projection + MediaStore.Video.Media.DURATION
+
+    /** Full/incremental sweep of BOTH volumes (images + videos), merged and
+     *  date-ordered. The caller reconciles; this class only queries. */
     suspend fun scanIncremental(sinceDateModifiedSec: Long): List<LocalMediaItem> =
         withContext(Dispatchers.IO) {
             val items = mutableListOf<LocalMediaItem>()
@@ -58,50 +68,62 @@ class LocalMediaScanner(private val resolver: ContentResolver) {
             // silently drop rows whose date is 0/NULL (OEM media-scanner gaps — 13%
             // of one production library), and the persisted cursor would then skip
             // them on every future scan too.
-            resolver.query(
-                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                projection,
-                if (sinceDateModifiedSec > 0) "${MediaStore.Images.Media.DATE_MODIFIED} > ?" else null,
-                if (sinceDateModifiedSec > 0) arrayOf(sinceDateModifiedSec.toString()) else null,
-                "${MediaStore.Images.Media.DATE_MODIFIED} ASC",
-            )?.use { cursor ->
-                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
-                val takenCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_TAKEN)
-                val addedCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
-                val modifiedCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_MODIFIED)
-                val widthCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.WIDTH)
-                val heightCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.HEIGHT)
-                val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE)
-                val bucketIdCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_ID)
-                val bucketNameCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
-                val relPathCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    cursor.getColumnIndexOrThrow(MediaStore.Images.Media.RELATIVE_PATH)
-                } else {
-                    -1
-                }
-
-                while (cursor.moveToNext()) {
-                    val id = cursor.getLong(idCol)
-                    val uri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
-                    // DATE_TAKEN can be 0/null on some OEMs — fall back to DATE_ADDED (sec → ms).
-                    val taken = cursor.getLong(takenCol).takeIf { it > 0 }
-                        ?: cursor.getLong(addedCol) * 1000
-                    items += LocalMediaItem(
-                        mediaStoreId = id,
-                        contentUri = uri.toString(),
-                        dateTakenMs = taken,
-                        dateModifiedSec = cursor.getLong(modifiedCol),
-                        width = cursor.getInt(widthCol),
-                        height = cursor.getInt(heightCol),
-                        sizeBytes = cursor.getLong(sizeCol),
-                        bucketId = cursor.getString(bucketIdCol),
-                        bucketName = cursor.getString(bucketNameCol),
-                        relativePath = if (relPathCol >= 0) cursor.getString(relPathCol) else null,
-                    )
-                }
-            }
+            val selection = if (sinceDateModifiedSec > 0) "${MediaStore.Images.Media.DATE_MODIFIED} > ?" else null
+            val args = if (sinceDateModifiedSec > 0) arrayOf(sinceDateModifiedSec.toString()) else null
+            queryVolume(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, projection, selection, args, isVideo = false, into = items)
+            queryVolume(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, videoProjection, selection, args, isVideo = true, into = items)
+            items.sortBy { it.dateModifiedSec }
             items
         }
+
+    private fun queryVolume(
+        uri: android.net.Uri,
+        projection: Array<String>,
+        selection: String?,
+        args: Array<String>?,
+        isVideo: Boolean,
+        into: MutableList<LocalMediaItem>,
+    ) {
+        resolver.query(uri, projection, selection, args, "${MediaStore.Images.Media.DATE_MODIFIED} ASC")?.use { cursor ->
+            val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+            val takenCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_TAKEN)
+            val addedCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
+            val modifiedCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_MODIFIED)
+            val widthCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.WIDTH)
+            val heightCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.HEIGHT)
+            val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE)
+            val bucketIdCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_ID)
+            val bucketNameCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
+            val relPathCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                cursor.getColumnIndexOrThrow(MediaStore.Images.Media.RELATIVE_PATH)
+            } else {
+                -1
+            }
+            val durationCol = if (isVideo) cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION) else -1
+
+            while (cursor.moveToNext()) {
+                val id = cursor.getLong(idCol)
+                val contentUri = ContentUris.withAppendedId(uri, id)
+                // DATE_TAKEN can be 0/null on some OEMs — fall back to DATE_ADDED (sec → ms).
+                val taken = cursor.getLong(takenCol).takeIf { it > 0 }
+                    ?: cursor.getLong(addedCol) * 1000
+                into += LocalMediaItem(
+                    mediaStoreId = id,
+                    contentUri = contentUri.toString(),
+                    dateTakenMs = taken,
+                    dateModifiedSec = cursor.getLong(modifiedCol),
+                    width = cursor.getInt(widthCol),
+                    height = cursor.getInt(heightCol),
+                    sizeBytes = cursor.getLong(sizeCol),
+                    bucketId = cursor.getString(bucketIdCol),
+                    bucketName = cursor.getString(bucketNameCol),
+                    relativePath = if (relPathCol >= 0) cursor.getString(relPathCol) else null,
+                    isVideo = isVideo,
+                    durationMs = if (durationCol >= 0) cursor.getLong(durationCol) else 0L,
+                )
+            }
+        }
+    }
 
     /**
      * Enumerate the device's image folders (MediaStore buckets) with a photo count,
@@ -116,8 +138,10 @@ class LocalMediaScanner(private val resolver: ContentResolver) {
         @Suppress("DEPRECATION")
         val pathCol = if (usePath) MediaStore.Images.Media.RELATIVE_PATH else MediaStore.Images.Media.DATA
         val acc = LinkedHashMap<String, BucketAcc>()
+        // Videos share the same buckets (DCIM & co.) — merge, deduping by bucketId.
+        listOf(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, MediaStore.Video.Media.EXTERNAL_CONTENT_URI).forEach { volume ->
         resolver.query(
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            volume,
             arrayOf(MediaStore.Images.Media.BUCKET_ID, MediaStore.Images.Media.BUCKET_DISPLAY_NAME, pathCol),
             null,
             null,
@@ -138,6 +162,7 @@ class LocalMediaScanner(private val resolver: ContentResolver) {
                     existing.count++
                 }
             }
+        }
         }
         acc.map { (id, b) -> MediaBucket(id, b.name, b.path, b.count) }
             .sortedByDescending { it.count }

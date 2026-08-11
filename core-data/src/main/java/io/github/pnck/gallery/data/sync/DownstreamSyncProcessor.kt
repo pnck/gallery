@@ -126,6 +126,8 @@ class DownstreamSyncProcessor(
             height = height,
             // appProperties.sourcePath — restore target folder, survives reinstalls.
             relativePath = sourcePath,
+            isVideo = isVideo,
+            durationMs = durationMs,
             syncState = SyncState.CLOUD_ONLY,
         )
     }

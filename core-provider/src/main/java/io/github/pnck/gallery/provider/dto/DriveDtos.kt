@@ -36,6 +36,13 @@ data class DriveFileDTO(
     /** Requires an Authorization: Bearer header to fetch (PRD §8.3). */
     val thumbnailLink: String? = null,
     val imageMediaMetadata: ImageMetadataDTO? = null,
+    /** Present on video files; durationMillis arrives as a STRING of ms. */
+    val videoMediaMetadata: VideoMetadataDTO? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class VideoMetadataDTO(
+    val durationMillis: String? = null,
 )
 
 @JsonClass(generateAdapter = true)

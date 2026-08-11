@@ -42,6 +42,10 @@ data class CloudFile(
     /** appProperties.sourcePath: the device folder the photo was uploaded from
      *  (e.g. "DCIM/Camera/") — the restore target on any device. */
     val sourcePath: String? = null,
+    /** Video mime — film badge + player. */
+    val isVideo: Boolean = false,
+    /** videoMediaMetadata.durationMillis when the provider knows it; 0 otherwise. */
+    val durationMs: Long = 0,
 )
 
 data class CloudPage(

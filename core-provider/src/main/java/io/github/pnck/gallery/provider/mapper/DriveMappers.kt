@@ -44,5 +44,7 @@ object DriveMappers {
             thumbnailUrl = dto.thumbnailLink,
             name = dto.name,
             sourcePath = dto.appProperties?.get("sourcePath"),
+            isVideo = dto.mimeType?.startsWith("video/") == true,
+            durationMs = dto.videoMediaMetadata?.durationMillis?.toLongOrNull() ?: 0L,
         )
 }

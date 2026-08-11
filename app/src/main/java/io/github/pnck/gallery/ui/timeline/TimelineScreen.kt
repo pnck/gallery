@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
@@ -117,7 +118,8 @@ import io.github.pnck.gallery.ui.util.rememberSystemDelete
 import io.github.pnck.gallery.ui.util.showAppToast
 import io.github.pnck.gallery.ui.util.hasFullMediaAccess
 import io.github.pnck.gallery.ui.util.isMiui
-import io.github.pnck.gallery.ui.util.mediaPermission
+import io.github.pnck.gallery.ui.util.hasMediaRuntimePermission
+import io.github.pnck.gallery.ui.util.mediaPermissionsToRequest
 import io.github.pnck.gallery.ui.util.openAutostartSettings
 import io.github.pnck.gallery.ui.util.openPermissionEditor
 import androidx.compose.ui.unit.Dp
@@ -227,9 +229,9 @@ fun TimelineScreen(
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        if (granted) viewModel.processIntent(TimelineIntent.ForceSync)
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { grants ->
+        if (grants.values.any { it }) viewModel.processIntent(TimelineIntent.ForceSync)
     }
 
     // Ask for media access once on entry; API 34+ partial grant still returns
@@ -238,10 +240,10 @@ fun TimelineScreen(
     // MIUI's foreground-only app-op); hasFullMediaAccess is for the sheet's
     // background-degradation row, not for gating the wall.
     LaunchedEffect(Unit) {
-        if (ContextCompat.checkSelfPermission(context, mediaPermission()) == PackageManager.PERMISSION_GRANTED) {
+        if (hasMediaRuntimePermission(context)) {
             viewModel.processIntent(TimelineIntent.ForceSync)
         } else {
-            permissionLauncher.launch(mediaPermission())
+            permissionLauncher.launch(mediaPermissionsToRequest())
         }
     }
 
@@ -707,6 +709,33 @@ private fun PhotoCell(
             badge = badge,
             modifier = Modifier.align(Alignment.TopEnd).padding(4.dp),
         )
+        // Video marker: film icon + duration, bottom-start (Google-Photos style).
+        if (photo.isVideo) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(4.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.4f))
+                    .padding(horizontal = 5.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Default.Movie,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(12.dp),
+                )
+                if (photo.durationMs > 0) {
+                    Spacer(Modifier.width(3.dp))
+                    Text(
+                        formatDuration(photo.durationMs),
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+            }
+        }
         if (selectionMode) {
             val accent = MaterialTheme.colorScheme.primary
             if (selected) {
@@ -1083,4 +1112,10 @@ private fun workStateLabel(state: WorkInfo.State): String = when (state) {
     WorkInfo.State.ENQUEUED -> stringResource(R.string.work_enqueued)
     WorkInfo.State.BLOCKED -> stringResource(R.string.work_blocked)
     else -> state.name
+}
+
+/** "0:47" / "12:03" — grid badge duration. */
+private fun formatDuration(ms: Long): String {
+    val totalSec = ms / 1000
+    return "%d:%02d".format(totalSec / 60, totalSec % 60)
 }

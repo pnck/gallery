@@ -54,6 +54,10 @@ data class PhotoEntity(
      * device lands in the original folder.
      */
     val relativePath: String? = null,
+    /** MediaStore.Video row — film+duration badge, player in the viewer. */
+    val isVideo: Boolean = false,
+    /** Video duration ms; 0 for images/unknown (cloud rows may carry it from the provider). */
+    val durationMs: Long = 0,
     val syncState: SyncState,
     /**
      * User opted this photo out of automatic backup ("clear queue"): it stays local

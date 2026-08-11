@@ -366,4 +366,6 @@ internal fun PhotoEntity.toTimelinePhoto(): TimelinePhoto =
         classified = syncState != SyncState.PENDING_UPLOAD || contentHashValue != null,
         queued = queued,
         uploadAttempts = uploadAttempts,
+        isVideo = isVideo,
+        durationMs = durationMs,
     )

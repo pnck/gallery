@@ -143,6 +143,8 @@ class ReconcileProcessor(
                 bucketId = item.bucketId,
                 bucketName = item.bucketName,
                 relativePath = item.relativePath,
+                isVideo = item.isVideo,
+                durationMs = item.durationMs,
             )
         }
 
@@ -155,6 +157,8 @@ class ReconcileProcessor(
                 height = it.height,
                 thumbnailUrl = it.thumbnailUrl,
                 sourcePath = it.sourcePath,
+                isVideo = it.isVideo,
+                durationMs = it.durationMs,
             )
         }
 
@@ -202,9 +206,10 @@ class ReconcileProcessor(
         fun granted(p: String) = ContextCompat.checkSelfPermission(appContext, p) == PackageManager.PERMISSION_GRANTED
         return when {
             Build.VERSION.SDK_INT >= 34 ->
-                granted(Manifest.permission.READ_MEDIA_IMAGES) ||
+                (granted(Manifest.permission.READ_MEDIA_IMAGES) && granted(Manifest.permission.READ_MEDIA_VIDEO)) ||
                     granted(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
-            Build.VERSION.SDK_INT >= 33 -> granted(Manifest.permission.READ_MEDIA_IMAGES)
+            Build.VERSION.SDK_INT >= 33 ->
+                granted(Manifest.permission.READ_MEDIA_IMAGES) && granted(Manifest.permission.READ_MEDIA_VIDEO)
             else -> granted(Manifest.permission.READ_EXTERNAL_STORAGE)
         }
     }
@@ -241,6 +246,8 @@ data class LocalTruth(
     val bucketId: String?,
     val bucketName: String?,
     val relativePath: String? = null,
+    val isVideo: Boolean = false,
+    val durationMs: Long = 0,
 )
 
 /** Cloud ground-truth item for [planReconcile] (a backup-folder file + its MD5). */
@@ -253,6 +260,8 @@ data class CloudTruth(
     val thumbnailUrl: String?,
     /** appProperties.sourcePath — restore target folder, carried into the row. */
     val sourcePath: String? = null,
+    val isVideo: Boolean = false,
+    val durationMs: Long = 0,
 )
 
 /** The DB mutation the reconcile computed: rows to write, row ids to delete. */
@@ -337,6 +346,8 @@ fun planReconcile(
             bucketId = l.bucketId,
             bucketName = l.bucketName,
             relativePath = l.relativePath,
+            isVideo = l.isVideo,
+            durationMs = l.durationMs,
             syncState = if (match != null || backedUpElsewhere) SyncState.SYNCED else SyncState.PENDING_UPLOAD,
             excluded = row?.excluded ?: false,
             // Classify, never enqueue: queue membership survives reconcile untouched.
@@ -375,6 +386,8 @@ fun planReconcile(
             // The cloud object carries the uploader's source folder (appProperties)
             // — restore targets it even though there is no local copy here.
             relativePath = c.sourcePath ?: row?.relativePath,
+            isVideo = c.isVideo,
+            durationMs = c.durationMs,
             syncState = SyncState.CLOUD_ONLY,
             excluded = row?.excluded ?: false,
         )

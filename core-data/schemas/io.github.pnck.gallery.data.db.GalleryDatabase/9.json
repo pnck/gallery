@@ -1,0 +1,254 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 9,
+    "identityHash": "fd5dc8c4c210bc23881afb3dc8516f33",
+    "entities": [
+      {
+        "tableName": "photos",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `localUri` TEXT, `cloudId` TEXT, `provider` TEXT, `contentHashType` TEXT, `contentHashValue` TEXT, `cloudThumbnailUrl` TEXT, `dateTaken` INTEGER NOT NULL, `dateModifiedSec` INTEGER NOT NULL, `width` INTEGER NOT NULL, `height` INTEGER NOT NULL, `sizeBytes` INTEGER NOT NULL, `bucketId` TEXT, `bucketName` TEXT, `relativePath` TEXT, `isVideo` INTEGER NOT NULL, `durationMs` INTEGER NOT NULL, `syncState` INTEGER NOT NULL, `excluded` INTEGER NOT NULL, `queued` INTEGER NOT NULL, `uploadAttempts` INTEGER NOT NULL, `lastUploadAttemptAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localUri",
+            "columnName": "localUri",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "cloudId",
+            "columnName": "cloudId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "provider",
+            "columnName": "provider",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "contentHashType",
+            "columnName": "contentHashType",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "contentHashValue",
+            "columnName": "contentHashValue",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "cloudThumbnailUrl",
+            "columnName": "cloudThumbnailUrl",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "dateTaken",
+            "columnName": "dateTaken",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dateModifiedSec",
+            "columnName": "dateModifiedSec",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "width",
+            "columnName": "width",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "height",
+            "columnName": "height",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sizeBytes",
+            "columnName": "sizeBytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bucketId",
+            "columnName": "bucketId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "bucketName",
+            "columnName": "bucketName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "relativePath",
+            "columnName": "relativePath",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "isVideo",
+            "columnName": "isVideo",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "durationMs",
+            "columnName": "durationMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "syncState",
+            "columnName": "syncState",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "excluded",
+            "columnName": "excluded",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "queued",
+            "columnName": "queued",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "uploadAttempts",
+            "columnName": "uploadAttempts",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastUploadAttemptAt",
+            "columnName": "lastUploadAttemptAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_photos_dateTaken",
+            "unique": false,
+            "columnNames": [
+              "dateTaken"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_photos_dateTaken` ON `${TABLE_NAME}` (`dateTaken`)"
+          },
+          {
+            "name": "index_photos_provider_cloudId",
+            "unique": true,
+            "columnNames": [
+              "provider",
+              "cloudId"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_photos_provider_cloudId` ON `${TABLE_NAME}` (`provider`, `cloudId`)"
+          },
+          {
+            "name": "index_photos_localUri",
+            "unique": true,
+            "columnNames": [
+              "localUri"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_photos_localUri` ON `${TABLE_NAME}` (`localUri`)"
+          }
+        ]
+      },
+      {
+        "tableName": "sync_keys",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`target` TEXT NOT NULL, `nextPageToken` TEXT, `deltaToken` TEXT, PRIMARY KEY(`target`))",
+        "fields": [
+          {
+            "fieldPath": "target",
+            "columnName": "target",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nextPageToken",
+            "columnName": "nextPageToken",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "deltaToken",
+            "columnName": "deltaToken",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "target"
+          ]
+        }
+      },
+      {
+        "tableName": "upload_sessions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`photoId` TEXT NOT NULL, `sessionUri` TEXT NOT NULL, `bytesConfirmed` INTEGER NOT NULL, `totalBytes` INTEGER NOT NULL, `mimeType` TEXT NOT NULL, `updatedAtEpochMs` INTEGER NOT NULL, PRIMARY KEY(`photoId`))",
+        "fields": [
+          {
+            "fieldPath": "photoId",
+            "columnName": "photoId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sessionUri",
+            "columnName": "sessionUri",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bytesConfirmed",
+            "columnName": "bytesConfirmed",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalBytes",
+            "columnName": "totalBytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mimeType",
+            "columnName": "mimeType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMs",
+            "columnName": "updatedAtEpochMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "photoId"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'fd5dc8c4c210bc23881afb3dc8516f33')"
+    ]
+  }
+}

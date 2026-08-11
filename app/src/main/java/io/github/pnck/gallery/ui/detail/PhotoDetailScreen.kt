@@ -74,7 +74,6 @@ import io.github.pnck.gallery.domain.SyncState
 import io.github.pnck.gallery.domain.TimelinePhoto
 import io.github.pnck.gallery.ui.util.rememberSystemDelete
 import io.github.pnck.gallery.ui.util.snapTo90
-import io.github.pnck.gallery.ui.util.twoFingerRotation
 import androidx.core.net.toUri
 import kotlinx.coroutines.launch
 import me.saket.telephoto.zoomable.coil3.ZoomableAsyncImage
@@ -219,7 +218,7 @@ fun PhotoDetailScreen(
                         // Swipe down to dismiss — only when the image isn't zoomed,
                         // so Telephoto still owns pan/zoom otherwise.
                         .then(
-                            if (notZoomed) {
+                            if (notZoomed && !photo.isVideo) {
                                 Modifier.pointerInput(Unit) {
                                     detectVerticalDragGestures(
                                         onVerticalDrag = { change, dy ->
@@ -236,15 +235,24 @@ fun PhotoDetailScreen(
                             } else {
                                 Modifier
                             },
-                        )
-                        .twoFingerRotation(
-                            enabled = model != null,
-                            onRotate = { d -> rotations[page] = (rotations[page] ?: 0f) + d },
-                            onSettle = { rotations[page] = snapTo90(rotations[page] ?: 0f) },
                         ),
+                        // Two-finger rotation gesture DISABLED (owner: it fights the
+                        // horizontal pager swipe). Rotation stays available as the
+                        // top-bar control only.
                     contentAlignment = Alignment.Center,
                 ) {
                     when {
+                        photo.isVideo -> {
+                            // Controls-only player (play/pause/seek/rotate — no gestures).
+                            val videoUri = photo.localUri ?: (originals[photo.id] as? OriginalState.Ready)?.uri
+                            if (videoUri != null) {
+                                VideoPlayerPage(uri = videoUri, modifier = Modifier.fillMaxSize())
+                            } else if (originals[photo.id] is OriginalState.Failed) {
+                                Text(stringResource(R.string.detail_download_failed), color = Color.White)
+                            } else {
+                                CircularProgressIndicator(color = Color.White)
+                            }
+                        }
                         model != null -> ZoomableAsyncImage(
                             model = model,
                             contentDescription = null,

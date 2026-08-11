@@ -21,6 +21,21 @@ fun mediaPermission(): String =
         Manifest.permission.READ_EXTERNAL_STORAGE
     }
 
+/** All media-read permissions to request at runtime (images + videos on 33+;
+ *  single legacy permission below). */
+fun mediaPermissionsToRequest(): Array<String> =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
+    } else {
+        arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+    }
+
+/** Runtime-grant check over BOTH media permissions (33+; legacy below). */
+fun hasMediaRuntimePermission(context: Context): Boolean =
+    mediaPermissionsToRequest().all {
+        ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+    }
+
 /**
  * FULL (not foreground-restricted) media read access.
  *
@@ -31,32 +46,33 @@ fun mediaPermission(): String =
  * place the restriction is visible.
  */
 fun hasFullMediaAccess(context: Context): Boolean {
-    if (ContextCompat.checkSelfPermission(context, mediaPermission()) != PackageManager.PERMISSION_GRANTED) {
-        return false
-    }
+    if (!hasMediaRuntimePermission(context)) return false
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return true // no app-op modes below Q
     val ops = context.getSystemService(AppOpsManager::class.java) ?: return true
-    val op = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        OPSTR_READ_MEDIA_IMAGES
+    val targets = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        listOf(OPSTR_READ_MEDIA_IMAGES, OPSTR_READ_MEDIA_VIDEO)
     } else {
-        AppOpsManager.OPSTR_READ_EXTERNAL_STORAGE
+        listOf(AppOpsManager.OPSTR_READ_EXTERNAL_STORAGE)
     }
-    return when (ops.unsafeCheckOpNoThrow(op, Process.myUid(), context.packageName)) {
-        AppOpsManager.MODE_ALLOWED -> true
-        else ->
-            // API 34+ partial access ("selected photos") is a complete, supported
-            // state (PRD §6.3), not a degradation.
-            Build.VERSION.SDK_INT >= 34 && ops.unsafeCheckOpNoThrow(
-                OPSTR_READ_MEDIA_VISUAL_USER_SELECTED,
-                Process.myUid(),
-                context.packageName,
-            ) == AppOpsManager.MODE_ALLOWED
+    return targets.all { op ->
+        when (ops.unsafeCheckOpNoThrow(op, Process.myUid(), context.packageName)) {
+            AppOpsManager.MODE_ALLOWED -> true
+            else ->
+                // API 34+ partial access ("selected photos") is a complete, supported
+                // state (PRD §6.3), not a degradation.
+                Build.VERSION.SDK_INT >= 34 && ops.unsafeCheckOpNoThrow(
+                    OPSTR_READ_MEDIA_VISUAL_USER_SELECTED,
+                    Process.myUid(),
+                    context.packageName,
+                ) == AppOpsManager.MODE_ALLOWED
+        }
     }
 }
 
 // The media app-op strings are hidden API (no public constants) — the values
 // are stable, set by the platform.
 private const val OPSTR_READ_MEDIA_IMAGES = "android:read_media_images"
+private const val OPSTR_READ_MEDIA_VIDEO = "android:read_media_video"
 private const val OPSTR_READ_MEDIA_VISUAL_USER_SELECTED = "android:read_media_visual_user_selected"
 
 /**
