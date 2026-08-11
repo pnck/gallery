@@ -107,32 +107,31 @@ class AppSettingsStore(private val context: Context) {
     }
 
     /**
-     * The autostart EXPERIMENT (see AutostartProbeWorker): when the current probe
-     * job was enqueued (0 = none) and when a probe last completed in the
-     * background (0 = never). Outstanding-and-overdue is the ONLY honest
-     * "background execution is blocked" signal — no API reports it.
+     * The autostart EXPERIMENT (see AutostartProbeWorker): each background
+     * transition arms a fresh probe (scheduledAt=now); a BACKGROUND delivery
+     * stamps completedAt (proof); a FOREGROUND delivery invalidates the round
+     * (concludes without verdict — no proof either way, no lock-in).
      */
     val autostartProbeScheduledAt: Flow<Long> = context.appSettingsStore.data.map { it[probeScheduledAtKey] ?: 0L }
     val autostartProbeCompletedAt: Flow<Long> = context.appSettingsStore.data.map { it[probeCompletedAtKey] ?: 0L }
 
-    /** Record a NEW probe's start — only when none is outstanding (the previous
-     *  one completed), so the timestamp always describes the live experiment.
-     *  @return true when a new experiment was recorded (caller should enqueue). */
-    suspend fun noteAutostartProbeScheduled(): Boolean {
-        var fresh = false
-        context.appSettingsStore.edit { prefs ->
-            val scheduled = prefs[probeScheduledAtKey] ?: 0L
-            val completed = prefs[probeCompletedAtKey] ?: 0L
-            if (scheduled <= completed) {
-                prefs[probeScheduledAtKey] = System.currentTimeMillis()
-                fresh = true
-            }
-        }
-        return fresh
+    /** Arm a fresh experiment: every background transition is a new question. */
+    suspend fun noteAutostartProbeScheduled() {
+        context.appSettingsStore.edit { it[probeScheduledAtKey] = System.currentTimeMillis() }
     }
 
+    /** Delivery proven (a background run landed). */
     suspend fun noteAutostartProbeCompleted() {
         context.appSettingsStore.edit { it[probeCompletedAtKey] = System.currentTimeMillis() }
+    }
+
+    /** The probe ran while the app was VISIBLE — the round proves nothing, so
+     *  conclude it (completed := scheduled) instead of leaving a stale
+     *  outstanding probe that would accuse the system 15 min later. */
+    suspend fun noteAutostartProbeInvalidated() {
+        context.appSettingsStore.edit { prefs ->
+            prefs[probeCompletedAtKey] = prefs[probeScheduledAtKey] ?: 0L
+        }
     }
 
     suspend fun setTransportLogLevel(level: String) {

@@ -31,9 +31,12 @@ class AutostartProbeWorker @AssistedInject constructor(
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
-        // A probe that lands while the app is VISIBLE proves nothing (any job
-        // runs then); only background delivery is evidence.
-        if (!appVisible) {
+        if (appVisible) {
+            // Ran while the app is VISIBLE — proves nothing about background
+            // delivery. Conclude the round without a verdict (invalidate), or a
+            // discarded-but-delivered probe would lock in a false "blocked" row.
+            settings.noteAutostartProbeInvalidated()
+        } else {
             settings.noteAutostartProbeCompleted()
         }
         return Result.success()
@@ -52,22 +55,17 @@ class AutostartProbeWorker @AssistedInject constructor(
         var appVisible: Boolean = false
 
         /**
-         * Fire a fresh zero-delay probe (REPLACE: each background interval is a
-         * new experiment — a system that killed the last job gets retried, and
-         * a healthy system delivers within seconds). The settings timestamp
-         * only advances when the previous experiment concluded
-         * (AppSettingsStore.noteAutostartProbeScheduled), so a blocked system's
-         * outstanding probe is never quietly renewed.
+         * Arm a fresh zero-delay probe for this background interval (REPLACE —
+         * every interval is a new experiment; a system that killed the last job
+         * gets retried, a healthy one delivers within seconds).
          */
         suspend fun fire(workManager: WorkManager, settings: AppSettingsStore) {
-            val fresh = settings.noteAutostartProbeScheduled()
-            if (fresh) {
-                workManager.enqueueUniqueWork(
-                    UNIQUE_NAME,
-                    ExistingWorkPolicy.REPLACE,
-                    OneTimeWorkRequestBuilder<AutostartProbeWorker>().build(),
-                )
-            }
+            settings.noteAutostartProbeScheduled()
+            workManager.enqueueUniqueWork(
+                UNIQUE_NAME,
+                ExistingWorkPolicy.REPLACE,
+                OneTimeWorkRequestBuilder<AutostartProbeWorker>().build(),
+            )
         }
     }
 }
