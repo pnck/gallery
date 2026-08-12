@@ -5,6 +5,7 @@ import android.content.Context
 import androidx.work.WorkManager
 import coil3.ImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
+import coil3.video.VideoFrameDecoder
 import com.squareup.moshi.Moshi
 import io.github.pnck.gallery.ui.coil.ProviderUriFetcher
 import io.github.pnck.gallery.provider.driveread.DriveReadAccess
@@ -199,6 +200,8 @@ object AppModule {
                 add(ProviderUriFetcher.Factory(provider, photoDao, client))
                 // "My Drive" images ride the separate drive.readonly token on the bare client.
                 add(DriveReadUrlFetcher.Factory(driveReadAccess, bareClient))
+                // Wall thumbnails for local videos: decode a frame via MediaMetadataRetriever.
+                add(VideoFrameDecoder.Factory())
             }
             .build()
 

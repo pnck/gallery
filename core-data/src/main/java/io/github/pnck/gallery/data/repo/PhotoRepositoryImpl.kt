@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.webkit.MimeTypeMap
 import androidx.core.content.FileProvider
 import androidx.sqlite.db.SimpleSQLiteQuery
 import androidx.sqlite.db.SupportSQLiteQuery
@@ -186,17 +187,30 @@ class PhotoRepositoryImpl(
         // and the cloud object keeps the original display name.
         val cloudMeta = (provider.getFileMetadata(cloudId) as? ApiResult.Success)?.data
         val displayName = cloudMeta?.name ?: "gallery-$cloudId.jpg"
-        val targetFolder = row.relativePath ?: cloudMeta?.sourcePath ?: Environment.DIRECTORY_PICTURES
+        val targetFolder = row.relativePath ?: cloudMeta?.sourcePath
+            ?: if (row.isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES
 
+        // Videos restore into the video collection; the images table would reject
+        // (or misfile) a video row. Mime comes from the original file extension so
+        // mp4/webm/heic etc. all round-trip faithfully.
+        val ext = displayName.substringAfterLast('.', "")
+        val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext.lowercase())
+            ?: if (row.isVideo) "video/mp4" else "image/jpeg"
         val values = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
-            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+            put(MediaStore.MediaColumns.MIME_TYPE, mime)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.Images.Media.RELATIVE_PATH, targetFolder)
-                put(MediaStore.Images.Media.IS_PENDING, 1)
+                put(MediaStore.MediaColumns.RELATIVE_PATH, targetFolder)
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
         }
-        val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val collection = if (row.isVideo) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            } else {
+                MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+            }
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         } else {
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI
@@ -212,7 +226,7 @@ class PhotoRepositoryImpl(
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             values.clear()
-            values.put(MediaStore.Images.Media.IS_PENDING, 0)
+            values.put(MediaStore.MediaColumns.IS_PENDING, 0)
             resolver.update(uri, values, null, null)
         }
 

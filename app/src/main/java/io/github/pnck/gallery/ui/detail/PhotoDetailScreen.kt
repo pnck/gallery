@@ -73,7 +73,6 @@ import io.github.pnck.gallery.R
 import io.github.pnck.gallery.domain.SyncState
 import io.github.pnck.gallery.domain.TimelinePhoto
 import io.github.pnck.gallery.ui.util.rememberSystemDelete
-import io.github.pnck.gallery.ui.util.snapTo90
 import androidx.core.net.toUri
 import kotlinx.coroutines.launch
 import me.saket.telephoto.zoomable.coil3.ZoomableAsyncImage
@@ -290,11 +289,14 @@ fun PhotoDetailScreen(
                     },
                     actions = {
                         if (current != null) {
-                            IconButton(onClick = {
-                                val p = pagerState.currentPage
-                                rotations[p] = snapTo90((rotations[p] ?: 0f) + 90f)
-                            }) {
-                                Icon(Icons.Default.RotateRight, contentDescription = stringResource(R.string.detail_rotate))
+                            // Videos carry their own rotate control in the player page.
+                            if (!current.isVideo) {
+                                IconButton(onClick = {
+                                    val p = pagerState.currentPage
+                                    rotations[p] = snapTo90((rotations[p] ?: 0f) + 90f)
+                                }) {
+                                    Icon(Icons.Default.RotateRight, contentDescription = stringResource(R.string.detail_rotate))
+                                }
                             }
                             IconButton(onClick = { share(current) }) {
                                 Icon(Icons.Default.Share, contentDescription = stringResource(R.string.detail_share))
@@ -422,3 +424,6 @@ private fun formatSize(bytes: Long): String {
     val kb = bytes / 1024.0
     return if (kb < 1024) "%.0f KB".format(kb) else "%.1f MB".format(kb / 1024)
 }
+
+/** Snap any angle to the nearest 90° step (used by the toolbar rotate control). */
+private fun snapTo90(angle: Float): Float = ((angle % 360f) + 360f) % 360f
