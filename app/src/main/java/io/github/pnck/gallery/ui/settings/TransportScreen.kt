@@ -53,7 +53,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import io.github.pnck.gallery.network.transport.TransportHealth
 import io.github.pnck.gallery.network.transport.TransportState
 import kotlinx.coroutines.delay
@@ -410,7 +410,7 @@ private fun MonitorCard(state: TransportState, health: TransportHealth?, error: 
             }
 
             if (state is TransportState.Connected && !yielding) {
-                val port = (state as TransportState.Connected).localSocksPort
+                val port = state.localSocksPort
                 Text(
                     stringResource(R.string.transport_local_socks, port),
                     style = MaterialTheme.typography.bodyMedium,

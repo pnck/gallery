@@ -111,6 +111,9 @@ android {
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        // KT-73255: lock in the future annotation-target semantics NOW, so the
+        // Kotlin-upgrade behavior flip can't silently change @Inject handling.
+        freeCompilerArgs.add("-Xannotation-default-target=param-property")
     }
 }
 
@@ -150,6 +153,7 @@ dependencies {
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     implementation(libs.androidx.hilt.navigation.compose)
+    implementation(libs.androidx.hilt.lifecycle.viewmodel.compose)
     implementation(libs.androidx.hilt.work)
     ksp(libs.androidx.hilt.compiler)
 

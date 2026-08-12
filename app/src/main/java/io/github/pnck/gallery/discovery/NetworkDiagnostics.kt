@@ -49,7 +49,7 @@ class NetworkDiagnostics @Inject constructor(
         val socksProxy = socks?.let { Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", it.port)) }
 
         emit("=== Diagnostics for $url ===")
-        emit("host=$host port=$port  tunnel=${if (tunnelUp) "127.0.0.1:${socks!!.port}" else "OFF"}")
+        emit("host=$host port=$port  tunnel=${socks?.let { "127.0.0.1:${it.port}" } ?: "OFF"}")
         emit("")
 
         // 1) DNS — through the tunnel when it's up (that's how app traffic resolves),
@@ -67,8 +67,8 @@ class NetworkDiagnostics @Inject constructor(
         //    configured DNS (WgOnly → WG DNS; Wg+SOCKS → upstream remote DNS); by-IP
         //    uses the [1] IP so a DNS failure is distinguishable from unreachability.
         emit("[2] TCP connect $host:$port")
-        if (tunnelUp) {
-            emit("    tunnel by-name (your configured DNS): ${tcpViaTunnel(host, port, socks!!.port)}")
+        if (socks != null) {
+            emit("    tunnel by-name (your configured DNS): ${tcpViaTunnel(host, port, socks.port)}")
             emit("    tunnel by-IP  (no DNS)              : ${if (refIp != null) tcpViaTunnel(refIp, port, socks.port) else "skipped (no IP from [1])"}")
         } else {
             emit("    tunnel: OFF")
@@ -78,8 +78,8 @@ class NetworkDiagnostics @Inject constructor(
 
         // 3) HTTP(S) through the tunnel (by-name) when up.
         emit("[3] HTTP GET $url")
-        if (tunnelUp) {
-            httpProbe(url, tunnelPort = socks!!.port, pinIps = emptyList(), emit = emit)
+        if (socks != null) {
+            httpProbe(url, tunnelPort = socks.port, pinIps = emptyList(), emit = emit)
         } else {
             httpProbe(url, tunnelPort = null, pinIps = refIps, emit = emit)
         }

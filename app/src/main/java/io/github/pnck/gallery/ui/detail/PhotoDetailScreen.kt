@@ -27,7 +27,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.RotateRight
+import androidx.compose.material.icons.automirrored.filled.RotateRight
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -68,7 +68,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import kotlin.math.abs
 import me.saket.telephoto.zoomable.rememberZoomableImageState
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import io.github.pnck.gallery.R
 import io.github.pnck.gallery.domain.SyncState
 import io.github.pnck.gallery.domain.TimelinePhoto
@@ -300,7 +300,7 @@ fun PhotoDetailScreen(
                                 val p = pagerState.currentPage
                                 rotations[p] = snapTo90((rotations[p] ?: 0f) + 90f)
                             }) {
-                                Icon(Icons.Default.RotateRight, contentDescription = stringResource(R.string.detail_rotate))
+                                Icon(Icons.AutoMirrored.Filled.RotateRight, contentDescription = stringResource(R.string.detail_rotate))
                             }
                             IconButton(onClick = { share(current) }) {
                                 Icon(Icons.Default.Share, contentDescription = stringResource(R.string.detail_share))

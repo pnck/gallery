@@ -50,7 +50,7 @@ class ProviderUriFetcher(
             }
         }
         val fresh = when (val res = provider.getThumbnailUrl(cloudId)) {
-            is ApiResult.Success -> res.data ?: error("no thumbnail for $cloudId")
+            is ApiResult.Success -> res.data
             is ApiResult.Error -> error("thumbnail ${res.code} for $cloudId")
         }
         photoDao.updateCloudThumbnailUrl(cloudId, fresh)
@@ -65,10 +65,8 @@ class ProviderUriFetcher(
             response.close()
             throw ThumbnailExpiredException()
         }
-        val body = response.body ?: run {
-            response.close()
-            error("empty thumbnail body for $cloudId (${response.code})")
-        }
+        // OkHttp 5: Response.body is non-null (empty body = 0-byte ResponseBody).
+        val body = response.body
         return SourceFetchResult(
             source = ImageSource(source = body.source(), fileSystem = options.fileSystem),
             mimeType = body.contentType()?.toString(),

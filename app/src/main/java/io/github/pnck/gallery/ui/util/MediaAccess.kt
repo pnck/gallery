@@ -54,13 +54,15 @@ fun hasFullMediaAccess(context: Context): Boolean {
     } else {
         listOf(AppOpsManager.OPSTR_READ_EXTERNAL_STORAGE)
     }
+    // checkOpNoThrow (API 29+) — the modern, non-deprecated form; this path
+    // only runs on Q+, and unsafeCheckOpNoThrow is deprecated since API 35.
     return targets.all { op ->
-        when (ops.unsafeCheckOpNoThrow(op, Process.myUid(), context.packageName)) {
+        when (ops.checkOpNoThrow(op, Process.myUid(), context.packageName)) {
             AppOpsManager.MODE_ALLOWED -> true
             else ->
                 // API 34+ partial access ("selected photos") is a complete, supported
                 // state (PRD §6.3), not a degradation.
-                Build.VERSION.SDK_INT >= 34 && ops.unsafeCheckOpNoThrow(
+                Build.VERSION.SDK_INT >= 34 && ops.checkOpNoThrow(
                     OPSTR_READ_MEDIA_VISUAL_USER_SELECTED,
                     Process.myUid(),
                     context.packageName,

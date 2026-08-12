@@ -33,7 +33,8 @@ class DriveReadUrlFetcher(
         val response = client.newCall(
             Request.Builder().url(model.url).header("Authorization", "Bearer $token").build(),
         ).execute()
-        val body = response.body ?: run { response.close(); error("empty body for ${model.url}") }
+        // OkHttp 5: Response.body is non-null (empty body = 0-byte ResponseBody).
+        val body = response.body
         SourceFetchResult(
             source = ImageSource(source = body.source(), fileSystem = options.fileSystem),
             mimeType = body.contentType()?.toString(),

@@ -67,10 +67,9 @@ object ExifReader {
             cameraModel = exif?.getAttribute(ExifInterface.TAG_MODEL)?.trim()?.ifBlank { null },
             aperture = exif?.getAttribute(ExifInterface.TAG_F_NUMBER)?.toFloatOrNull()?.let { "f/$it" },
             exposure = exif?.getAttribute(ExifInterface.TAG_EXPOSURE_TIME)?.toDoubleOrNull()?.let(::formatShutter),
-            iso = (exif?.getAttribute(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY)
-                ?: exif?.getAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS))?.let { "ISO $it" },
+            iso = exif?.getAttribute(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY)?.let { "ISO $it" },
             focalLength = exif?.getAttribute(ExifInterface.TAG_FOCAL_LENGTH)?.let(::formatFocal),
-            latLon = exif?.latLong?.let { it[0].toDouble() to it[1].toDouble() },
+            latLon = exif?.latLong?.let { it[0] to it[1] },
             contentHash = details.contentHashValue?.let { "${details.contentHashType ?: "?"}:$it" },
         )
     }
