@@ -207,6 +207,10 @@
     <string name="sort_size_desc">最大在前</string>
     <string name="sort_size_asc">最小在前</string>
     <string name="filter_title">显示</string>
+    <string name="media_type_title">媒体类型</string>
+    <string name="media_filter_all">全部</string>
+    <string name="media_filter_images">仅照片</string>
+    <string name="media_filter_videos">仅视频</string>
     <string name="filter_all">全部照片</string>
     <string name="filter_not_backed">未备份</string>
     <string name="filter_backed">已备份</string>

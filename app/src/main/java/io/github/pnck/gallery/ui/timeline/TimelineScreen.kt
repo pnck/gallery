@@ -70,8 +70,10 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -97,6 +99,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
@@ -105,6 +108,7 @@ import androidx.work.WorkInfo
 import io.github.pnck.gallery.work.AutostartProbeWorker
 import coil3.compose.AsyncImage
 import io.github.pnck.gallery.R
+import io.github.pnck.gallery.domain.MediaTypeFilter
 import io.github.pnck.gallery.domain.SyncBadge
 import io.github.pnck.gallery.domain.SyncCounts
 import io.github.pnck.gallery.domain.SyncFilter
@@ -159,6 +163,7 @@ fun TimelineScreen(
     val backupState by viewModel.backupState.collectAsState()
     val sort by viewModel.sort.collectAsState()
     val syncFilter by viewModel.syncFilter.collectAsState()
+    val mediaType by viewModel.mediaType.collectAsState()
     val authorized by viewModel.googleAuthorized.collectAsState()
     val scanSettled by viewModel.scanSettled.collectAsState()
     val blindScanAt by viewModel.blindScanAt.collectAsState()
@@ -358,25 +363,25 @@ fun TimelineScreen(
                 onResume = viewModel::resumeBackup,
             )
             // On-wall indicators are for TEMPORARY view state only — the sync-state
-            // filter changes per session, so an active one gets a chip (tap = change
-            // it). The folder scope is durable config: it lives in Settings and has
-            // no business floating over the wall.
-            if (syncFilter != SyncFilter.ALL) {
+            // and media-type filters change per session, so an active one gets a
+            // chip (tap = change it). The folder scope is durable config: it lives
+            // in Settings and has no business floating over the wall.
+            if (syncFilter != SyncFilter.ALL || mediaType != MediaTypeFilter.ALL) {
                 Box(Modifier.fillMaxWidth().padding(vertical = 2.dp), contentAlignment = Alignment.Center) {
+                    val syncLabel = when (syncFilter) {
+                        SyncFilter.NOT_BACKED_UP -> stringResource(R.string.filter_not_backed)
+                        SyncFilter.BACKED_UP -> stringResource(R.string.filter_backed)
+                        SyncFilter.CLOUD_ONLY -> stringResource(R.string.filter_cloud)
+                        SyncFilter.ALL -> null
+                    }
+                    val typeLabel = when (mediaType) {
+                        MediaTypeFilter.IMAGES -> stringResource(R.string.media_filter_images)
+                        MediaTypeFilter.VIDEOS -> stringResource(R.string.media_filter_videos)
+                        MediaTypeFilter.ALL -> null
+                    }
                     AssistChip(
                         onClick = { showViewOptions = true },
-                        label = {
-                            Text(
-                                stringResource(
-                                    when (syncFilter) {
-                                        SyncFilter.NOT_BACKED_UP -> R.string.filter_not_backed
-                                        SyncFilter.BACKED_UP -> R.string.filter_backed
-                                        SyncFilter.CLOUD_ONLY -> R.string.filter_cloud
-                                        SyncFilter.ALL -> R.string.filter_all
-                                    },
-                                ),
-                            )
-                        },
+                        label = { Text(listOfNotNull(syncLabel, typeLabel).joinToString(" · ")) },
                     )
                 }
             }
@@ -508,9 +513,37 @@ fun TimelineScreen(
             ViewOptionsSheet(
                 sort = sort,
                 filter = syncFilter,
+                mediaType = mediaType,
                 onSortChange = viewModel::setSort,
                 onFilterChange = viewModel::setSyncFilter,
+                onMediaTypeChange = viewModel::setMediaType,
             )
+        }
+    }
+}
+
+/** One compact segmented row per option group — replaces the old flat radio list,
+ *  which ate half the sheet. */
+@Composable
+private fun <T> SegmentedOptions(
+    options: List<Pair<T, Int>>,
+    selected: T,
+    onSelect: (T) -> Unit,
+) {
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        options.forEachIndexed { i, (value, label) ->
+            SegmentedButton(
+                selected = selected == value,
+                onClick = { onSelect(value) },
+                shape = SegmentedButtonDefaults.itemShape(index = i, count = options.size),
+            ) {
+                Text(
+                    stringResource(label),
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -519,50 +552,58 @@ fun TimelineScreen(
 private fun ViewOptionsSheet(
     sort: TimelineSort,
     filter: SyncFilter,
+    mediaType: MediaTypeFilter,
     onSortChange: (TimelineSort) -> Unit,
     onFilterChange: (SyncFilter) -> Unit,
+    onMediaTypeChange: (MediaTypeFilter) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 8.dp)) {
         Text(stringResource(R.string.sort_title), style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(4.dp))
-        val sorts = listOf(
-            TimelineSort.DATE_DESC to R.string.sort_date_desc,
-            TimelineSort.DATE_ASC to R.string.sort_date_asc,
-            TimelineSort.SIZE_DESC to R.string.sort_size_desc,
-            TimelineSort.SIZE_ASC to R.string.sort_size_asc,
+        Spacer(Modifier.height(8.dp))
+        SegmentedOptions(
+            options = listOf(
+                TimelineSort.DATE_DESC to R.string.sort_date_desc,
+                TimelineSort.DATE_ASC to R.string.sort_date_asc,
+                TimelineSort.SIZE_DESC to R.string.sort_size_desc,
+                TimelineSort.SIZE_ASC to R.string.sort_size_asc,
+            ),
+            selected = sort,
+            onSelect = onSortChange,
         )
-        sorts.forEach { (value, label) ->
-            OptionRow(selected = sort == value, label = stringResource(label)) { onSortChange(value) }
-        }
+
+        Spacer(Modifier.height(12.dp))
+        HorizontalDivider()
+        Spacer(Modifier.height(12.dp))
+
+        Text(stringResource(R.string.media_type_title), style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(8.dp))
+        SegmentedOptions(
+            options = listOf(
+                MediaTypeFilter.ALL to R.string.media_filter_all,
+                MediaTypeFilter.IMAGES to R.string.media_filter_images,
+                MediaTypeFilter.VIDEOS to R.string.media_filter_videos,
+            ),
+            selected = mediaType,
+            onSelect = onMediaTypeChange,
+        )
 
         Spacer(Modifier.height(12.dp))
         HorizontalDivider()
         Spacer(Modifier.height(12.dp))
 
         Text(stringResource(R.string.filter_title), style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(4.dp))
-        val filters = listOf(
-            SyncFilter.ALL to R.string.filter_all,
-            SyncFilter.NOT_BACKED_UP to R.string.filter_not_backed,
-            SyncFilter.BACKED_UP to R.string.filter_backed,
-            SyncFilter.CLOUD_ONLY to R.string.filter_cloud,
+        Spacer(Modifier.height(8.dp))
+        SegmentedOptions(
+            options = listOf(
+                SyncFilter.ALL to R.string.filter_all,
+                SyncFilter.NOT_BACKED_UP to R.string.filter_not_backed,
+                SyncFilter.BACKED_UP to R.string.filter_backed,
+                SyncFilter.CLOUD_ONLY to R.string.filter_cloud,
+            ),
+            selected = filter,
+            onSelect = onFilterChange,
         )
-        filters.forEach { (value, label) ->
-            OptionRow(selected = filter == value, label = stringResource(label)) { onFilterChange(value) }
-        }
         Spacer(Modifier.height(16.dp))
-    }
-}
-
-@Composable
-private fun OptionRow(selected: Boolean, label: String, onClick: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        RadioButton(selected = selected, onClick = onClick)
-        Spacer(Modifier.width(8.dp))
-        Text(label, style = MaterialTheme.typography.bodyLarge)
     }
 }
 

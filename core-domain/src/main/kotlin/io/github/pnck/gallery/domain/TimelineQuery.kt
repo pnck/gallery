@@ -13,6 +13,7 @@ data class TimelineQuery(
     val sort: TimelineSort = TimelineSort.DATE_DESC,
     val filter: SyncFilter = SyncFilter.ALL,
     val bucketIds: Set<String> = emptySet(),
+    val mediaType: MediaTypeFilter = MediaTypeFilter.ALL,
 )
 
 /** Ordering options surfaced in the timeline's view-options sheet. */
@@ -43,4 +44,16 @@ enum class SyncFilter {
 
     /** Cloud-only photos whose local copy was released (CLOUD_ONLY). */
     CLOUD_ONLY,
+}
+
+/** Photos / videos / both — a pure view filter over the isVideo column. */
+enum class MediaTypeFilter {
+    /** Photos and videos (default). */
+    ALL,
+
+    /** Images only. */
+    IMAGES,
+
+    /** Videos only. */
+    VIDEOS,
 }

@@ -11,6 +11,7 @@ import io.github.pnck.gallery.data.settings.AppSettingsStore
 import io.github.pnck.gallery.data.sync.MediaReconciler
 import io.github.pnck.gallery.domain.PhotoRepository
 import io.github.pnck.gallery.domain.SyncCounts
+import io.github.pnck.gallery.domain.MediaTypeFilter
 import io.github.pnck.gallery.domain.SyncFilter
 import io.github.pnck.gallery.domain.TimelinePhoto
 import io.github.pnck.gallery.domain.TimelineSort
@@ -124,6 +125,9 @@ class TimelineViewModel @Inject constructor(
     /** Shared with the detail pager so both swipe through the same filtered set. */
     val syncFilter: StateFlow<SyncFilter> = queryHolder.filter
 
+    /** Photos / videos / both — transient session choice, shared with the pager. */
+    val mediaType: StateFlow<MediaTypeFilter> = queryHolder.mediaType
+
     /** The scan-allowlist / directory filter (empty = all folders). */
     val scanBuckets: StateFlow<Set<String>> = settings.scanBuckets
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
@@ -189,6 +193,10 @@ class TimelineViewModel @Inject constructor(
 
     fun setSyncFilter(filter: SyncFilter) {
         queryHolder.setFilter(filter)
+    }
+
+    fun setMediaType(mediaType: MediaTypeFilter) {
+        queryHolder.setMediaType(mediaType)
     }
 
     /** Sync indicator for the TopAppBar (PRD §9.1), derived from the unique chain. */

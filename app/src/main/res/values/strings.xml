@@ -208,6 +208,10 @@
     <string name="sort_size_desc">Largest first</string>
     <string name="sort_size_asc">Smallest first</string>
     <string name="filter_title">Show</string>
+    <string name="media_type_title">Media type</string>
+    <string name="media_filter_all">All</string>
+    <string name="media_filter_images">Photos</string>
+    <string name="media_filter_videos">Videos</string>
     <string name="filter_all">All photos</string>
     <string name="filter_not_backed">Not backed up</string>
     <string name="filter_backed">Backed up</string>

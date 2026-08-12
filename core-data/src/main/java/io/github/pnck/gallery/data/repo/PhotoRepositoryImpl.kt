@@ -15,6 +15,7 @@ import io.github.pnck.gallery.data.db.PhotoDao
 import io.github.pnck.gallery.data.db.PhotoEntity
 import io.github.pnck.gallery.data.scanner.LocalMediaScanner
 import io.github.pnck.gallery.domain.MediaBucket
+import io.github.pnck.gallery.domain.MediaTypeFilter
 import io.github.pnck.gallery.domain.PhotoDetails
 import io.github.pnck.gallery.domain.PhotoRepository
 import io.github.pnck.gallery.domain.StorageSummary
@@ -339,6 +340,11 @@ class PhotoRepositoryImpl(
             SyncFilter.NOT_BACKED_UP -> where += "syncState = 0"
             SyncFilter.BACKED_UP -> where += "syncState = 1"
             SyncFilter.CLOUD_ONLY -> where += "syncState = 2"
+        }
+        when (query.mediaType) {
+            MediaTypeFilter.ALL -> Unit
+            MediaTypeFilter.IMAGES -> where += "isVideo = 0"
+            MediaTypeFilter.VIDEOS -> where += "isVideo = 1"
         }
         if (query.bucketIds.isNotEmpty()) {
             val placeholders = query.bucketIds.joinToString(",") { "?" }

@@ -1,27 +1,25 @@
 package io.github.pnck.gallery.ui.detail
 
-import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Forward10
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay10
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -33,8 +31,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -58,17 +60,20 @@ private const val SEEK_STEP_MS = 10_000L
  * rotate control) and is applied through the Media3 effect pipeline
  * ([ScaleAndRotateTransformation]) — the DECODER output is rotated, so pixels
  * and the aspect ratio stay correct; rotating the Compose canvas would only
- * spin the view and crush the frame. Effects can only be installed before
- * prepare(), so a rotation change rebuilds the player and resumes at the
- * saved position.
+ * spin the view and crush the frame. Video effects can only be installed
+ * before prepare(), so a rotation change rebuilds the player; resume state
+ * comes from the ticker-fed [positionMs]/[playing] snapshot (composition runs
+ * BEFORE the old player's onDispose, so reading the dying player itself would
+ * be too late), and the AndroidView's update block rebinds the PlayerView to
+ * the new instance — without it the view keeps showing the released player.
  *
  * Layout follows the classic gallery-player pattern (Google Photos & co.):
  * a centered transport row (back 10s / play-pause / forward 10s) above a
- * seek row of current-time — thin white track with a round thumb — duration,
- * padded clear of the system navigation bar.
+ * seek row of current-time — hairline track, solid white for the played part,
+ * translucent for the rest, no thumb — duration, padded clear of the system
+ * navigation bar.
  */
 @androidx.annotation.OptIn(UnstableApi::class)
-@OptIn(ExperimentalMaterial3Api::class) // Slider's custom thumb slot
 @Composable
 fun VideoPlayerPage(
     /** content:// or file:// uri of the playable video. */
@@ -79,24 +84,23 @@ fun VideoPlayerPage(
 ) {
     val context = LocalContext.current
 
-    // Resume state carried across player rebuilds (plain array, not compose
-    // state — writing it in onDispose must not schedule a recomposition).
-    val resume = remember { LongArray(2) } // [positionMs, isPlaying 0/1]
+    var playing by remember { mutableStateOf(false) }
+    var durationMs by remember { mutableLongStateOf(0L) }
+    var positionMs by remember { mutableLongStateOf(0L) }
+    var dragging by remember { mutableStateOf(false) }
+
+    // A rotation change rebuilds the player (effects are pre-prepare only) and
+    // resumes from the ticker's latest position/play-state.
     val player = remember(rotationDeg) {
         ExoPlayer.Builder(context).build().apply {
             if (rotationDeg != 0f) {
                 setVideoEffects(listOf(ScaleAndRotateTransformation.Builder().setRotationDegrees(rotationDeg).build()))
             }
-            setMediaItem(MediaItem.fromUri(uri), resume[0])
+            setMediaItem(MediaItem.fromUri(uri), positionMs)
             prepare()
-            playWhenReady = resume[1] == 1L
+            playWhenReady = playing
         }
     }
-
-    var playing by remember { mutableStateOf(false) }
-    var durationMs by remember { mutableLongStateOf(0L) }
-    var positionMs by remember { mutableLongStateOf(0L) }
-    var dragging by remember { mutableStateOf(false) }
 
     DisposableEffect(player) {
         val listener = object : Player.Listener {
@@ -110,14 +114,12 @@ fun VideoPlayerPage(
         }
         player.addListener(listener)
         onDispose {
-            resume[0] = player.currentPosition.coerceAtLeast(0)
-            resume[1] = if (player.isPlaying) 1L else 0L
             player.removeListener(listener)
             player.release()
         }
     }
 
-    // Position ticker (paused while the user drags the seek slider).
+    // Position ticker (paused while the user drags on the seek bar).
     LaunchedEffect(player, playing, dragging) {
         positionMs = player.currentPosition.coerceAtLeast(0)
         while (playing && !dragging) {
@@ -136,9 +138,10 @@ fun VideoPlayerPage(
             factory = { ctx ->
                 PlayerView(ctx).apply {
                     useController = false // controls live below, per spec
-                    this.player = player
                 }
             },
+            // Rebind on every player rebuild — the factory runs only once.
+            update = { it.player = player },
             modifier = Modifier.fillMaxWidth().weight(1f),
         )
         Column(
@@ -179,7 +182,7 @@ fun VideoPlayerPage(
                     )
                 }
             }
-            // Seek: current time — thin white track, round thumb — duration.
+            // Seek: current time — hairline track — duration.
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -190,25 +193,17 @@ fun VideoPlayerPage(
                     color = Color.White,
                     style = MaterialTheme.typography.labelMedium,
                 )
-                Slider(
-                    value = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f,
-                    onValueChange = { frac ->
+                HairlineSeekBar(
+                    fraction = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f,
+                    onDrag = { frac ->
                         dragging = true
                         positionMs = (frac * durationMs).toLong()
                     },
-                    onValueChangeFinished = {
+                    onDragFinished = {
                         player.seekTo(positionMs)
                         dragging = false
                     },
                     modifier = Modifier.weight(1f),
-                    colors = SliderDefaults.colors(
-                        thumbColor = Color.White,
-                        activeTrackColor = Color.White,
-                        inactiveTrackColor = Color.White.copy(alpha = 0.3f),
-                    ),
-                    thumb = {
-                        Box(Modifier.size(12.dp).background(Color.White, CircleShape))
-                    },
                 )
                 Text(
                     formatMs(durationMs),
@@ -216,6 +211,62 @@ fun VideoPlayerPage(
                     style = MaterialTheme.typography.labelMedium,
                 )
             }
+        }
+    }
+}
+
+/**
+ * The thinnest possible seek bar: a 2dp hairline, solid white for the played
+ * fraction, translucent white for the rest, NO thumb (owner's spec — the M2
+ * dot-on-line look can't be had from M3's slider, so the indicator goes away
+ * entirely). The 28dp touch lane keeps taps/drags comfortable.
+ */
+@Composable
+private fun HairlineSeekBar(
+    fraction: Float,
+    onDrag: (Float) -> Unit,
+    onDragFinished: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val stroke = with(LocalDensity.current) { 2.dp.toPx() }
+    Canvas(
+        modifier
+            .fillMaxWidth()
+            .height(28.dp) // comfortable touch lane; the line itself is 2dp
+            .pointerInput(Unit) {
+                detectTapGestures { offset ->
+                    onDrag((offset.x / size.width).coerceIn(0f, 1f))
+                    onDragFinished()
+                }
+            }
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragStart = { offset -> onDrag((offset.x / size.width).coerceIn(0f, 1f)) },
+                    onHorizontalDrag = { change, _ ->
+                        change.consume()
+                        onDrag((change.position.x / size.width).coerceIn(0f, 1f))
+                    },
+                    onDragEnd = onDragFinished,
+                    onDragCancel = onDragFinished,
+                )
+            },
+    ) {
+        val y = size.height / 2f
+        drawLine(
+            Color.White.copy(alpha = 0.3f),
+            Offset(0f, y),
+            Offset(size.width, y),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round,
+        )
+        if (fraction > 0f) {
+            drawLine(
+                Color.White,
+                Offset(0f, y),
+                Offset(size.width * fraction, y),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round,
+            )
         }
     }
 }
