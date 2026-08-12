@@ -76,11 +76,21 @@ class SettingsViewModel @Inject constructor(
      * handles Room/cursors/upload-sessions/originals/provider caches; the app
      * layer adds Coil (thumbnails fetched under the old grant, on disk) and the
      * My Drive readonly grant (an old account's token must never ride along).
+     *
+     * [newSession] marks the just-signed-in path: when the identity probe
+     * FAILED there, the session is untrusted and staged data is wiped before
+     * any sync runs (the review's residual high). Routine refresh probes never
+     * wipe on failure — a flaky network must not nuke a healthy cache.
      */
-    private suspend fun isolateIfAccountSwitched(email: String?) {
-        if (email == null) return
-        val switched = withContext(Dispatchers.IO) { accountGuard.onAccountObserved(email) }
-        if (switched) {
+    private suspend fun enforceAccountIsolation(email: String?, newSession: Boolean) {
+        val wiped = withContext(Dispatchers.IO) {
+            when {
+                email != null -> accountGuard.onAccountObserved(email)
+                newSession -> accountGuard.onUntrustedSession()
+                else -> false
+            }
+        }
+        if (wiped) {
             imageLoader.memoryCache?.clear()
             withContext(Dispatchers.IO) { imageLoader.diskCache?.clear() }
             driveRead.signOut()
@@ -154,7 +164,7 @@ class SettingsViewModel @Inject constructor(
                 val probe = withContext(Dispatchers.IO) { provider.getAccountEmail() }
                 when (probe) {
                     is ApiResult.Success -> {
-                        isolateIfAccountSwitched(probe.data)
+                        enforceAccountIsolation(probe.data, newSession = false)
                         _state.value = _state.value.copy(
                             googleAuthorized = true,
                             cloudReachable = true,
@@ -200,11 +210,13 @@ class SettingsViewModel @Inject constructor(
                         is ApiResult.Success -> {
                             // Identity first: if this approval belongs to a
                             // DIFFERENT account, the old account's staged data
-                            // must be gone before any new traffic runs.
+                            // must be gone before any new traffic runs — and if
+                            // identity can't be confirmed at all, the session is
+                            // treated as untrusted and wiped anyway.
                             val email = withContext(Dispatchers.IO) {
                                 (provider.getAccountEmail() as? ApiResult.Success)?.data
                             }
-                            isolateIfAccountSwitched(email)
+                            enforceAccountIsolation(email, newSession = true)
                             _state.value = SettingsState(googleAuthorized = true, signIn = SignInPhase.Idle, accountEmail = email)
                             // First login: kick the chain NOW (downstream → reconcile)
                             // so badges converge — waiting 30 min for the periodic

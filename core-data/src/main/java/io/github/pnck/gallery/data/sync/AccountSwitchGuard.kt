@@ -60,10 +60,36 @@ class AccountSwitchGuard(
         }
 
         Log.w(TAG, "account switch: $previous → $email — wiping account-scoped state")
+        wipe()
+        settings.setAccountEmail(email)
+        return true
+    }
+
+    /**
+     * A NEW session whose identity could not be confirmed (tokens were just
+     * persisted but the about() probe failed). On a shared device, staged data
+     * anchored to a PREVIOUS account is untrusted from this moment: wipe it
+     * before any cloud traffic runs under the new grant. The anchor email is
+     * kept, so a later successful probe as a different account re-wipes (a
+     * no-op) and as the same account does nothing.
+     *
+     * Cost of a false positive (same account, flaky probe): one full re-derive
+     * cycle — the DB is a pure cache by design. Cost of a false negative was
+     * the review's residual high: account A's data visible to account B.
+     *
+     * Call ONLY right after a new sign-in. Never on routine probe failures —
+     * a flaky network must not keep nuking the same account's cache.
+     */
+    suspend fun onUntrustedSession(): Boolean {
+        if (settings.accountEmail.first() == null) return false // no previous account — nothing foreign
+        Log.w(TAG, "new session with UNCONFIRMED identity — wiping staged data as untrusted")
+        wipe()
+        return true
+    }
+
+    private suspend fun wipe() {
         db.clearAllTables() // photos + sync_keys + upload_sessions in one transaction
         originalsDir.deleteRecursively()
         provider.clearAccountCaches()
-        settings.setAccountEmail(email)
-        return true
     }
 }
