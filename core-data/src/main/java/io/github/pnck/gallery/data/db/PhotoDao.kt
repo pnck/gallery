@@ -130,6 +130,25 @@ interface PhotoDao {
     @Query("UPDATE photos SET localUri = NULL, syncState = 2 WHERE id IN (:ids)")
     suspend fun markAsCloudOnly(ids: List<String>)
 
+    /**
+     * Sign-out purge (1/2): CLOUD_ONLY rows are pure projections of the dead
+     * session's cloud listing — with no account there is no "remote", so they
+     * leave the wall. They re-derive on the next sign-in's downstream sync.
+     */
+    @Query("DELETE FROM photos WHERE syncState = 2")
+    suspend fun deleteCloudOnlyRows()
+
+    /**
+     * Sign-out purge (2/2): rows with a local copy keep the copy AND the user's
+     * queue intent, but the dead session's linkage goes (cloudId / provider /
+     * pre-authorized thumbnail url → null, state → PENDING_UPLOAD) — showing a
+     * "backed up" badge with no account would be a lie, and the thumbnail URL
+     * is account-authorized. The local content hash stays: it's derived from
+     * local bytes, account-independent, and speeds up re-derivation.
+     */
+    @Query("UPDATE photos SET cloudId = NULL, provider = NULL, cloudThumbnailUrl = NULL, syncState = 0 WHERE cloudId IS NOT NULL")
+    suspend fun stripCloudLinkage()
+
     /** "Save to device" re-materialised a local copy: CLOUD_ONLY → SYNCED (PRD §3.7).
      *  A scan may already hold a fresh row for the new localUri — remove it first
      *  (it's an unclassified PENDING_UPLOAD artifact with no user state), otherwise

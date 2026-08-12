@@ -1,6 +1,7 @@
 package io.github.pnck.gallery.data.sync
 
 import android.util.Log
+import androidx.room.withTransaction
 import io.github.pnck.gallery.data.db.GalleryDatabase
 import io.github.pnck.gallery.data.settings.AppSettingsStore
 import io.github.pnck.gallery.provider.ICloudStorageProvider
@@ -85,6 +86,21 @@ class AccountSwitchGuard(
         Log.w(TAG, "new session with UNCONFIRMED identity — wiping staged data as untrusted")
         wipe()
         return true
+    }
+
+    /**
+     * Sign-out: the session's cloud PROJECTION leaves the wall (cloud-only rows
+     * deleted, local rows stripped of cloud linkage) — with no account there is
+     * no "remote", and a "backed up" badge would be a lie. Kept on purpose:
+     * the user's manual queue (local intent, not account data), sync cursors
+     * and upload sessions (still valid if the SAME account signs back in; a
+     * different account triggers the full wipe above), and the anchor email.
+     */
+    suspend fun onSignedOut() {
+        db.withTransaction {
+            db.photoDao().deleteCloudOnlyRows()
+            db.photoDao().stripCloudLinkage()
+        }
     }
 
     private suspend fun wipe() {

@@ -245,7 +245,15 @@ class SettingsViewModel @Inject constructor(
 
     fun signOutGoogle() {
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { googleAuthManager.signOut() }
+            withContext(Dispatchers.IO) {
+                googleAuthManager.signOut()
+                // The session's cloud projection leaves with it (owner: signed-out
+                // must equal "local wall only" — no cloud-only thumbnails, no
+                // backed-up badges). Queue intent / cursors / anchor survive.
+                accountGuard.onSignedOut()
+                imageLoader.diskCache?.clear() // account-fetched thumbnails off the disk
+            }
+            imageLoader.memoryCache?.clear()
             _state.value = SettingsState(googleAuthorized = false)
         }
     }
