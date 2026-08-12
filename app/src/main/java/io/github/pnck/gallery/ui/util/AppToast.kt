@@ -54,12 +54,17 @@ fun showAppToast(context: Context, message: String) {
     dialog.setCancelable(false)
     dialog.window?.let { window ->
         window.setBackgroundDrawable(ColorDrawable(android.graphics.Color.TRANSPARENT))
+        // The stock dialog theme dims whatever is behind it — that's what made
+        // the toast look like a modal blackout. This layer must be invisible
+        // except for the pill itself.
+        window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
         window.addFlags(
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
         )
         window.attributes = window.attributes.apply {
+            dimAmount = 0f
             width = WindowManager.LayoutParams.WRAP_CONTENT
             height = WindowManager.LayoutParams.WRAP_CONTENT
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL

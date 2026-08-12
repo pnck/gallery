@@ -532,14 +532,14 @@ private fun <T> RadioGrid(
         Row(Modifier.fillMaxWidth()) {
             row.forEach { (value, label) ->
                 Row(
-                    Modifier.weight(1f).clickable { onSelect(value) }.padding(vertical = 2.dp),
+                    Modifier.weight(1f).clickable { onSelect(value) }.padding(vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     RadioButton(selected = selected == value, onClick = null)
-                    Spacer(Modifier.width(4.dp))
+                    Spacer(Modifier.width(8.dp))
                     Text(
                         stringResource(label),
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodyLarge,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
