@@ -70,10 +70,8 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -522,28 +520,32 @@ fun TimelineScreen(
     }
 }
 
-/** One compact segmented row per option group — replaces the old flat radio list,
- *  which ate half the sheet. */
+/** Two-column radio grid — compact both ways: the segmented-button row squeezed
+ *  long labels into narrow pills, and the old flat list ate the whole sheet. */
 @Composable
-private fun <T> SegmentedOptions(
+private fun <T> RadioGrid(
     options: List<Pair<T, Int>>,
     selected: T,
     onSelect: (T) -> Unit,
 ) {
-    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-        options.forEachIndexed { i, (value, label) ->
-            SegmentedButton(
-                selected = selected == value,
-                onClick = { onSelect(value) },
-                shape = SegmentedButtonDefaults.itemShape(index = i, count = options.size),
-            ) {
-                Text(
-                    stringResource(label),
-                    style = MaterialTheme.typography.labelMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+    options.chunked(2).forEach { row ->
+        Row(Modifier.fillMaxWidth()) {
+            row.forEach { (value, label) ->
+                Row(
+                    Modifier.weight(1f).clickable { onSelect(value) }.padding(vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(selected = selected == value, onClick = null)
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        stringResource(label),
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
+            if (row.size == 1) Spacer(Modifier.weight(1f))
         }
     }
 }
@@ -560,7 +562,7 @@ private fun ViewOptionsSheet(
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 8.dp)) {
         Text(stringResource(R.string.sort_title), style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(8.dp))
-        SegmentedOptions(
+        RadioGrid(
             options = listOf(
                 TimelineSort.DATE_DESC to R.string.sort_date_desc,
                 TimelineSort.DATE_ASC to R.string.sort_date_asc,
@@ -577,7 +579,7 @@ private fun ViewOptionsSheet(
 
         Text(stringResource(R.string.media_type_title), style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(8.dp))
-        SegmentedOptions(
+        RadioGrid(
             options = listOf(
                 MediaTypeFilter.ALL to R.string.media_filter_all,
                 MediaTypeFilter.IMAGES to R.string.media_filter_images,
@@ -593,7 +595,7 @@ private fun ViewOptionsSheet(
 
         Text(stringResource(R.string.filter_title), style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(8.dp))
-        SegmentedOptions(
+        RadioGrid(
             options = listOf(
                 SyncFilter.ALL to R.string.filter_all,
                 SyncFilter.NOT_BACKED_UP to R.string.filter_not_backed,
