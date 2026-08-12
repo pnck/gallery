@@ -89,6 +89,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            // Sign stable releases with the SAME committed debug key (project
+            // convention while we're sideload-only): the official release APK
+            // and every CI/local debug build upgrade each other cleanly. A real
+            // upload key is a Play-Console-era decision, not now.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
