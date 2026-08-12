@@ -3,8 +3,10 @@ package io.github.pnck.gallery.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.WorkManager
+import coil3.ImageLoader
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.pnck.gallery.data.settings.AppSettingsStore
+import io.github.pnck.gallery.data.sync.AccountSwitchGuard
 import io.github.pnck.gallery.network.ApiResult
 import io.github.pnck.gallery.network.transport.TransportState
 import io.github.pnck.gallery.provider.AuthManager
@@ -63,8 +65,27 @@ class SettingsViewModel @Inject constructor(
     private val provider: ICloudStorageProvider,
     private val driveRead: io.github.pnck.gallery.provider.driveread.DriveReadAccess,
     private val workManager: WorkManager,
+    private val accountGuard: AccountSwitchGuard,
+    private val imageLoader: ImageLoader,
     transportController: TransportController,
 ) : ViewModel() {
+
+    /**
+     * Account isolation (review finding): after any successful identity probe,
+     * wipe the previous account's staged data if the email changed. The guard
+     * handles Room/cursors/upload-sessions/originals/provider caches; the app
+     * layer adds Coil (thumbnails fetched under the old grant, on disk) and the
+     * My Drive readonly grant (an old account's token must never ride along).
+     */
+    private suspend fun isolateIfAccountSwitched(email: String?) {
+        if (email == null) return
+        val switched = withContext(Dispatchers.IO) { accountGuard.onAccountObserved(email) }
+        if (switched) {
+            imageLoader.memoryCache?.clear()
+            withContext(Dispatchers.IO) { imageLoader.diskCache?.clear() }
+            driveRead.signOut()
+        }
+    }
 
     /** A web link to the cloud backup folder so the user can browse it directly. */
     suspend fun backupFolderLink(): String? =
@@ -132,11 +153,14 @@ class SettingsViewModel @Inject constructor(
                 // display). A dead tunnel flips this to reachable=false, honestly.
                 val probe = withContext(Dispatchers.IO) { provider.getAccountEmail() }
                 when (probe) {
-                    is ApiResult.Success -> _state.value = _state.value.copy(
-                        googleAuthorized = true,
-                        cloudReachable = true,
-                        accountEmail = probe.data,
-                    )
+                    is ApiResult.Success -> {
+                        isolateIfAccountSwitched(probe.data)
+                        _state.value = _state.value.copy(
+                            googleAuthorized = true,
+                            cloudReachable = true,
+                            accountEmail = probe.data,
+                        )
+                    }
                     is ApiResult.Error -> _state.value = _state.value.copy(
                         googleAuthorized = true,
                         cloudReachable = false,
@@ -174,7 +198,14 @@ class SettingsViewModel @Inject constructor(
                     _state.value = _state.value.copy(signIn = SignInPhase.AwaitingApproval(challenge.data))
                     when (val result = googleAuthManager.pollForToken(challenge.data)) {
                         is ApiResult.Success -> {
-                            _state.value = SettingsState(googleAuthorized = true, signIn = SignInPhase.Idle)
+                            // Identity first: if this approval belongs to a
+                            // DIFFERENT account, the old account's staged data
+                            // must be gone before any new traffic runs.
+                            val email = withContext(Dispatchers.IO) {
+                                (provider.getAccountEmail() as? ApiResult.Success)?.data
+                            }
+                            isolateIfAccountSwitched(email)
+                            _state.value = SettingsState(googleAuthorized = true, signIn = SignInPhase.Idle, accountEmail = email)
                             // First login: kick the chain NOW (downstream → reconcile)
                             // so badges converge — waiting 30 min for the periodic
                             // run leaves the wall stuck at unclassified.

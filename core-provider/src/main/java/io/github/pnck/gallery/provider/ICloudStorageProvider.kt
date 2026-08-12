@@ -94,4 +94,11 @@ interface ICloudStorageProvider {
      * confirm uploads are landing where they expect (diagnoses account mismatch).
      */
     suspend fun getAccountEmail(): ApiResult<String?>
+
+    /**
+     * Drop any in-memory state bound to the current account (cached folder ids
+     * etc.). Called when the signed-in account changes so nothing of the old
+     * account leaks into the new one's traffic.
+     */
+    fun clearAccountCaches() {}
 }

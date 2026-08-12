@@ -169,6 +169,16 @@ class GoogleDriveProvider(
     override suspend fun getAccountEmail(): ApiResult<String?> =
         safeApiCall({ api.about() }) { it.user?.emailAddress }
 
+    /**
+     * The cached backup-folder id belongs to the OLD account's Drive — after an
+     * account switch it would 404 (or worse, be recreated in the wrong place's
+     * history), so the guard clears it before any new-account traffic.
+     */
+    override fun clearAccountCaches() {
+        cachedFolderId = null
+        cachedFolderName = null
+    }
+
     override suspend fun getThumbnailUrl(cloudId: String): ApiResult<String> =
         when (val res = safeApiCall({ api.getFile(cloudId) }) { it.thumbnailLink }) {
             is ApiResult.Success ->
@@ -197,8 +207,7 @@ class GoogleDriveProvider(
      * OAuth client id must stay stable across releases. Within one client this
      * function guarantees a single folder.
      */
-    private suspend fun ensureFolderId(): String? {
-        val name = folderName()
+    private suspend fun ensureFolderId(): String? {        val name = folderName()
         // Re-resolve if the user renamed the folder since we cached the id.
         cachedFolderId?.let { if (cachedFolderName == name) return it }
         return folderMutex.withLock {

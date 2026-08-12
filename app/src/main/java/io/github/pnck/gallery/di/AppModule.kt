@@ -23,6 +23,7 @@ import io.github.pnck.gallery.data.db.UploadSessionDao
 import io.github.pnck.gallery.data.repo.PhotoRepositoryImpl
 import io.github.pnck.gallery.data.scanner.LocalMediaScanner
 import io.github.pnck.gallery.data.settings.AppSettingsStore
+import io.github.pnck.gallery.data.sync.AccountSwitchGuard
 import io.github.pnck.gallery.data.sync.DownstreamSyncProcessor
 import io.github.pnck.gallery.data.sync.MediaReconciler
 import io.github.pnck.gallery.data.sync.ReconcileProcessor
@@ -36,6 +37,7 @@ import io.github.pnck.gallery.transport.SystemVpnMonitor
 import io.github.pnck.gallery.transport.TransportConfigStore
 import io.github.pnck.gallery.transport.TransportConnector
 import io.github.pnck.gallery.transport.TransportController
+import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -82,6 +84,17 @@ object AppModule {
     @Singleton
     fun provideUploadSessionStore(dao: UploadSessionDao): UploadSessionStore =
         RoomUploadSessionStore(dao)
+
+    /** Account isolation: wipes account-scoped staged data on account switch. */
+    @Provides
+    @Singleton
+    fun provideAccountSwitchGuard(
+        @ApplicationContext context: Context,
+        db: GalleryDatabase,
+        settings: AppSettingsStore,
+        provider: ICloudStorageProvider,
+    ): AccountSwitchGuard =
+        AccountSwitchGuard(db, settings, provider, File(context.cacheDir, "originals"))
 
     @Provides
     @Singleton
