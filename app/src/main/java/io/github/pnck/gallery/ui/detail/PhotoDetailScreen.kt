@@ -242,10 +242,15 @@ fun PhotoDetailScreen(
                 ) {
                     when {
                         photo.isVideo -> {
-                            // Controls-only player (play/pause/seek/rotate — no gestures).
+                            // Controls-only player (play/pause/seek — no gestures);
+                            // rotation rides the top-bar control like images do.
                             val videoUri = photo.localUri ?: (originals[photo.id] as? OriginalState.Ready)?.uri
                             if (videoUri != null) {
-                                VideoPlayerPage(uri = videoUri, modifier = Modifier.fillMaxSize())
+                                VideoPlayerPage(
+                                    uri = videoUri,
+                                    rotationDeg = rotations[page] ?: 0f,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
                             } else if (originals[photo.id] is OriginalState.Failed) {
                                 Text(stringResource(R.string.detail_download_failed), color = Color.White)
                             } else {
@@ -289,14 +294,13 @@ fun PhotoDetailScreen(
                     },
                     actions = {
                         if (current != null) {
-                            // Videos carry their own rotate control in the player page.
-                            if (!current.isVideo) {
-                                IconButton(onClick = {
-                                    val p = pagerState.currentPage
-                                    rotations[p] = snapTo90((rotations[p] ?: 0f) + 90f)
-                                }) {
-                                    Icon(Icons.Default.RotateRight, contentDescription = stringResource(R.string.detail_rotate))
-                                }
+                            // One rotate control for both media kinds: images rotate
+                            // the canvas, videos rotate decoder output (VideoPlayerPage).
+                            IconButton(onClick = {
+                                val p = pagerState.currentPage
+                                rotations[p] = snapTo90((rotations[p] ?: 0f) + 90f)
+                            }) {
+                                Icon(Icons.Default.RotateRight, contentDescription = stringResource(R.string.detail_rotate))
                             }
                             IconButton(onClick = { share(current) }) {
                                 Icon(Icons.Default.Share, contentDescription = stringResource(R.string.detail_share))

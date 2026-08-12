@@ -92,9 +92,22 @@ fun LibraryFoldersScreen(
                         },
                         headlineContent = { Text(bucket.name) },
                         supportingContent = {
+                            val path = bucket.path // hoisted: cross-module vals can't smart-cast
                             Text(
-                                bucket.path?.let { stringResource(R.string.folders_path_count, it, bucket.count) }
-                                    ?: stringResource(R.string.folders_photo_count, bucket.count),
+                                when {
+                                    bucket.videoCount > 0 && path != null ->
+                                        stringResource(
+                                            R.string.folders_path_photo_video_count,
+                                            path,
+                                            bucket.photoCount,
+                                            bucket.videoCount,
+                                        )
+                                    bucket.videoCount > 0 ->
+                                        stringResource(R.string.folders_photo_video_count, bucket.photoCount, bucket.videoCount)
+                                    path != null ->
+                                        stringResource(R.string.folders_path_count, path, bucket.photoCount)
+                                    else -> stringResource(R.string.folders_photo_count, bucket.photoCount)
+                                },
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         },

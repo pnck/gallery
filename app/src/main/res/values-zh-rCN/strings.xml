@@ -164,6 +164,12 @@
 
     <!-- Detail viewer actions (PRD §9.1, T-403) -->
     <string name="detail_rotate">旋转</string>
+    <string name="detail_play">播放</string>
+    <string name="detail_pause">暂停</string>
+    <string name="detail_seek_back">后退 10 秒</string>
+    <string name="detail_seek_forward">前进 10 秒</string>
+    <string name="picker_title">选择照片或视频</string>
+    <string name="picker_empty">设备上没有照片或视频</string>
     <string name="detail_edit">编辑</string>
     <string name="detail_share">分享</string>
     <string name="detail_save">保存到设备</string>
@@ -208,6 +214,8 @@
     <string name="folders_all">全部文件夹</string>
     <string name="folders_photo_count">%1$d 张照片</string>
     <string name="folders_path_count">%1$s · %2$d 张</string>
+    <string name="folders_photo_video_count">%1$d 张照片 · %2$d 个视频</string>
+    <string name="folders_path_photo_video_count">%1$s · %2$d 张照片 · %3$d 个视频</string>
 
     <!-- Library folders (scope picker, settings child — docs/GALLERY-UX-INTERACTION.md §5.4) -->
     <string name="library_folders_title">图库文件夹</string>

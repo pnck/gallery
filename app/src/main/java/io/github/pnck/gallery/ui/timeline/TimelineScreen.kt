@@ -1115,7 +1115,7 @@ private fun workStateLabel(state: WorkInfo.State): String = when (state) {
 }
 
 /** "0:47" / "12:03" — grid badge duration. */
-private fun formatDuration(ms: Long): String {
+internal fun formatDuration(ms: Long): String {
     val totalSec = ms / 1000
     return "%d:%02d".format(totalSec / 60, totalSec % 60)
 }

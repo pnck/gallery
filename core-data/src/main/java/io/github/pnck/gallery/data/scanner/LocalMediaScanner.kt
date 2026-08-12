@@ -138,8 +138,12 @@ class LocalMediaScanner(private val resolver: ContentResolver) {
         @Suppress("DEPRECATION")
         val pathCol = if (usePath) MediaStore.Images.Media.RELATIVE_PATH else MediaStore.Images.Media.DATA
         val acc = LinkedHashMap<String, BucketAcc>()
-        // Videos share the same buckets (DCIM & co.) — merge, deduping by bucketId.
-        listOf(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, MediaStore.Video.Media.EXTERNAL_CONTENT_URI).forEach { volume ->
+        // Videos share the same buckets (DCIM & co.) — merge, deduping by bucketId,
+        // while keeping photo/video counts apart so the picker can show both.
+        listOf(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI to false,
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI to true,
+        ).forEach { (volume, isVideo) ->
         resolver.query(
             volume,
             arrayOf(MediaStore.Images.Media.BUCKET_ID, MediaStore.Images.Media.BUCKET_DISPLAY_NAME, pathCol),
@@ -157,16 +161,17 @@ class LocalMediaScanner(private val resolver: ContentResolver) {
                 if (existing == null) {
                     val raw = cursor.getString(pCol)
                     val path = if (usePath) raw?.trimEnd('/') else raw?.substringBeforeLast('/', "")?.ifBlank { null }
-                    acc[bucketId] = BucketAcc(name, path, 1)
+                    acc[bucketId] = BucketAcc(name, path, 1, if (isVideo) 1 else 0)
                 } else {
                     existing.count++
+                    if (isVideo) existing.videoCount++
                 }
             }
         }
         }
-        acc.map { (id, b) -> MediaBucket(id, b.name, b.path, b.count) }
+        acc.map { (id, b) -> MediaBucket(id, b.name, b.path, b.count, b.videoCount) }
             .sortedByDescending { it.count }
     }
 
-    private class BucketAcc(val name: String, val path: String?, var count: Int)
+    private class BucketAcc(val name: String, val path: String?, var count: Int, var videoCount: Int)
 }
