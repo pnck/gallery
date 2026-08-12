@@ -60,12 +60,10 @@ private const val SEEK_STEP_MS = 10_000L
  * rotate control) and is applied through the Media3 effect pipeline
  * ([ScaleAndRotateTransformation]) — the DECODER output is rotated, so pixels
  * and the aspect ratio stay correct; rotating the Compose canvas would only
- * spin the view and crush the frame. Video effects can only be installed
- * before prepare(), so a rotation change rebuilds the player; resume state
- * comes from the ticker-fed [positionMs]/[playing] snapshot (composition runs
- * BEFORE the old player's onDispose, so reading the dying player itself would
- * be too late), and the AndroidView's update block rebinds the PlayerView to
- * the new instance — without it the view keeps showing the released player.
+ * spin the view and crush the frame. The pipeline is installed once before
+ * prepare() (a media3 requirement — even an empty list counts), after which
+ * effects can be swapped DURING playback: rotation changes are instant, with
+ * no player rebuild, no seek-resume, and no PlayerView rebind.
  *
  * Layout follows the classic gallery-player pattern (Google Photos & co.):
  * a centered transport row (back 10s / play-pause / forward 10s) above a
@@ -89,17 +87,27 @@ fun VideoPlayerPage(
     var positionMs by remember { mutableLongStateOf(0L) }
     var dragging by remember { mutableStateOf(false) }
 
-    // A rotation change rebuilds the player (effects are pre-prepare only) and
-    // resumes from the ticker's latest position/play-state.
-    val player = remember(rotationDeg) {
+    // ONE player for the page's lifetime. The effects pipeline is installed
+    // once before prepare() (media3 requirement — even an empty list counts),
+    // which makes later setVideoEffects() calls legal DURING playback.
+    val player = remember {
         ExoPlayer.Builder(context).build().apply {
-            if (rotationDeg != 0f) {
-                setVideoEffects(listOf(ScaleAndRotateTransformation.Builder().setRotationDegrees(rotationDeg).build()))
-            }
-            setMediaItem(MediaItem.fromUri(uri), positionMs)
+            setVideoEffects(emptyList())
+            setMediaItem(MediaItem.fromUri(uri))
             prepare()
-            playWhenReady = playing
         }
+    }
+
+    // Rotation: swap the effect in place. Playback position/state are untouched
+    // — no rebuild, no seek-resume, no rebind (official dynamic-effects pattern).
+    LaunchedEffect(rotationDeg) {
+        player.setVideoEffects(
+            if (rotationDeg == 0f) {
+                emptyList()
+            } else {
+                listOf(ScaleAndRotateTransformation.Builder().setRotationDegrees(rotationDeg).build())
+            },
+        )
     }
 
     DisposableEffect(player) {
@@ -138,10 +146,9 @@ fun VideoPlayerPage(
             factory = { ctx ->
                 PlayerView(ctx).apply {
                     useController = false // controls live below, per spec
+                    this.player = player
                 }
             },
-            // Rebind on every player rebuild — the factory runs only once.
-            update = { it.player = player },
             modifier = Modifier.fillMaxWidth().weight(1f),
         )
         Column(
