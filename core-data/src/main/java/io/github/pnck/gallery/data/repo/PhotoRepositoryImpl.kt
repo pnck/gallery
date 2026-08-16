@@ -236,7 +236,29 @@ class PhotoRepositoryImpl(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI
         }
 
-        val uri = resolver.insert(collection, values) ?: run {
+        var uri = resolver.insert(collection, values)
+        if (uri == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // A STALE row (file removed out-of-band, MediaStore never told) blocks
+            // the insert with the same path+name. If its bytes are gone, bury the
+            // corpse and retry once. The probe is a content-uri open — no paths.
+            Log.w(TAG, "saveToDevice: insert blocked — probing for a stale row at $targetFolder$displayName")
+            val stale = resolver.query(
+                collection,
+                arrayOf(MediaStore.MediaColumns._ID),
+                "${MediaStore.MediaColumns.RELATIVE_PATH} = ? AND ${MediaStore.MediaColumns.DISPLAY_NAME} = ?",
+                arrayOf(targetFolder.let { if (it.endsWith('/')) it else "$it/" }, displayName),
+                null,
+            )?.use { c -> if (c.moveToFirst()) c.getLong(0) else null }
+            if (stale != null) {
+                val staleUri = Uri.withAppendedPath(collection, stale.toString())
+                val alive = runCatching { resolver.openInputStream(staleUri)?.close() != null }.getOrDefault(false)
+                if (!alive) {
+                    resolver.delete(staleUri, null, null)
+                    uri = resolver.insert(collection, values)
+                }
+            }
+        }
+        if (uri == null) {
             Log.w(TAG, "saveToDevice: MediaStore insert returned null (folder=$targetFolder name=$displayName mime=$mime)")
             stream.close()
             return@withContext null
