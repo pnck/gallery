@@ -46,6 +46,27 @@ class GalleryApp : Application(), Configuration.Provider, SingletonImageLoader.F
         // Register the background incremental keep-up (T-304); KEEP is idempotent.
         SyncPipeline.schedulePeriodic(WorkManager.getInstance(this))
         trackForegroundForProbe()
+        registerDebugHooks()
+    }
+
+    /**
+     * adb-drivable automation hooks (owner: end-to-end testing) — DEBUG/ALPHA
+     * ONLY. Dynamic registration means release builds (DIAGNOSTICS_ENABLED=false)
+     * have zero receiver surface; nothing in the manifest.
+     */
+    private fun registerDebugHooks() {
+        if (!BuildConfig.DIAGNOSTICS_ENABLED) return
+        val filter = android.content.IntentFilter().apply {
+            addAction(io.github.pnck.gallery.debug.DebugCommandReceiver.ACTION_SYNC)
+            addAction(io.github.pnck.gallery.debug.DebugCommandReceiver.ACTION_SAVE_FIRST_CLOUD_ONLY)
+            addAction(io.github.pnck.gallery.debug.DebugCommandReceiver.ACTION_STATE)
+        }
+        androidx.core.content.ContextCompat.registerReceiver(
+            this,
+            io.github.pnck.gallery.debug.DebugCommandReceiver(),
+            filter,
+            androidx.core.content.ContextCompat.RECEIVER_EXPORTED,
+        )
     }
 
     /**

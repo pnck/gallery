@@ -256,12 +256,24 @@ class PhotoRepositoryImpl(
             values.put(MediaStore.MediaColumns.IS_PENDING, 0)
             resolver.update(uri, values, null, null)
         }
+        // MediaStore IGNORES DATE_MODIFIED at insert (verified on-device): on the
+        // legacy model (≤29) fix the real file mtime so file managers show the
+        // capture date. Narrow invariant-#9 exception: _data is read only to
+        // stamp our own just-restored file, never to reference media.
+        if (takenMs > 0 && Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q) {
+            @Suppress("DEPRECATION")
+            runCatching {
+                resolver.query(uri, arrayOf(MediaStore.MediaColumns.DATA), null, null, null)?.use { c ->
+                    if (c.moveToFirst()) File(c.getString(0)).setLastModified(takenMs)
+                }
+            }
+        }
 
         // The freshly published uri becomes the row's local copy: CLOUD_ONLY → SYNCED.
         // adoptLocalCopy first removes any scan-created fresh row holding this uri
         // (unique localUri index would otherwise reject the update).
         photoDao.adoptLocalCopy(id, uri.toString())
-        Log.i(TAG, "saveToDevice: OK → $uri")
+        Log.i(TAG, "saveToDevice: OK → $uri (dateTaken=$takenMs)")
         SavedCopy(uri.toString(), targetFolder.trimEnd('/'))
     }
 

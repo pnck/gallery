@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.Menu
@@ -289,6 +290,7 @@ fun TimelineScreen(
         topBar = {
             if (selectionMode) {
                 SelectionAppBar(
+                    filter = syncFilter,
                     onClear = viewModel::exitSelectionMode,
                     onSelectAll = viewModel::selectAllVisible,
                     onSync = viewModel::syncSelected,
@@ -822,9 +824,19 @@ private fun PhotoCell(
     }
 }
 
+/**
+ * Selection actions follow the active filter (owner's rule): an action that
+ * can't apply to ANY item in the current filter is absent, and the primary
+ * icon is the filter's meaningful verb —
+ *   ALL/NOT_BACKED_UP → Back up (cloud-upload),
+ *   BACKED_UP         → Free up space (both copies exist locally),
+ *   CLOUD_ONLY        → Download (no local copy to back up or free).
+ * Delete is universal and always stays.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SelectionAppBar(
+    filter: SyncFilter,
     onClear: () -> Unit,
     onSelectAll: () -> Unit,
     onSync: () -> Unit,
@@ -832,6 +844,9 @@ private fun SelectionAppBar(
     onFreeSpace: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    val showSync = filter == SyncFilter.ALL || filter == SyncFilter.NOT_BACKED_UP
+    val showSave = filter == SyncFilter.ALL || filter == SyncFilter.CLOUD_ONLY
+    val showFree = filter == SyncFilter.ALL || filter == SyncFilter.BACKED_UP
     TopAppBar(
         navigationIcon = {
             IconButton(onClick = onClear) {
@@ -841,10 +856,18 @@ private fun SelectionAppBar(
         // No title: the count lives in the centered banner below the bar.
         title = { },
         actions = {
-            // Two primary icons max (docs §4): Back up (backup-first) and Delete —
-            // both universal metaphors. Everything else is overflow text.
-            IconButton(onClick = onSync) {
-                Icon(Icons.Default.CloudUpload, contentDescription = stringResource(R.string.action_sync_selected))
+            // The primary verb for this filter, then Delete — both universal
+            // metaphors (docs §4: two icons max). The rest is overflow text.
+            when (filter) {
+                SyncFilter.CLOUD_ONLY -> IconButton(onClick = onSave) {
+                    Icon(Icons.Default.Download, contentDescription = stringResource(R.string.action_save_selected))
+                }
+                SyncFilter.BACKED_UP -> IconButton(onClick = onFreeSpace) {
+                    Icon(Icons.Default.DeleteSweep, contentDescription = stringResource(R.string.action_free_selected))
+                }
+                else -> IconButton(onClick = onSync) {
+                    Icon(Icons.Default.CloudUpload, contentDescription = stringResource(R.string.action_sync_selected))
+                }
             }
             IconButton(onClick = onDelete) {
                 Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.action_delete_selected))
@@ -858,14 +881,25 @@ private fun SelectionAppBar(
                     text = { Text(stringResource(R.string.action_select_all)) },
                     onClick = { menu = false; onSelectAll() },
                 )
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.action_free_selected)) },
-                    onClick = { menu = false; onFreeSpace() },
-                )
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.action_save_selected)) },
-                    onClick = { menu = false; onSave() },
-                )
+                if (showFree) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.action_free_selected)) },
+                        onClick = { menu = false; onFreeSpace() },
+                    )
+                }
+                if (showSave) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.action_save_selected)) },
+                        onClick = { menu = false; onSave() },
+                    )
+                }
+                if (showSync && filter != SyncFilter.ALL && filter != SyncFilter.NOT_BACKED_UP) {
+                    // Never primary for these filters, still legal on a mixed selection.
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.action_sync_selected)) },
+                        onClick = { menu = false; onSync() },
+                    )
+                }
             }
         },
     )
