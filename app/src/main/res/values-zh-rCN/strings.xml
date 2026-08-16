@@ -114,8 +114,8 @@
     <string name="space_freed">已释放 %1$d 张照片的空间</string>
     <string name="free_queued">先备份 %1$d 张照片——完成后再释放空间</string>
     <string name="free_space_none">没有可释放的内容</string>
-    <string name="storage_verify_failed">无法确认云端副本——请检查网络连接与登录状态，未删除任何内容。</string>
-    <string name="storage_verifying">正在校验云端副本… %1$d/%2$d</string>
+    <string name="storage_sync_first">正在同步云端状态，完成后请再次点击</string>
+    <string name="storage_manage_media_row">开启一键清理（媒体管理权限）</string>
     <string name="action_select">选择</string>
     <string name="action_select_all">全选</string>
 

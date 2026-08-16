@@ -26,21 +26,13 @@ import io.github.pnck.gallery.domain.TimelinePhoto
 import io.github.pnck.gallery.domain.TimelineQuery
 import io.github.pnck.gallery.domain.TimelineSort
 import io.github.pnck.gallery.network.ApiResult
-import io.github.pnck.gallery.provider.ContentHash
 import io.github.pnck.gallery.provider.ICloudStorageProvider
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
-import java.security.MessageDigest
-import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
 /**
@@ -265,79 +257,29 @@ class PhotoRepositoryImpl(
      * whose bytes differ is never offered for freeing. The confirmed hash is
      * persisted so the local/cloud identity survives a broken state machine.
      */
-    override suspend fun freeableLocalUris(
-        onProgress: (done: Int, total: Int) -> Unit,
-    ): List<String> = withContext(Dispatchers.IO) {
-        verifyFreeable(photoDao.getSyncedWithLocal(), onProgress)
+    /**
+     * The freeable set is a PURE DB read (owner directive, superseding the old
+     * spot re-verification): a SYNCED row in an up-to-date DB is already
+     * verified evidence — reconcile hashed the file at upload and cross-checked
+     * the cloud listing on every downstream sync. Re-hashing every file at
+     * cleanup time was a redundant second verification layer: minutes of
+     * silence on big libraries, and a whole class of silent failure modes
+     * (SecurityException swallowed by runCatching → "nothing to free"). The
+     * up-to-date gate lives at the call site (SpaceManagementViewModel).
+     */
+    override suspend fun freeableLocalUris(): List<String> = withContext(Dispatchers.IO) {
+        photoDao.getSyncedWithLocal().mapNotNull { it.localUri }
     }
 
     override suspend fun freeableLocalUrisFor(ids: List<String>): List<String> =
         withContext(Dispatchers.IO) {
-            if (ids.isEmpty()) emptyList() else verifyFreeable(photoDao.getSyncedWithLocalByIds(ids))
+            if (ids.isEmpty()) emptyList() else photoDao.getSyncedWithLocalByIds(ids).mapNotNull { it.localUri }
         }
-
-    /**
-     * The anti-data-loss guard (PRD §7.3): a synced+local row is only freeable if its
-     * cloud copy is verified present with matching content (MD5) BEFORE the local file
-     * is deleted. The confirmed hash is persisted so local/cloud identity survives a
-     * broken state machine.
-     *
-     * Per-file checks run with bounded parallelism (6): sequential metadata
-     * round-trips made a full-library sweep look hung for minutes (owner report:
-     * "cleanup does nothing"). [onProgress] fires after each file completes.
-     */
-    private suspend fun verifyFreeable(
-        rows: List<PhotoEntity>,
-        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
-    ): List<String> = coroutineScope {
-        val gate = Semaphore(VERIFY_CONCURRENCY)
-        val done = AtomicInteger(0)
-        rows.map { row ->
-            async {
-                gate.withPermit {
-                    val uri = verifyOne(row)
-                    onProgress(done.incrementAndGet(), rows.size)
-                    uri
-                }
-            }
-        }.awaitAll().filterNotNull()
-    }
-
-    /** One file: cloud copy must exist AND hash-match the local bytes. */
-    private suspend fun verifyOne(row: PhotoEntity): String? {
-        val cloudId = row.cloudId ?: return null
-        val localUri = row.localUri ?: return null
-        val cloudMd5 = when (val res = provider.getFileMetadata(cloudId)) {
-            is ApiResult.Success -> (res.data.contentHash as? ContentHash.Md5)?.value
-            is ApiResult.Error -> null // cloud gone/unreachable → not safe to free
-        } ?: return null
-        val localMd5 = computeMd5(localUri) ?: return null
-        return if (localMd5.equals(cloudMd5, ignoreCase = true)) {
-            photoDao.setContentHash(row.id, "MD5", cloudMd5)
-            localUri
-        } else {
-            null
-        }
-    }
 
     override suspend fun releaseLocalCopies(uris: List<String>) = withContext(Dispatchers.IO) {
         val ids = uris.mapNotNull { photoDao.findByLocalUri(it)?.id }
         if (ids.isNotEmpty()) photoDao.markAsCloudOnly(ids)
     }
-
-    private fun computeMd5(uriStr: String): String? = runCatching {
-        val digest = MessageDigest.getInstance("MD5")
-        val ok = resolver.openInputStream(Uri.parse(uriStr))?.use { input ->
-            val buffer = ByteArray(64 * 1024)
-            while (true) {
-                val read = input.read(buffer)
-                if (read < 0) break
-                digest.update(buffer, 0, read)
-            }
-            true
-        } ?: false
-        if (ok) digest.digest().joinToString("") { "%02x".format(it) } else null
-    }.getOrNull()
 
     private fun writeStreamToFile(stream: InputStream, file: File): Boolean = runCatching {
         stream.use { input -> file.outputStream().use { input.copyTo(it) } }
@@ -350,9 +292,6 @@ class PhotoRepositoryImpl(
     private companion object {
         /** Bounded resume loop for cacheOriginal (each round resumes from disk). */
         const val MAX_DOWNLOAD_ATTEMPTS = 4
-
-        /** Parallel cloud-metadata probes during free-space verification. */
-        const val VERIFY_CONCURRENCY = 6
     }
 
     private fun fileProviderUri(file: File): Uri =

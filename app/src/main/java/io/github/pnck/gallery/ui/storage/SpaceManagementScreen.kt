@@ -1,5 +1,7 @@
 package io.github.pnck.gallery.ui.storage
 
+import android.app.Activity
+import android.os.Build
 import android.text.format.Formatter
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -28,7 +30,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -36,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -51,8 +53,13 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.pnck.gallery.R
 import io.github.pnck.gallery.domain.StorageSummary
+import io.github.pnck.gallery.ui.util.canManageMedia
+import io.github.pnck.gallery.ui.util.openManageMediaSettings
 import io.github.pnck.gallery.ui.util.rememberSystemDelete
 
 /**
@@ -70,11 +77,22 @@ fun SpaceManagementScreen(
     val summary by viewModel.summary.collectAsState()
     val device by viewModel.device.collectAsState()
     val freeUris by viewModel.freeUris.collectAsState()
-    val verifying by viewModel.verifying.collectAsState()
     val context = LocalContext.current
     val snackbarHost = remember { SnackbarHostState() }
-    val systemDelete = rememberSystemDelete()
+    // Free-up-space prefers the MANAGE_MEDIA silent path (no system preview dialog).
+    val systemDelete = rememberSystemDelete(preferDirect = true)
     var confirmFree by remember { mutableStateOf(false) }
+
+    // Re-check the media-management grant on every resume (it changes in system settings).
+    var manageMedia by remember { mutableStateOf(canManageMedia(context)) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) manageMedia = canManageMedia(context)
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     // Refresh device figures each time the screen is shown (a sync may have changed them).
     LaunchedEffect(Unit) { viewModel.refreshDevice() }
@@ -94,7 +112,7 @@ fun SpaceManagementScreen(
     LaunchedEffect(Unit) { viewModel.eventFlow.collect { pendingEvent = it } }
     val message = when (val event = pendingEvent) {
         SpaceEvent.NothingToFree -> stringResource(R.string.free_space_none)
-        SpaceEvent.VerificationFailed -> stringResource(R.string.storage_verify_failed)
+        SpaceEvent.SyncFirst -> stringResource(R.string.storage_sync_first)
         is SpaceEvent.Freed -> stringResource(R.string.space_freed, event.count)
         null -> null
     }
@@ -128,7 +146,7 @@ fun SpaceManagementScreen(
 
             Button(
                 onClick = { confirmFree = true },
-                enabled = summary.freeableCount > 0 && verifying == null,
+                enabled = summary.freeableCount > 0,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(
@@ -142,20 +160,16 @@ fun SpaceManagementScreen(
                     },
                 )
             }
-            // Live progress while the cloud-copy verification sweep runs — without
-            // it a big library looked hung for minutes ("cleanup does nothing").
-            verifying?.let { (done, total) ->
-                Spacer(Modifier.height(12.dp))
-                LinearProgressIndicator(
-                    progress = { if (total > 0) done.toFloat() / total else 0f },
-                    modifier = Modifier.fillMaxWidth(),
-                )
+            // One-time offer of the media-management grant: with it, batch cleanup
+            // runs with ZERO system dialogs (no preview grid, no per-chunk approve).
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !manageMedia) {
                 Spacer(Modifier.height(4.dp))
-                Text(
-                    stringResource(R.string.storage_verifying, done, total),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                TextButton(
+                    onClick = { (context as? Activity)?.let(::openManageMediaSettings) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.storage_manage_media_row))
+                }
             }
             Spacer(Modifier.height(8.dp))
             Text(

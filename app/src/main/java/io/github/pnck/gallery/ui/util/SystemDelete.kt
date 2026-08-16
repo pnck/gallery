@@ -12,6 +12,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 
@@ -41,19 +42,29 @@ private data class PendingDelete(
 )
 
 /**
- * Scoped-storage local media deletion (PRD §7.3, invariant #7). On Android 11+
- * this shows the system delete dialog via MediaStore.createDeleteRequest —
- * ONE dialog per [DELETE_CHUNK]-item chunk, and [onConfirmed] runs per
- * confirmed chunk (so a mid-batch cancel keeps already-deleted chunks'
- * bookkeeping instead of pretending the whole batch went through). Older
- * devices fall back to a best-effort direct delete.
+ * Scoped-storage local media deletion (PRD §7.3, invariant #7).
  *
- * Shared by "delete" (→ purge cloud + row) and "free up space" (→ CLOUD_ONLY),
- * which differ only in what [onConfirmed] does.
+ * Three paths, best first:
+ *  1. [preferDirect] + MANAGE_MEDIA granted (API 31+): silent direct delete —
+ *     no system dialog, no thumbnail-preview storm, no per-chunk approve. This
+ *     is the free-up-space path: our in-app confirm (count + size) is the one
+ *     and only design-language confirmation; the system dialog's flat preview
+ *     grid is useless (can't zoom), slow on big batches, and off-design.
+ *  2. Android 11+ otherwise: the system delete dialog via
+ *     MediaStore.createDeleteRequest — ONE dialog per [DELETE_CHUNK]-item
+ *     chunk, [onConfirmed] per confirmed chunk (a mid-batch cancel keeps
+ *     already-deleted chunks' bookkeeping honest).
+ *  3. Older devices: best-effort direct delete.
+ *
+ * Shared by "delete" (→ purge cloud + row; keeps the system dialog unless
+ * MANAGE_MEDIA is held) and "free up space" (→ CLOUD_ONLY; [preferDirect]).
  */
 @Composable
-fun rememberSystemDelete(): (uris: List<Uri>, onConfirmed: (List<Uri>) -> Unit) -> Unit {
+fun rememberSystemDelete(
+    preferDirect: Boolean = false,
+): (uris: List<Uri>, onConfirmed: (List<Uri>) -> Unit) -> Unit {
     val context = LocalContext.current
+    val direct by rememberUpdatedState(preferDirect)
     var pending by remember { mutableStateOf<PendingDelete?>(null) }
 
     val launcher = rememberLauncherForActivityResult(
@@ -91,6 +102,11 @@ fun rememberSystemDelete(): (uris: List<Uri>, onConfirmed: (List<Uri>) -> Unit) 
         { uris, onConfirmed ->
             when {
                 uris.isEmpty() -> onConfirmed(emptyList())
+                direct && canManageMedia(context) -> {
+                    // MANAGE_MEDIA held: delete silently (in-app confirm already happened).
+                    uris.forEach { runCatching { context.contentResolver.delete(it, null, null) } }
+                    onConfirmed(uris)
+                }
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.R ->
                     pending = PendingDelete(uris.chunked(DELETE_CHUNK), 0, onConfirmed)
                 else -> {

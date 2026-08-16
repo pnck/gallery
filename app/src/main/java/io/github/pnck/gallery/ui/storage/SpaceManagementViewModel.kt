@@ -5,10 +5,13 @@ import android.os.Environment
 import android.os.StatFs
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.pnck.gallery.domain.PhotoRepository
 import io.github.pnck.gallery.domain.StorageSummary
+import io.github.pnck.gallery.work.SyncPipeline
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -28,8 +31,8 @@ data class DeviceStorage(val totalBytes: Long, val freeBytes: Long)
 sealed interface SpaceEvent {
     data object NothingToFree : SpaceEvent
 
-    /** Candidates existed but NONE could be verified — cloud unreachable / signed out. */
-    data object VerificationFailed : SpaceEvent
+    /** The sync chain hasn't settled — a fresh sweep was kicked; retry when it lands. */
+    data object SyncFirst : SpaceEvent
 
     data class Freed(val count: Int) : SpaceEvent
 }
@@ -43,6 +46,7 @@ sealed interface SpaceEvent {
 class SpaceManagementViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val repo: PhotoRepository,
+    private val workManager: WorkManager,
 ) : ViewModel() {
 
     val summary: StateFlow<StorageSummary> = repo.observeStorageSummary()
@@ -58,10 +62,6 @@ class SpaceManagementViewModel @Inject constructor(
     /** Verified freeable uris awaiting the system delete dialog (null = nothing pending). */
     private val _freeUris = MutableStateFlow<List<String>?>(null)
     val freeUris: StateFlow<List<String>?> = _freeUris.asStateFlow()
-
-    /** (done, total) while the cloud-copy verification sweep runs; null when idle. */
-    private val _verifying = MutableStateFlow<Pair<Int, Int>?>(null)
-    val verifying: StateFlow<Pair<Int, Int>?> = _verifying.asStateFlow()
 
     private val events = Channel<SpaceEvent>(Channel.BUFFERED)
     val eventFlow = events.receiveAsFlow()
@@ -83,25 +83,29 @@ class SpaceManagementViewModel @Inject constructor(
     }
 
     /**
-     * Gather verified-freeable local copies (cloud existence + hash checked).
-     * The sweep is parallel but still takes seconds on a big library — progress
-     * rides [verifying] so the screen never looks dead (owner report: "cleanup
-     * does nothing" was a minutes-long silent verification).
+     * Free-up-space (owner's model): the SYNCED rows in an UP-TO-DATE database
+     * are already the verified backed-up set — no spot re-verification, no
+     * hash recompute. The only gate is freshness: if the sync chain is running
+     * or never completed, kick a sweep and ask for a retry instead of freeing
+     * against a stale projection.
      */
     fun requestFreeSpace() {
-        if (_verifying.value != null) return
         viewModelScope.launch {
-            _verifying.value = 0 to 1
-            val uris = repo.freeableLocalUris { done, total -> _verifying.value = done to total }
-            _verifying.value = null
-            when {
-                uris.isNotEmpty() -> _freeUris.value = uris
-                // Candidates existed but nothing verified: the honest message is
-                // "can't confirm the cloud", not "nothing to free".
-                summary.value.freeableCount > 0 -> events.send(SpaceEvent.VerificationFailed)
-                else -> events.send(SpaceEvent.NothingToFree)
+            if (!withContext(Dispatchers.IO) { isUpToDate() }) {
+                SyncPipeline.enqueue(workManager, force = true)
+                events.send(SpaceEvent.SyncFirst)
+                return@launch
             }
+            val uris = repo.freeableLocalUris()
+            if (uris.isEmpty()) events.send(SpaceEvent.NothingToFree) else _freeUris.value = uris
         }
+    }
+
+    /** Up-to-date = the unique sync chain is idle AND has completed at least once. */
+    private fun isUpToDate(): Boolean {
+        val infos = workManager.getWorkInfosForUniqueWork(SyncPipeline.UNIQUE_NAME).get()
+        if (infos.any { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED }) return false
+        return infos.any { it.state == WorkInfo.State.SUCCEEDED }
     }
 
     fun onFreeHandled() {

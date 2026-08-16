@@ -10,6 +10,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Process
+import android.provider.MediaStore
 import android.provider.Settings
 import androidx.core.content.ContextCompat
 
@@ -124,6 +125,36 @@ fun isMiui(): Boolean =
 fun openAutostartSettings(activity: Activity) {
     val intents = listOfNotNull(
         Intent().setClassName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"),
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${activity.packageName}")),
+    )
+    for (intent in intents) {
+        try {
+            activity.startActivity(intent)
+            return
+        } catch (e: ActivityNotFoundException) {
+            // try the next fallback
+        } catch (e: SecurityException) {
+            // try the next fallback
+        }
+    }
+}
+
+/**
+ * MANAGE_MEDIA ("媒体管理" special access, API 31+): while held, the app may
+ * delete media WITHOUT the system delete dialog — the batch-cleanup path.
+ * Always false below S (the grant doesn't exist there).
+ */
+fun canManageMedia(context: Context): Boolean =
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && MediaStore.canManageMedia(context)
+
+/** Deep-link to the system's media-management grant page (API 31+). */
+fun openManageMediaSettings(activity: Activity) {
+    val intents = listOfNotNull(
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            Intent(Settings.ACTION_REQUEST_MANAGE_MEDIA, Uri.parse("package:${activity.packageName}"))
+        } else {
+            null
+        },
         Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${activity.packageName}")),
     )
     for (intent in intents) {

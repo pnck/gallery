@@ -115,8 +115,8 @@
     <string name="space_freed">Freed space from %1$d photo(s)</string>
     <string name="free_queued">Backing up %1$d photo(s) first — free up space again once they finish</string>
     <string name="free_space_none">Nothing to free up</string>
-    <string name="storage_verify_failed">Couldn\'t confirm the cloud copies — check your connection and sign-in. Nothing was deleted.</string>
-    <string name="storage_verifying">Verifying cloud copies… %1$d/%2$d</string>
+    <string name="storage_sync_first">Checking cloud state first — try again when sync finishes</string>
+    <string name="storage_manage_media_row">Enable one-tap cleanup (media management permission)</string>
     <string name="action_select">Select</string>
     <string name="action_select_all">Select all</string>
 
