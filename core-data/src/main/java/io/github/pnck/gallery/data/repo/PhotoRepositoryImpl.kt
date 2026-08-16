@@ -32,9 +32,15 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
 /**
@@ -259,8 +265,10 @@ class PhotoRepositoryImpl(
      * whose bytes differ is never offered for freeing. The confirmed hash is
      * persisted so the local/cloud identity survives a broken state machine.
      */
-    override suspend fun freeableLocalUris(): List<String> = withContext(Dispatchers.IO) {
-        verifyFreeable(photoDao.getSyncedWithLocal())
+    override suspend fun freeableLocalUris(
+        onProgress: (done: Int, total: Int) -> Unit,
+    ): List<String> = withContext(Dispatchers.IO) {
+        verifyFreeable(photoDao.getSyncedWithLocal(), onProgress)
     }
 
     override suspend fun freeableLocalUrisFor(ids: List<String>): List<String> =
@@ -273,23 +281,44 @@ class PhotoRepositoryImpl(
      * cloud copy is verified present with matching content (MD5) BEFORE the local file
      * is deleted. The confirmed hash is persisted so local/cloud identity survives a
      * broken state machine.
+     *
+     * Per-file checks run with bounded parallelism (6): sequential metadata
+     * round-trips made a full-library sweep look hung for minutes (owner report:
+     * "cleanup does nothing"). [onProgress] fires after each file completes.
      */
-    private suspend fun verifyFreeable(rows: List<PhotoEntity>): List<String> =
-        rows.mapNotNull { row ->
-            val cloudId = row.cloudId ?: return@mapNotNull null
-            val localUri = row.localUri ?: return@mapNotNull null
-            val cloudMd5 = when (val res = provider.getFileMetadata(cloudId)) {
-                is ApiResult.Success -> (res.data.contentHash as? ContentHash.Md5)?.value
-                is ApiResult.Error -> null // cloud gone/unreachable → not safe to free
-            } ?: return@mapNotNull null
-            val localMd5 = computeMd5(localUri) ?: return@mapNotNull null
-            if (localMd5.equals(cloudMd5, ignoreCase = true)) {
-                photoDao.setContentHash(row.id, "MD5", cloudMd5)
-                localUri
-            } else {
-                null
+    private suspend fun verifyFreeable(
+        rows: List<PhotoEntity>,
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+    ): List<String> = coroutineScope {
+        val gate = Semaphore(VERIFY_CONCURRENCY)
+        val done = AtomicInteger(0)
+        rows.map { row ->
+            async {
+                gate.withPermit {
+                    val uri = verifyOne(row)
+                    onProgress(done.incrementAndGet(), rows.size)
+                    uri
+                }
             }
+        }.awaitAll().filterNotNull()
+    }
+
+    /** One file: cloud copy must exist AND hash-match the local bytes. */
+    private suspend fun verifyOne(row: PhotoEntity): String? {
+        val cloudId = row.cloudId ?: return null
+        val localUri = row.localUri ?: return null
+        val cloudMd5 = when (val res = provider.getFileMetadata(cloudId)) {
+            is ApiResult.Success -> (res.data.contentHash as? ContentHash.Md5)?.value
+            is ApiResult.Error -> null // cloud gone/unreachable → not safe to free
+        } ?: return null
+        val localMd5 = computeMd5(localUri) ?: return null
+        return if (localMd5.equals(cloudMd5, ignoreCase = true)) {
+            photoDao.setContentHash(row.id, "MD5", cloudMd5)
+            localUri
+        } else {
+            null
         }
+    }
 
     override suspend fun releaseLocalCopies(uris: List<String>) = withContext(Dispatchers.IO) {
         val ids = uris.mapNotNull { photoDao.findByLocalUri(it)?.id }
@@ -321,6 +350,9 @@ class PhotoRepositoryImpl(
     private companion object {
         /** Bounded resume loop for cacheOriginal (each round resumes from disk). */
         const val MAX_DOWNLOAD_ATTEMPTS = 4
+
+        /** Parallel cloud-metadata probes during free-space verification. */
+        const val VERIFY_CONCURRENCY = 6
     }
 
     private fun fileProviderUri(file: File): Uri =

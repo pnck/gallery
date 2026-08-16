@@ -27,6 +27,10 @@ data class DeviceStorage(val totalBytes: Long, val freeBytes: Long)
 /** One-shot feedback for the space-management screen. */
 sealed interface SpaceEvent {
     data object NothingToFree : SpaceEvent
+
+    /** Candidates existed but NONE could be verified — cloud unreachable / signed out. */
+    data object VerificationFailed : SpaceEvent
+
     data class Freed(val count: Int) : SpaceEvent
 }
 
@@ -55,6 +59,10 @@ class SpaceManagementViewModel @Inject constructor(
     private val _freeUris = MutableStateFlow<List<String>?>(null)
     val freeUris: StateFlow<List<String>?> = _freeUris.asStateFlow()
 
+    /** (done, total) while the cloud-copy verification sweep runs; null when idle. */
+    private val _verifying = MutableStateFlow<Pair<Int, Int>?>(null)
+    val verifying: StateFlow<Pair<Int, Int>?> = _verifying.asStateFlow()
+
     private val events = Channel<SpaceEvent>(Channel.BUFFERED)
     val eventFlow = events.receiveAsFlow()
 
@@ -74,11 +82,25 @@ class SpaceManagementViewModel @Inject constructor(
         }
     }
 
-    /** Gather verified-freeable local copies (cloud existence + hash checked). */
+    /**
+     * Gather verified-freeable local copies (cloud existence + hash checked).
+     * The sweep is parallel but still takes seconds on a big library — progress
+     * rides [verifying] so the screen never looks dead (owner report: "cleanup
+     * does nothing" was a minutes-long silent verification).
+     */
     fun requestFreeSpace() {
+        if (_verifying.value != null) return
         viewModelScope.launch {
-            val uris = repo.freeableLocalUris()
-            if (uris.isEmpty()) events.send(SpaceEvent.NothingToFree) else _freeUris.value = uris
+            _verifying.value = 0 to 1
+            val uris = repo.freeableLocalUris { done, total -> _verifying.value = done to total }
+            _verifying.value = null
+            when {
+                uris.isNotEmpty() -> _freeUris.value = uris
+                // Candidates existed but nothing verified: the honest message is
+                // "can't confirm the cloud", not "nothing to free".
+                summary.value.freeableCount > 0 -> events.send(SpaceEvent.VerificationFailed)
+                else -> events.send(SpaceEvent.NothingToFree)
+            }
         }
     }
 

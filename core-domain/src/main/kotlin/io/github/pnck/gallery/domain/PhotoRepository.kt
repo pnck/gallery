@@ -76,8 +76,12 @@ interface PhotoRepository {
 
     // ── Free up space (T-302, PRD §7.3) ────────────────────────────────────
 
-    /** Local copies of already-synced photos, safe to release. */
-    suspend fun freeableLocalUris(): List<String>
+    /**
+     * Local copies of already-synced photos, safe to release. Verification is a
+     * per-file cloud round-trip, so [onProgress] reports (done, total) for the
+     * UI's progress bar.
+     */
+    suspend fun freeableLocalUris(onProgress: (done: Int, total: Int) -> Unit = { _, _ -> }): List<String>
 
     /**
      * Freeable local copies limited to [ids] (verified cloud-existent + hash-matched,

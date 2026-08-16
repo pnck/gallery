@@ -28,6 +28,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -69,6 +70,7 @@ fun SpaceManagementScreen(
     val summary by viewModel.summary.collectAsState()
     val device by viewModel.device.collectAsState()
     val freeUris by viewModel.freeUris.collectAsState()
+    val verifying by viewModel.verifying.collectAsState()
     val context = LocalContext.current
     val snackbarHost = remember { SnackbarHostState() }
     val systemDelete = rememberSystemDelete()
@@ -77,10 +79,13 @@ fun SpaceManagementScreen(
     // Refresh device figures each time the screen is shown (a sync may have changed them).
     LaunchedEffect(Unit) { viewModel.refreshDevice() }
 
-    // Run the verified freeable uris through the system delete dialog, then release rows.
+    // Run the verified freeable uris through the system delete dialog, then release
+    // rows — PER CONFIRMED CHUNK, so a mid-batch cancel keeps honest bookkeeping.
     LaunchedEffect(freeUris) {
         freeUris?.let { uris ->
-            systemDelete(uris.map { it.toUri() }) { viewModel.confirmFreed(uris) }
+            systemDelete(uris.map { it.toUri() }) { confirmed ->
+                viewModel.confirmFreed(confirmed.map { it.toString() })
+            }
             viewModel.onFreeHandled()
         }
     }
@@ -89,6 +94,7 @@ fun SpaceManagementScreen(
     LaunchedEffect(Unit) { viewModel.eventFlow.collect { pendingEvent = it } }
     val message = when (val event = pendingEvent) {
         SpaceEvent.NothingToFree -> stringResource(R.string.free_space_none)
+        SpaceEvent.VerificationFailed -> stringResource(R.string.storage_verify_failed)
         is SpaceEvent.Freed -> stringResource(R.string.space_freed, event.count)
         null -> null
     }
@@ -122,7 +128,7 @@ fun SpaceManagementScreen(
 
             Button(
                 onClick = { confirmFree = true },
-                enabled = summary.freeableCount > 0,
+                enabled = summary.freeableCount > 0 && verifying == null,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(
@@ -134,6 +140,21 @@ fun SpaceManagementScreen(
                     } else {
                         stringResource(R.string.storage_free_none)
                     },
+                )
+            }
+            // Live progress while the cloud-copy verification sweep runs — without
+            // it a big library looked hung for minutes ("cleanup does nothing").
+            verifying?.let { (done, total) ->
+                Spacer(Modifier.height(12.dp))
+                LinearProgressIndicator(
+                    progress = { if (total > 0) done.toFloat() / total else 0f },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    stringResource(R.string.storage_verifying, done, total),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             Spacer(Modifier.height(8.dp))

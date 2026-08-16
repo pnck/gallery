@@ -150,7 +150,7 @@ fun PhotoDetailScreen(
     // Route a pending delete through the system dialog, then purge cloud + row.
     LaunchedEffect(deleteRequest) {
         deleteRequest?.let { request ->
-            systemDelete(request.localUris.map { it.toUri() }) { viewModel.purge(request.ids) }
+            systemDelete(request.localUris.map { it.toUri() }) { _ -> viewModel.purge(request.ids) }
             viewModel.onDeleteHandled()
         }
     }

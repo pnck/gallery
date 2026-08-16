@@ -217,7 +217,7 @@ fun TimelineScreen(
     // Route a pending delete through the system dialog, then purge cloud + rows.
     LaunchedEffect(deleteRequest) {
         deleteRequest?.let { request ->
-            systemDelete(request.localUris.map { it.toUri() }) { viewModel.purge(request.ids) }
+            systemDelete(request.localUris.map { it.toUri() }) { _ -> viewModel.purge(request.ids) }
             viewModel.onDeleteHandled()
         }
     }
@@ -226,7 +226,7 @@ fun TimelineScreen(
     // dialog, then flip those rows to CLOUD_ONLY (they stay as a cloud preview).
     LaunchedEffect(freeRequest) {
         freeRequest?.let { uris ->
-            systemDelete(uris.map { it.toUri() }) { viewModel.confirmFreed(uris) }
+            systemDelete(uris.map { it.toUri() }) { confirmed -> viewModel.confirmFreed(confirmed.map { it.toString() }) }
             viewModel.onFreeHandled()
         }
     }
