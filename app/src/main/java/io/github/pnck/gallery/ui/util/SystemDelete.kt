@@ -76,10 +76,12 @@ fun rememberSystemDelete(): (uris: List<Uri>, onConfirmed: (List<Uri>) -> Unit) 
     }
 
     // The request for the current chunk is fired from an effect, not from the
-    // result callback — the callback can't reference its own launcher.
+    // result callback — the callback can't reference its own launcher. (The SDK
+    // guard looks redundant — pending is only set on R+ — but lint is right to
+    // demand it here: this call site itself must be provably safe.)
     LaunchedEffect(pending) {
         val p = pending ?: return@LaunchedEffect
-        if (p.fired) return@LaunchedEffect
+        if (p.fired || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return@LaunchedEffect
         pending = p.copy(fired = true)
         val request = MediaStore.createDeleteRequest(context.contentResolver, p.chunks[p.index])
         launcher.launch(IntentSenderRequest.Builder(request.intentSender).build())
