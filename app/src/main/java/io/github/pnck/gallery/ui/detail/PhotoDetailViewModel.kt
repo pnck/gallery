@@ -112,7 +112,9 @@ class PhotoDetailViewModel @Inject constructor(
     /** Save-to-device: cloud original → Pictures/ + SYNCED (PRD §3.7). */
     fun save(photo: TimelinePhoto) {
         viewModelScope.launch {
-            val uri = repo.saveToDevice(photo.id)
+            // runCatching: an uncaught exception in the repo (SQLite, provider)
+            // must still produce USER feedback, not a silently dead coroutine.
+            val uri = runCatching { repo.saveToDevice(photo.id) }.getOrNull()
             events.send(if (uri != null) DetailEvent.Saved else DetailEvent.SaveFailed)
         }
     }

@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.util.Log
 import android.webkit.MimeTypeMap
 import androidx.core.content.FileProvider
 import androidx.sqlite.db.SimpleSQLiteQuery
@@ -173,12 +174,22 @@ class PhotoRepositoryImpl(
      * so the next scan won't create a duplicate PENDING_UPLOAD row.
      */
     override suspend fun saveToDevice(id: String): String? = withContext(Dispatchers.IO) {
-        val row = photoDao.getById(id) ?: return@withContext null
-        val cloudId = row.cloudId ?: return@withContext null
+        val row = photoDao.getById(id) ?: run {
+            Log.w(TAG, "saveToDevice: no row for $id")
+            return@withContext null
+        }
+        val cloudId = row.cloudId ?: run {
+            Log.w(TAG, "saveToDevice: $id has no cloudId")
+            return@withContext null
+        }
 
+        Log.i(TAG, "saveToDevice: downloading $cloudId ($id)")
         val stream = when (val res = provider.downloadOriginal(cloudId)) {
             is ApiResult.Success -> res.data
-            is ApiResult.Error -> return@withContext null
+            is ApiResult.Error -> run {
+                Log.w(TAG, "saveToDevice: download FAILED code=${res.code} retryable=${res.retryable} — ${res.message}")
+                return@withContext null
+            }
         }
 
         // Restore to the ORIGINAL folder and name: the row carries the uploader's
@@ -215,10 +226,17 @@ class PhotoRepositoryImpl(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI
         }
 
-        val uri = resolver.insert(collection, values) ?: return@withContext null
+        val uri = resolver.insert(collection, values) ?: run {
+            Log.w(TAG, "saveToDevice: MediaStore insert returned null (folder=$targetFolder name=$displayName mime=$mime)")
+            stream.close()
+            return@withContext null
+        }
         val ok = runCatching {
             resolver.openOutputStream(uri)?.use { out -> stream.use { it.copyTo(out) } } != null
-        }.getOrDefault(false)
+        }.getOrElse {
+            Log.w(TAG, "saveToDevice: byte copy FAILED for $displayName — ${it.message}")
+            false
+        }
         if (!ok) {
             resolver.delete(uri, null, null)
             return@withContext null
@@ -233,6 +251,7 @@ class PhotoRepositoryImpl(
         // adoptLocalCopy first removes any scan-created fresh row holding this uri
         // (unique localUri index would otherwise reject the update).
         photoDao.adoptLocalCopy(id, uri.toString())
+        Log.i(TAG, "saveToDevice: OK → $uri")
         uri.toString()
     }
 
@@ -290,6 +309,8 @@ class PhotoRepositoryImpl(
     }
 
     private companion object {
+        const val TAG = "gallery-sync"
+
         /** Bounded resume loop for cacheOriginal (each round resumes from disk). */
         const val MAX_DOWNLOAD_ATTEMPTS = 4
     }
