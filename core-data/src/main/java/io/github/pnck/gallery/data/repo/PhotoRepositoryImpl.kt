@@ -209,17 +209,21 @@ class PhotoRepositoryImpl(
             ?: if (row.isVideo) "video/mp4" else "image/jpeg"
         // Round-trip the capture time: Drive's own createdTime is the upload time
         // and EXIF is absent for screenshots — the upload's appProperties copy is
-        // the only trustworthy source. Stamped as DATE_TAKEN (timeline ordering)
-        // and DATE_MODIFIED.
+        // the only trustworthy source. NOTE the timing subtlety (device-verified):
+        // MediaStore RE-EXTRACTS metadata when IS_PENDING flips to 0 and would
+        // overwrite DATE_TAKEN with the restore moment — so on Q+ the dates are
+        // stamped in the FINAL update, after the file mtime is already fixed.
         val takenMs = cloudMeta?.dateTakenMs?.takeIf { it > 0 } ?: row.dateTaken
+        val preQ = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
             put(MediaStore.MediaColumns.MIME_TYPE, mime)
-            if (takenMs > 0) {
+            if (preQ && takenMs > 0) {
+                // No pending flow below Q: the insert stamp is honored directly.
                 put(MediaStore.MediaColumns.DATE_TAKEN, takenMs)
                 put(MediaStore.MediaColumns.DATE_MODIFIED, takenMs / 1000)
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            if (!preQ) {
                 put(MediaStore.MediaColumns.RELATIVE_PATH, targetFolder)
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
@@ -273,15 +277,10 @@ class PhotoRepositoryImpl(
             resolver.delete(uri, null, null)
             return@withContext null
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            values.clear()
-            values.put(MediaStore.MediaColumns.IS_PENDING, 0)
-            resolver.update(uri, values, null, null)
-        }
-        // MediaStore IGNORES DATE_MODIFIED at insert (verified on-device): on the
-        // legacy model (≤29) fix the real file mtime so file managers show the
-        // capture date. Narrow invariant-#9 exception: _data is read only to
-        // stamp our own just-restored file, never to reference media.
+        // Fix the file mtime FIRST (legacy model can reach it): MediaStore
+        // re-extracts on pending-clear, and the explicit date stamp then
+        // double-covers DATE_TAKEN/DATE_MODIFIED. Narrow invariant-#9 exception:
+        // _data is read only to stamp our own just-restored file.
         if (takenMs > 0 && Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q) {
             @Suppress("DEPRECATION")
             runCatching {
@@ -289,6 +288,15 @@ class PhotoRepositoryImpl(
                     if (c.moveToFirst()) File(c.getString(0)).setLastModified(takenMs)
                 }
             }
+        }
+        if (!preQ) {
+            values.clear()
+            values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+            if (takenMs > 0) {
+                values.put(MediaStore.MediaColumns.DATE_TAKEN, takenMs)
+                values.put(MediaStore.MediaColumns.DATE_MODIFIED, takenMs / 1000)
+            }
+            resolver.update(uri, values, null, null)
         }
 
         // The freshly published uri becomes the row's local copy: CLOUD_ONLY → SYNCED.
