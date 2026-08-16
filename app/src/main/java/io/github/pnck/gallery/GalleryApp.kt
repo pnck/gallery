@@ -50,23 +50,31 @@ class GalleryApp : Application(), Configuration.Provider, SingletonImageLoader.F
     }
 
     /**
-     * adb-drivable automation hooks (owner: end-to-end testing) — DEBUG/ALPHA
-     * ONLY. Dynamic registration means release builds (DIAGNOSTICS_ENABLED=false)
-     * have zero receiver surface; nothing in the manifest.
+     * adb-drivable automation hooks (owner: end-to-end round-trip testing).
+     * The receiver lives in the DEBUG SOURCE SET and is reached ONLY via
+     * reflection here — release builds compile without the class entirely
+     * (compile-time removal: no bytecode, no manifest entry, no surface),
+     * and this block then just logs nothing and moves on.
      */
     private fun registerDebugHooks() {
         if (!BuildConfig.DIAGNOSTICS_ENABLED) return
-        val filter = android.content.IntentFilter().apply {
-            addAction(io.github.pnck.gallery.debug.DebugCommandReceiver.ACTION_SYNC)
-            addAction(io.github.pnck.gallery.debug.DebugCommandReceiver.ACTION_SAVE_FIRST_CLOUD_ONLY)
-            addAction(io.github.pnck.gallery.debug.DebugCommandReceiver.ACTION_STATE)
+        runCatching {
+            val cls = Class.forName("io.github.pnck.gallery.debug.DebugCommandReceiver")
+            val receiver = cls.getDeclaredConstructor().newInstance() as android.content.BroadcastReceiver
+            val filter = android.content.IntentFilter().apply {
+                addAction("io.github.pnck.gallery.DEBUG_SYNC_NOW")
+                addAction("io.github.pnck.gallery.DEBUG_QUEUE_LATEST")
+                addAction("io.github.pnck.gallery.DEBUG_FREE_FIRST_SYNCED")
+                addAction("io.github.pnck.gallery.DEBUG_SAVE_FIRST_CLOUD_ONLY")
+                addAction("io.github.pnck.gallery.DEBUG_STATE")
+            }
+            androidx.core.content.ContextCompat.registerReceiver(
+                this,
+                receiver,
+                filter,
+                androidx.core.content.ContextCompat.RECEIVER_EXPORTED,
+            )
         }
-        androidx.core.content.ContextCompat.registerReceiver(
-            this,
-            io.github.pnck.gallery.debug.DebugCommandReceiver(),
-            filter,
-            androidx.core.content.ContextCompat.RECEIVER_EXPORTED,
-        )
     }
 
     /**
