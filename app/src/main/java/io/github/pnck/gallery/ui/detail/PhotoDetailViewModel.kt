@@ -34,7 +34,8 @@ sealed interface OriginalState {
 
 /** One-shot feedback for the detail viewer. */
 sealed interface DetailEvent {
-    data object Saved : DetailEvent
+    /** [folder] makes the toast discoverable ("saved, but WHERE?" was invisible). */
+    data class Saved(val folder: String) : DetailEvent
     data object SaveFailed : DetailEvent
     data object DownloadFailed : DetailEvent
     data object NoEditor : DetailEvent
@@ -114,8 +115,8 @@ class PhotoDetailViewModel @Inject constructor(
         viewModelScope.launch {
             // runCatching: an uncaught exception in the repo (SQLite, provider)
             // must still produce USER feedback, not a silently dead coroutine.
-            val uri = runCatching { repo.saveToDevice(photo.id) }.getOrNull()
-            events.send(if (uri != null) DetailEvent.Saved else DetailEvent.SaveFailed)
+            val saved = runCatching { repo.saveToDevice(photo.id) }.getOrNull()
+            events.send(if (saved != null) DetailEvent.Saved(saved.folder) else DetailEvent.SaveFailed)
         }
     }
 

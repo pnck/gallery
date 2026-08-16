@@ -42,6 +42,11 @@ data class CloudFile(
     /** appProperties.sourcePath: the device folder the photo was uploaded from
      *  (e.g. "DCIM/Camera/") — the restore target on any device. */
     val sourcePath: String? = null,
+    /** appProperties.dateTakenMs: the DEVICE-recorded capture time (0 = unknown).
+     *  Written at upload; restore stamps it back into MediaStore DATE_TAKEN so a
+     *  round-trip preserves the timeline position (Drive's own createdTime is the
+     *  upload time and EXIF is absent for screenshots — neither is trustworthy). */
+    val dateTakenMs: Long = 0,
     /** Video mime — film badge + player. */
     val isVideo: Boolean = false,
     /** videoMediaMetadata.durationMillis when the provider knows it; 0 otherwise. */

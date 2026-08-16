@@ -19,6 +19,7 @@ import io.github.pnck.gallery.domain.MediaBucket
 import io.github.pnck.gallery.domain.MediaTypeFilter
 import io.github.pnck.gallery.domain.PhotoDetails
 import io.github.pnck.gallery.domain.PhotoRepository
+import io.github.pnck.gallery.domain.SavedCopy
 import io.github.pnck.gallery.domain.StorageSummary
 import io.github.pnck.gallery.domain.SyncCounts
 import io.github.pnck.gallery.domain.SyncFilter
@@ -173,7 +174,7 @@ class PhotoRepositoryImpl(
      * the row to SYNCED with the inserted uri. The reconciler dedups on that uri,
      * so the next scan won't create a duplicate PENDING_UPLOAD row.
      */
-    override suspend fun saveToDevice(id: String): String? = withContext(Dispatchers.IO) {
+    override suspend fun saveToDevice(id: String): SavedCopy? = withContext(Dispatchers.IO) {
         val row = photoDao.getById(id) ?: run {
             Log.w(TAG, "saveToDevice: no row for $id")
             return@withContext null
@@ -206,9 +207,18 @@ class PhotoRepositoryImpl(
         val ext = displayName.substringAfterLast('.', "")
         val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext.lowercase())
             ?: if (row.isVideo) "video/mp4" else "image/jpeg"
+        // Round-trip the capture time: Drive's own createdTime is the upload time
+        // and EXIF is absent for screenshots — the upload's appProperties copy is
+        // the only trustworthy source. Stamped as DATE_TAKEN (timeline ordering)
+        // and DATE_MODIFIED.
+        val takenMs = cloudMeta?.dateTakenMs?.takeIf { it > 0 } ?: row.dateTaken
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
             put(MediaStore.MediaColumns.MIME_TYPE, mime)
+            if (takenMs > 0) {
+                put(MediaStore.MediaColumns.DATE_TAKEN, takenMs)
+                put(MediaStore.MediaColumns.DATE_MODIFIED, takenMs / 1000)
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 put(MediaStore.MediaColumns.RELATIVE_PATH, targetFolder)
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
@@ -252,7 +262,7 @@ class PhotoRepositoryImpl(
         // (unique localUri index would otherwise reject the update).
         photoDao.adoptLocalCopy(id, uri.toString())
         Log.i(TAG, "saveToDevice: OK → $uri")
-        uri.toString()
+        SavedCopy(uri.toString(), targetFolder.trimEnd('/'))
     }
 
     override suspend fun localUrisToDelete(ids: List<String>): List<String> =

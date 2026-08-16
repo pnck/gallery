@@ -180,7 +180,7 @@
     <string name="detail_share">Share</string>
     <string name="detail_save">Save to device</string>
     <string name="detail_download_failed">Couldn\'t download the original.</string>
-    <string name="detail_saved">Saved to your gallery</string>
+    <string name="detail_saved">Saved to %1$s</string>
     <string name="detail_save_failed">Couldn\'t save the photo.</string>
     <string name="detail_share_title">Share photo</string>
     <string name="detail_no_editor">No app can edit this photo.</string>

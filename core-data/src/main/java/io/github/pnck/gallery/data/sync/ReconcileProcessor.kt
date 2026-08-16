@@ -152,7 +152,9 @@ class ReconcileProcessor(
             CloudTruth(
                 cloudId = it.id,
                 md5 = (it.contentHash as? ContentHash.Md5)?.value,
-                dateTaken = it.creationTime,
+                // Device-authoritative capture time first (EXIF-less screenshots
+                // otherwise collapse to the upload time).
+                dateTaken = it.dateTakenMs.takeIf { t -> t > 0 } ?: it.creationTime,
                 width = it.width,
                 height = it.height,
                 thumbnailUrl = it.thumbnailUrl,

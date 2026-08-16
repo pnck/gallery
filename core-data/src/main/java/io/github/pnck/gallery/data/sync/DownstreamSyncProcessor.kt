@@ -121,7 +121,9 @@ class DownstreamSyncProcessor(
             contentHashType = hashType,
             contentHashValue = hashValue,
             cloudThumbnailUrl = thumbnailUrl,
-            dateTaken = creationTime,
+            // The upload's appProperties copy is device-authoritative; EXIF is
+            // absent for screenshots and Drive createdTime is the upload time.
+            dateTaken = dateTakenMs.takeIf { it > 0 } ?: creationTime,
             width = width,
             height = height,
             // appProperties.sourcePath — restore target folder, survives reinstalls.

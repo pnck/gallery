@@ -55,9 +55,10 @@ interface PhotoRepository {
      * (Pictures/, scoped storage via MediaStore — never DCIM, invariant #9) and
      * flip the row to SYNCED pointing at the freshly inserted content uri. The
      * reconciler dedups on that uri, so no duplicate PENDING_UPLOAD row is created.
-     * Returns the saved content uri, or null on failure.
+     * The original capture time is stamped back (DATE_TAKEN/DATE_MODIFIED) from
+     * the upload's appProperties.dateTakenMs. Returns the saved copy, or null.
      */
-    suspend fun saveToDevice(id: String): String?
+    suspend fun saveToDevice(id: String): SavedCopy?
 
     // ── Delete (PENDING_DELETE, PRD §3.7 / §7.3) ───────────────────────────
 
@@ -93,3 +94,6 @@ interface PhotoRepository {
     /** After the system delete removed the local files, flip those rows to CLOUD_ONLY. */
     suspend fun releaseLocalCopies(uris: List<String>)
 }
+
+/** Result of [PhotoRepository.saveToDevice] — the content uri and the human-readable target folder. */
+data class SavedCopy(val uri: String, val folder: String)

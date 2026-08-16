@@ -120,7 +120,7 @@ fun PhotoDetailScreen(
     val pagerState = rememberPagerState(pageCount = { photos.size })
 
     // Resolve strings in composition (lint: no LocalContext.getString in effects).
-    val msgSaved = stringResource(R.string.detail_saved)
+    val msgSavedTemplate = stringResource(R.string.detail_saved)
     val msgSaveFailed = stringResource(R.string.detail_save_failed)
     val msgDownloadFailed = stringResource(R.string.detail_download_failed)
     val msgNoEditor = stringResource(R.string.detail_no_editor)
@@ -144,7 +144,7 @@ fun PhotoDetailScreen(
     LaunchedEffect(Unit) {
         viewModel.eventFlow.collect { event ->
             val message = when (event) {
-                DetailEvent.Saved -> msgSaved
+                is DetailEvent.Saved -> msgSavedTemplate.format(event.folder)
                 DetailEvent.SaveFailed -> msgSaveFailed
                 DetailEvent.DownloadFailed -> msgDownloadFailed
                 DetailEvent.NoEditor -> msgNoEditor
