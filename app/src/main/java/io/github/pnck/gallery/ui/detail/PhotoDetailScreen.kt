@@ -72,6 +72,8 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import io.github.pnck.gallery.R
 import io.github.pnck.gallery.domain.SyncState
 import io.github.pnck.gallery.domain.TimelinePhoto
+import io.github.pnck.gallery.ui.util.openPermissionEditor
+import io.github.pnck.gallery.ui.util.rememberDeleteGrantRequest
 import io.github.pnck.gallery.ui.util.rememberSystemDelete
 import androidx.core.net.toUri
 import kotlinx.coroutines.launch
@@ -101,7 +103,12 @@ fun PhotoDetailScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbarHost = remember { SnackbarHostState() }
-    val systemDelete = rememberSystemDelete()
+    val storageTreeUri by viewModel.storageTreeUri.collectAsState()
+    val requestDeleteGrant = rememberDeleteGrantRequest(
+        onTreeGranted = { viewModel.saveStorageTree(it.toString()) },
+        onRequestRuntimePermissions = { (context as? android.app.Activity)?.let(::openPermissionEditor) },
+    )
+    val systemDelete = rememberSystemDelete(treeUri = storageTreeUri, onGrantMissing = requestDeleteGrant)
     var menuExpanded by remember { mutableStateOf(false) }
 
     // Immersive chrome + swipe-down-to-dismiss (Google-Photos style).

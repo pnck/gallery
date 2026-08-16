@@ -116,6 +116,7 @@ import io.github.pnck.gallery.domain.badge
 import io.github.pnck.gallery.ui.util.FastScroller
 import io.github.pnck.gallery.ui.util.ScrubModel
 import io.github.pnck.gallery.ui.util.pinchToStep
+import io.github.pnck.gallery.ui.util.rememberDeleteGrantRequest
 import io.github.pnck.gallery.ui.util.rememberSystemDelete
 import io.github.pnck.gallery.ui.util.showAppToast
 import io.github.pnck.gallery.ui.util.hasFullMediaAccess
@@ -155,6 +156,7 @@ fun TimelineScreen(
     val selectionMode by viewModel.selectionActive.collectAsState()
     val deleteRequest by viewModel.deleteRequest.collectAsState()
     val deleteConfirm by viewModel.deleteConfirm.collectAsState()
+    val freeConfirm by viewModel.freeConfirm.collectAsState()
     val freeRequest by viewModel.freeRequest.collectAsState()
     val syncCounts by viewModel.syncCounts.collectAsState()
     val queue by viewModel.queue.collectAsState()
@@ -170,7 +172,6 @@ fun TimelineScreen(
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
     val storageTreeUri by viewModel.storageTreeUri.collectAsState()
-    val systemDelete = rememberSystemDelete(preferDirect = true, treeUri = storageTreeUri)
 
     // Autostart probe verdict (recomputed when either probe timestamp moves).
     // The probe was fired the moment the app last went to background, so an
@@ -215,7 +216,21 @@ fun TimelineScreen(
         onDispose { context.contentResolver.unregisterContentObserver(observer) }
     }
 
-    // Route a pending delete through the system dialog, then purge cloud + rows.
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { grants ->
+        if (grants.values.any { it }) viewModel.processIntent(TimelineIntent.ForceSync)
+    }
+
+    // Deletion is silent-or-refused (owner's rule: the system delete dialog is
+    // banned in every form). Ungranted deletes lead to the one-time grant flow.
+    val requestDeleteGrant = rememberDeleteGrantRequest(
+        onTreeGranted = { viewModel.saveStorageTree(it.toString()) },
+        onRequestRuntimePermissions = { permissionLauncher.launch(mediaPermissionsToRequest()) },
+    )
+    val systemDelete = rememberSystemDelete(treeUri = storageTreeUri, onGrantMissing = requestDeleteGrant)
+
+    // Route a pending delete through the silent path, then purge cloud + rows.
     LaunchedEffect(deleteRequest) {
         deleteRequest?.let { request ->
             systemDelete(request.localUris.map { it.toUri() }) { _ -> viewModel.purge(request.ids) }
@@ -223,19 +238,13 @@ fun TimelineScreen(
         }
     }
 
-    // "Free space for these photos": release the verified local copies via the system
-    // dialog, then flip those rows to CLOUD_ONLY (they stay as a cloud preview).
+    // "Free space for these photos": release the verified local copies silently
+    // (or lead to the grant), then flip those rows to CLOUD_ONLY.
     LaunchedEffect(freeRequest) {
         freeRequest?.let { uris ->
             systemDelete(uris.map { it.toUri() }) { confirmed -> viewModel.confirmFreed(confirmed.map { it.toString() }) }
             viewModel.onFreeHandled()
         }
-    }
-
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions(),
-    ) { grants ->
-        if (grants.values.any { it }) viewModel.processIntent(TimelineIntent.ForceSync)
     }
 
     // Ask for media access once on entry; API 34+ partial grant still returns
@@ -457,6 +466,24 @@ fun TimelineScreen(
             notBackedUp = confirm.notBackedUp,
             onConfirm = viewModel::confirmDelete,
             onDismiss = viewModel::cancelDelete,
+        )
+    }
+
+    // Batch free keeps its own in-app confirm (owner: 二次确认必须保留; only the
+    // system-dialog rounds are banned).
+    freeConfirm?.let { uris ->
+        AlertDialog(
+            onDismissRequest = viewModel::dismissFreeConfirm,
+            title = { Text(stringResource(R.string.free_confirm_title, uris.size)) },
+            text = { Text(stringResource(R.string.free_confirm_message)) },
+            confirmButton = {
+                TextButton(onClick = viewModel::confirmFreeSelected) {
+                    Text(stringResource(R.string.free_confirm_button))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::dismissFreeConfirm) { Text(stringResource(R.string.cancel)) }
+            },
         )
     }
 

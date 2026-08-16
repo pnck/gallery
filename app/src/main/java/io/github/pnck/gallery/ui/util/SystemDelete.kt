@@ -1,18 +1,13 @@
 package io.github.pnck.gallery.ui.util
 
-import android.app.Activity
 import android.net.Uri
 import android.os.Build
-import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 
 /** A pending delete the UI must route through the system delete dialog (PRD §7.3). */
@@ -25,69 +20,80 @@ data class DeleteRequest(val localUris: List<String>, val ids: List<String>)
 data class DeleteConfirm(val ids: List<String>, val notBackedUp: Int)
 
 /**
- * Scoped-storage local media deletion (PRD §7.3, invariant #7) — ONE action, AT
- * MOST one system dialog, never a chunked confirmation sequence (owner's hard
- * requirement). Paths, best first:
+ * Local media deletion (PRD §7.3, invariant #7). OWNER'S HARD RULE: the system
+ * delete dialog (createDeleteRequest) is BANNED in every form — no chunked
+ * confirmations, no single batch dialog, no fallback. Deletion is either
+ * silent (a one-time grant is held) or it DOES NOT RUN and the user is taken
+ * to the grant instead ([onGrantMissing]).
  *
- *  1. Silent, [preferDirect] callers: MANAGE_MEDIA held (API 31+), a SAF
- *     document-tree grant held (API 30 — legacy storage is hard-blocked there
- *     for targetSdk 30+, so the tree grant is the gallery-app standard), or
- *     legacy-model WRITE_EXTERNAL_STORAGE held (API ≤29, e.g. the MI 9
- *     baseline). Zero system UI — our in-app confirm (count + size /
- *     not-backed-up warning) is the one and only design-language confirmation.
- *  2. A SINGLE MediaStore.createDeleteRequest dialog for the whole batch
- *     (API 30+ without any silent grant).
- *  3. Best-effort direct delete (API ≤29 without the write grant).
+ * Silent paths, by platform:
+ *  - API 31+: MANAGE_MEDIA (one-time system-settings grant);
+ *  - API 30:  SAF document-tree grant (one-time picker);
+ *  - API ≤29: legacy-model WRITE_EXTERNAL_STORAGE (runtime prompt, one time).
  *
- * [onConfirmed] runs once with the uris actually deleted (empty on cancel).
+ * [onConfirmed] runs once with the uris actually deleted.
  */
 @Composable
 fun rememberSystemDelete(
-    preferDirect: Boolean = false,
     /** Persisted SAF tree grant (settings.storageTreeUri) — the API-30 silent path. */
-    treeUri: String? = null,
+    treeUri: String?,
+    /** No silent grant held: take the user to the right grant UI. No deletion happens. */
+    onGrantMissing: () -> Unit,
 ): (uris: List<Uri>, onConfirmed: (List<Uri>) -> Unit) -> Unit {
     val context = LocalContext.current
-    val direct by rememberUpdatedState(preferDirect)
     val tree by rememberUpdatedState(treeUri)
-    var pending by remember { mutableStateOf<(() -> Unit)?>(null) }
-
-    val launcher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartIntentSenderForResult(),
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) pending?.invoke()
-        pending = null
-    }
 
     return remember {
         { uris, onConfirmed ->
-            val treeDelete = direct &&
-                Build.VERSION.SDK_INT == Build.VERSION_CODES.R &&
-                hasStorageTreeAccess(context, tree)
             when {
                 uris.isEmpty() -> onConfirmed(emptyList())
                 // Silent: confirm only the uris that ACTUALLY deleted.
-                (direct && canManageMedia(context)) || hasLegacyWritePermission(context) -> {
+                canManageMedia(context) || hasLegacyWritePermission(context) -> {
                     val resolver = context.contentResolver
                     onConfirmed(
                         uris.filter { runCatching { resolver.delete(it, null, null) > 0 }.getOrDefault(false) },
                     )
                 }
-                treeDelete -> {
+                Build.VERSION.SDK_INT == Build.VERSION_CODES.R && hasStorageTreeAccess(context, tree) -> {
                     onConfirmed(uris.filter { deleteViaStorageTree(context, it, tree.orEmpty()) })
                 }
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> {
-                    pending = { onConfirmed(uris) }
-                    val request = MediaStore.createDeleteRequest(context.contentResolver, uris)
-                    launcher.launch(IntentSenderRequest.Builder(request.intentSender).build())
-                }
-                else -> {
-                    val resolver = context.contentResolver
-                    onConfirmed(
-                        uris.filter { runCatching { resolver.delete(it, null, null) > 0 }.getOrDefault(false) },
-                    )
-                }
+                else -> onGrantMissing()
             }
         }
     }
 }
+
+/**
+ * The platform-correct grant request for the silent-delete capability:
+ * MANAGE_MEDIA settings (31+), the SAF tree picker (30), or the media runtime
+ * permission prompt (≤29, which includes WRITE under the legacy model).
+ */
+@Composable
+fun rememberDeleteGrantRequest(
+    /** Persist the picked tree uri (settings + takePersistableUriPermission is done here). */
+    onTreeGranted: (Uri) -> Unit,
+    /** ≤29 path: launch the runtime permission prompt (the screen's own launcher). */
+    onRequestRuntimePermissions: () -> Unit,
+): () -> Unit {
+    val context = LocalContext.current
+    val treeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            persistStorageTree(context, uri)
+            onTreeGranted(uri)
+        }
+    }
+    return remember {
+        {
+            when {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
+                    (context as? android.app.Activity)?.let(::openManageMediaSettings)
+                Build.VERSION.SDK_INT == Build.VERSION_CODES.R ->
+                    treeLauncher.launch(storageRootTreeUri())
+                else -> onRequestRuntimePermissions()
+            }
+        }
+    }
+}
+
+private fun storageRootTreeUri(): Uri =
+    android.provider.DocumentsContract.buildTreeDocumentUri("com.android.externalstorage.documents", "primary:")

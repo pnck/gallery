@@ -115,8 +115,10 @@
     <string name="free_queued">先备份 %1$d 张照片——完成后再释放空间</string>
     <string name="free_space_none">没有可释放的内容</string>
     <string name="storage_sync_first">正在同步云端状态，完成后请再次点击</string>
-    <string name="storage_manage_media_row">开启一键清理（媒体管理权限）</string>
-    <string name="storage_tree_row">开启一键清理（一次性授予文件夹访问）</string>
+    <string name="storage_silent_grant_row">开启一键清理（一次性授权）</string>
+    <string name="free_confirm_title">释放 %1$d 项的本地空间？</string>
+    <string name="free_confirm_message">将删除这些内容的本地副本，云端副本保留，可随时取回。</string>
+    <string name="free_confirm_button">释放</string>
     <string name="action_select">选择</string>
     <string name="action_select_all">全选</string>
 

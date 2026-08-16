@@ -63,9 +63,10 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.pnck.gallery.R
 import io.github.pnck.gallery.domain.StorageSummary
 import io.github.pnck.gallery.ui.util.canManageMedia
+import io.github.pnck.gallery.ui.util.hasLegacyWritePermission
 import io.github.pnck.gallery.ui.util.hasStorageTreeAccess
-import io.github.pnck.gallery.ui.util.openManageMediaSettings
-import io.github.pnck.gallery.ui.util.persistStorageTree
+import io.github.pnck.gallery.ui.util.openPermissionEditor
+import io.github.pnck.gallery.ui.util.rememberDeleteGrantRequest
 import io.github.pnck.gallery.ui.util.rememberSystemDelete
 
 /**
@@ -86,19 +87,15 @@ fun SpaceManagementScreen(
     val treeUri by viewModel.storageTreeUri.collectAsState()
     val context = LocalContext.current
     val snackbarHost = remember { SnackbarHostState() }
-    // Free-up-space prefers silent paths (MANAGE_MEDIA on 31+, SAF tree on 30,
-    // legacy WRITE on ≤29) — no system preview dialog.
-    val systemDelete = rememberSystemDelete(preferDirect = true, treeUri = treeUri)
     var confirmFree by remember { mutableStateOf(false) }
 
-    // One-time SAF tree picker (API-30 silent path): grant once, then deletes
-    // run through DocumentsContract with zero system dialogs.
-    val treeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        if (uri != null) {
-            persistStorageTree(context, uri)
-            viewModel.saveStorageTree(uri.toString())
-        }
-    }
+    // Silent-delete grant: MANAGE_MEDIA (31+) / SAF tree (30) / runtime WRITE
+    // (≤29). Never granted → the delete action leads HERE instead of running.
+    val requestDeleteGrant = rememberDeleteGrantRequest(
+        onTreeGranted = { viewModel.saveStorageTree(it.toString()) },
+        onRequestRuntimePermissions = { (context as? Activity)?.let(::openPermissionEditor) },
+    )
+    val systemDelete = rememberSystemDelete(treeUri = treeUri, onGrantMissing = requestDeleteGrant)
 
     // Grants change in system settings / the tree picker — re-check on resume
     // and whenever the stored tree uri changes.
@@ -111,8 +108,9 @@ fun SpaceManagementScreen(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-    val manageMedia = remember(resumeTick) { canManageMedia(context) }
-    val treeOk = remember(resumeTick, treeUri) { hasStorageTreeAccess(context, treeUri) }
+    val silentCapable = remember(resumeTick, treeUri) {
+        canManageMedia(context) || hasLegacyWritePermission(context) || hasStorageTreeAccess(context, treeUri)
+    }
 
     // Refresh device figures each time the screen is shown (a sync may have changed them).
     LaunchedEffect(Unit) { viewModel.refreshDevice() }
@@ -180,31 +178,16 @@ fun SpaceManagementScreen(
                     },
                 )
             }
-            // One-time offers of the silent-delete grants: with either held, batch
-            // cleanup runs with ZERO system dialogs (no preview grid, no approve).
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !manageMedia) {
+            // One-time offer of the silent-delete grant — with it held, cleanup
+            // runs with ZERO system dialogs. Without it the action refuses to
+            // run and leads here instead (owner's rule: no system dialog, ever).
+            if (!silentCapable) {
                 Spacer(Modifier.height(4.dp))
                 TextButton(
-                    onClick = { (context as? Activity)?.let(::openManageMediaSettings) },
+                    onClick = requestDeleteGrant,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(stringResource(R.string.storage_manage_media_row))
-                }
-            }
-            if (Build.VERSION.SDK_INT == Build.VERSION_CODES.R && !treeOk) {
-                Spacer(Modifier.height(4.dp))
-                TextButton(
-                    onClick = {
-                        treeLauncher.launch(
-                            DocumentsContract.buildTreeDocumentUri(
-                                "com.android.externalstorage.documents",
-                                "primary:",
-                            ),
-                        )
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(stringResource(R.string.storage_tree_row))
+                    Text(stringResource(R.string.storage_silent_grant_row))
                 }
             }
             Spacer(Modifier.height(8.dp))

@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.github.pnck.gallery.data.settings.AppSettingsStore
 import io.github.pnck.gallery.domain.PhotoRepository
 import io.github.pnck.gallery.domain.TimelinePhoto
 import io.github.pnck.gallery.ui.timeline.TimelineQueryHolder
@@ -50,8 +51,18 @@ sealed interface DetailEvent {
 class PhotoDetailViewModel @Inject constructor(
     private val repo: PhotoRepository,
     @ApplicationContext private val context: Context,
+    private val settings: AppSettingsStore,
     queryHolder: TimelineQueryHolder,
 ) : ViewModel() {
+
+    /** The SAF tree grant (API-30 silent-delete path); null when not granted. */
+    val storageTreeUri: StateFlow<String?> = settings.storageTreeUri
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** Persist the uri string; the platform grant itself is taken by the caller. */
+    fun saveStorageTree(uri: String) {
+        viewModelScope.launch { settings.setStorageTreeUri(uri) }
+    }
 
     // Same shared query as the grid, so the pager swipes through the identical
     // ordered/filtered set the user was just looking at.

@@ -116,8 +116,10 @@
     <string name="free_queued">Backing up %1$d photo(s) first — free up space again once they finish</string>
     <string name="free_space_none">Nothing to free up</string>
     <string name="storage_sync_first">Checking cloud state first — try again when sync finishes</string>
-    <string name="storage_manage_media_row">Enable one-tap cleanup (media management permission)</string>
-    <string name="storage_tree_row">Enable one-tap cleanup (grant folder access once)</string>
+    <string name="storage_silent_grant_row">Enable one-tap cleanup (one-time grant)</string>
+    <string name="free_confirm_title">Free up space for %1$d items?</string>
+    <string name="free_confirm_message">The local copies will be deleted. Cloud copies stay and can be restored anytime.</string>
+    <string name="free_confirm_button">Free up</string>
     <string name="action_select">Select</string>
     <string name="action_select_all">Select all</string>
 

@@ -132,6 +132,11 @@ class TimelineViewModel @Inject constructor(
     val storageTreeUri: StateFlow<String?> = settings.storageTreeUri
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
+    /** Persist the uri string; the platform grant itself is taken by the caller. */
+    fun saveStorageTree(uri: String) {
+        viewModelScope.launch { settings.setStorageTreeUri(uri) }
+    }
+
     /** The scan-allowlist / directory filter (empty = all folders). */
     val scanBuckets: StateFlow<Set<String>> = settings.scanBuckets
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
@@ -392,6 +397,10 @@ class TimelineViewModel @Inject constructor(
     private val _freeRequest = MutableStateFlow<List<String>?>(null)
     val freeRequest: StateFlow<List<String>?> = _freeRequest.asStateFlow()
 
+    /** Batch free awaits its own in-app confirm (owner: 二次确认必须保留). */
+    private val _freeConfirm = MutableStateFlow<List<String>?>(null)
+    val freeConfirm: StateFlow<List<String>?> = _freeConfirm.asStateFlow()
+
     fun freeSpaceSelected() {
         val ids = _selection.value.toList()
         if (ids.isEmpty()) return
@@ -406,11 +415,22 @@ class TimelineViewModel @Inject constructor(
             }
             val uris = repo.freeableLocalUrisFor(ids)
             if (uris.isNotEmpty()) {
-                _freeRequest.value = uris
+                _freeConfirm.value = uris
             } else if (notBackedUp > 0) {
                 events.send(TimelineEvent.FreeQueued(notBackedUp))
             }
         }
+    }
+
+    /** In-app confirm approved → route to the (silent) delete. */
+    fun confirmFreeSelected() {
+        val uris = _freeConfirm.value ?: return
+        _freeConfirm.value = null
+        _freeRequest.value = uris
+    }
+
+    fun dismissFreeConfirm() {
+        _freeConfirm.value = null
     }
 
     fun onFreeHandled() {
