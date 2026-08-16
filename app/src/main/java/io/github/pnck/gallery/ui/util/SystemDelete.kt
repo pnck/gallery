@@ -8,7 +8,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -26,38 +25,22 @@ data class DeleteRequest(val localUris: List<String>, val ids: List<String>)
 data class DeleteConfirm(val ids: List<String>, val notBackedUp: Int)
 
 /**
- * Binder safety bound for one createDeleteRequest: each URI rides the intent
- * extras (~1 MB transaction cap), so a 20k-photo cleanup is chunked into a few
- * SEQUENTIAL system dialogs instead of one oversized (crashing) request — and
- * never one dialog per file.
- */
-private const val DELETE_CHUNK = 1000
-
-private data class PendingDelete(
-    val chunks: List<List<Uri>>,
-    val index: Int,
-    val onConfirmed: (List<Uri>) -> Unit,
-    /** The dialog for [index] has been launched — guards against recomposition re-fires. */
-    val fired: Boolean = false,
-)
-
-/**
- * Scoped-storage local media deletion (PRD §7.3, invariant #7).
+ * Scoped-storage local media deletion (PRD §7.3, invariant #7) — ONE action, AT
+ * MOST one system dialog, never a chunked confirmation sequence (owner's hard
+ * requirement). Three paths, best first:
  *
- * Three paths, best first:
- *  1. [preferDirect] + MANAGE_MEDIA granted (API 31+): silent direct delete —
- *     no system dialog, no thumbnail-preview storm, no per-chunk approve. This
- *     is the free-up-space path: our in-app confirm (count + size) is the one
- *     and only design-language confirmation; the system dialog's flat preview
- *     grid is useless (can't zoom), slow on big batches, and off-design.
- *  2. Android 11+ otherwise: the system delete dialog via
- *     MediaStore.createDeleteRequest — ONE dialog per [DELETE_CHUNK]-item
- *     chunk, [onConfirmed] per confirmed chunk (a mid-batch cancel keeps
- *     already-deleted chunks' bookkeeping honest).
- *  3. Older devices: best-effort direct delete.
+ *  1. Silent: [preferDirect] + MANAGE_MEDIA held (API 31+), or legacy-model
+ *     WRITE_EXTERNAL_STORAGE held (API ≤29, e.g. the MI 9 baseline). Direct
+ *     ContentResolver deletes, zero system UI — our in-app confirm (count +
+ *     size / not-backed-up warning) is the one and only design-language
+ *     confirmation.
+ *  2. Android 11+ otherwise: a SINGLE MediaStore.createDeleteRequest system
+ *     dialog for the whole batch — the only legal path on API 30 and the
+ *     pre-grant path on 31+.
+ *  3. Older devices without the write grant: best-effort direct delete.
  *
- * Shared by "delete" (→ purge cloud + row; keeps the system dialog unless
- * MANAGE_MEDIA is held) and "free up space" (→ CLOUD_ONLY; [preferDirect]).
+ * [onConfirmed] runs once with the confirmed uris (all of them, or empty on
+ * cancel).
  */
 @Composable
 fun rememberSystemDelete(
@@ -65,53 +48,28 @@ fun rememberSystemDelete(
 ): (uris: List<Uri>, onConfirmed: (List<Uri>) -> Unit) -> Unit {
     val context = LocalContext.current
     val direct by rememberUpdatedState(preferDirect)
-    var pending by remember { mutableStateOf<PendingDelete?>(null) }
+    var pending by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult(),
     ) { result ->
-        val p = pending
-        if (result.resultCode == Activity.RESULT_OK && p != null) {
-            p.onConfirmed(p.chunks[p.index])
-            // Advance (or finish): the LaunchedEffect below fires the next dialog.
-            pending = if (p.index + 1 < p.chunks.size) {
-                p.copy(index = p.index + 1, fired = false)
-            } else {
-                null
-            }
-        } else {
-            // Cancelled (or nothing pending): stop the batch — chunks already
-            // confirmed stay confirmed, the rest never happens.
-            pending = null
-        }
-    }
-
-    // The request for the current chunk is fired from an effect, not from the
-    // result callback — the callback can't reference its own launcher. (The SDK
-    // guard looks redundant — pending is only set on R+ — but lint is right to
-    // demand it here: this call site itself must be provably safe.)
-    LaunchedEffect(pending) {
-        val p = pending ?: return@LaunchedEffect
-        if (p.fired || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return@LaunchedEffect
-        pending = p.copy(fired = true)
-        val request = MediaStore.createDeleteRequest(context.contentResolver, p.chunks[p.index])
-        launcher.launch(IntentSenderRequest.Builder(request.intentSender).build())
+        if (result.resultCode == Activity.RESULT_OK) pending?.invoke()
+        pending = null
     }
 
     return remember {
         { uris, onConfirmed ->
+            val silent = (direct && canManageMedia(context)) || hasLegacyWritePermission(context)
             when {
                 uris.isEmpty() -> onConfirmed(emptyList())
-                direct && canManageMedia(context) -> {
-                    // MANAGE_MEDIA held: delete silently (in-app confirm already happened).
+                silent || Build.VERSION.SDK_INT < Build.VERSION_CODES.R -> {
                     uris.forEach { runCatching { context.contentResolver.delete(it, null, null) } }
                     onConfirmed(uris)
                 }
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R ->
-                    pending = PendingDelete(uris.chunked(DELETE_CHUNK), 0, onConfirmed)
                 else -> {
-                    uris.forEach { runCatching { context.contentResolver.delete(it, null, null) } }
-                    onConfirmed(uris)
+                    pending = { onConfirmed(uris) }
+                    val request = MediaStore.createDeleteRequest(context.contentResolver, uris)
+                    launcher.launch(IntentSenderRequest.Builder(request.intentSender).build())
                 }
             }
         }

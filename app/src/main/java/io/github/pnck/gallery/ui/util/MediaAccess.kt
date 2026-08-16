@@ -27,9 +27,19 @@ fun mediaPermission(): String =
 fun mediaPermissionsToRequest(): Array<String> =
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
+    } else if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q) {
+        // Legacy model (requestLegacyExternalStorage): WRITE covers silent
+        // batch delete — the Android-10 counterpart of MANAGE_MEDIA.
+        arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE)
     } else {
         arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
     }
+
+/** Legacy-model write grant (API ≤29): with it, deletes are silent — no system dialog. */
+fun hasLegacyWritePermission(context: Context): Boolean =
+    Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q &&
+        ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
+        PackageManager.PERMISSION_GRANTED
 
 /** Runtime-grant check over BOTH media permissions (33+; legacy below). */
 fun hasMediaRuntimePermission(context: Context): Boolean =
