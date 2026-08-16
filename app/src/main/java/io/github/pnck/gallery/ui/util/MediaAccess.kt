@@ -10,6 +10,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Process
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.Settings
 import androidx.core.content.ContextCompat
@@ -177,4 +178,73 @@ fun openManageMediaSettings(activity: Activity) {
             // try the next fallback
         }
     }
+}
+
+// ── SAF tree access (the API-30 silent-delete path) ─────────────────────────
+// Android 11 hard-blocks the legacy storage model for targetSdk 30+, and
+// MANAGE_MEDIA doesn't exist until 31 — so on API 30 the gallery-app standard
+// (Simple Gallery & co.) is a ONE-TIME document-tree grant over shared storage;
+// afterwards DocumentsContract deletes run silently, with zero system dialogs.
+
+/** Intent for the one-time tree picker, opened at the primary storage root. */
+fun buildTreeAccessIntent(): Intent =
+    Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+        addFlags(
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
+                Intent.FLAG_GRANT_PREFIX_URI_PERMISSION,
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            putExtra(
+                DocumentsContract.EXTRA_INITIAL_URI,
+                DocumentsContract.buildTreeDocumentUri(
+                    "com.android.externalstorage.documents",
+                    "primary:",
+                ),
+            )
+        }
+    }
+
+/** Persist a granted tree uri so [hasStorageTreeAccess] survives reboots. */
+fun persistStorageTree(context: Context, treeUri: Uri) {
+    context.contentResolver.takePersistableUriPermission(
+        treeUri,
+        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+    )
+}
+
+/** True while a persisted storage-tree grant is held (the API-30 silent path). */
+fun hasStorageTreeAccess(context: Context, treeUri: String?): Boolean {
+    if (treeUri == null) return false
+    val held = context.contentResolver.persistedUriPermissions
+    return held.any { it.uri.toString() == treeUri && it.isWritePermission }
+}
+
+/**
+ * Delete ONE media item through the SAF tree (API-30 silent path). Resolves the
+ * MediaStore row's volume + relative path + name into the tree's document id.
+ * Returns false when the row can't be resolved (caller falls back).
+ */
+fun deleteViaStorageTree(context: Context, mediaUri: Uri, treeUri: String): Boolean {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false // RELATIVE_PATH
+    return runCatching {
+    val projection = arrayOf(
+        MediaStore.MediaColumns.RELATIVE_PATH,
+        MediaStore.MediaColumns.DISPLAY_NAME,
+    )
+    val docId = context.contentResolver.query(mediaUri, projection, null, null, null)?.use { c ->
+        if (!c.moveToFirst()) return false
+        val rel = c.getString(0) ?: return false
+        val name = c.getString(1) ?: return false
+        // "external_primary" → SAF's "primary"; sd cards carry their uuid.
+        val volume = when (val v = MediaStore.getVolumeName(mediaUri)) {
+            MediaStore.VOLUME_EXTERNAL_PRIMARY -> "primary"
+            else -> v
+        }
+        "$volume:$rel$name"
+    } ?: return false
+    val docUri = DocumentsContract.buildDocumentUriUsingTree(Uri.parse(treeUri), docId)
+    DocumentsContract.deleteDocument(context.contentResolver, docUri)
+    }.getOrDefault(false)
 }

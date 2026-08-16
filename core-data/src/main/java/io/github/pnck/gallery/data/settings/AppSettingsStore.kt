@@ -30,6 +30,7 @@ class AppSettingsStore(private val context: Context) {
     private val probeScheduledAtKey = longPreferencesKey("autostart_probe_scheduled_at")
     private val probeCompletedAtKey = longPreferencesKey("autostart_probe_completed_at")
     private val accountEmailKey = stringPreferencesKey("account_email")
+    private val storageTreeKey = stringPreferencesKey("saf_tree_uri")
 
     /** Name of the app's cloud folder that uploads are pinned to. */
     val remoteFolderName: Flow<String> = context.appSettingsStore.data.map { prefs ->
@@ -96,6 +97,16 @@ class AppSettingsStore(private val context: Context) {
 
     suspend fun setAccountEmail(email: String) {
         context.appSettingsStore.edit { it[accountEmailKey] = email }
+    }
+
+    /**
+     * The SAF document-tree grant (API-30 silent-delete path): a one-time picker
+     * grant over shared storage, persisted via takePersistableUriPermission.
+     */
+    val storageTreeUri: Flow<String?> = context.appSettingsStore.data.map { it[storageTreeKey] }
+
+    suspend fun setStorageTreeUri(uri: String) {
+        context.appSettingsStore.edit { it[storageTreeKey] = uri }
     }
 
     /** Transport core (`gallery-wg`) verbosity: off/error/warn/info/debug/trace.

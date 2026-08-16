@@ -9,6 +9,7 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.github.pnck.gallery.data.settings.AppSettingsStore
 import io.github.pnck.gallery.domain.PhotoRepository
 import io.github.pnck.gallery.domain.StorageSummary
 import io.github.pnck.gallery.work.SyncPipeline
@@ -47,7 +48,17 @@ class SpaceManagementViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val repo: PhotoRepository,
     private val workManager: WorkManager,
+    private val settings: AppSettingsStore,
 ) : ViewModel() {
+
+    /** The SAF tree grant (API-30 silent-delete path); null when not granted. */
+    val storageTreeUri: StateFlow<String?> = settings.storageTreeUri
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** Persist the uri string; the platform grant itself is taken by the caller. */
+    fun saveStorageTree(uri: String) {
+        viewModelScope.launch { settings.setStorageTreeUri(uri) }
+    }
 
     val summary: StateFlow<StorageSummary> = repo.observeStorageSummary()
         .stateIn(

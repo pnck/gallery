@@ -116,6 +116,7 @@
     <string name="free_space_none">没有可释放的内容</string>
     <string name="storage_sync_first">正在同步云端状态，完成后请再次点击</string>
     <string name="storage_manage_media_row">开启一键清理（媒体管理权限）</string>
+    <string name="storage_tree_row">开启一键清理（一次性授予文件夹访问）</string>
     <string name="action_select">选择</string>
     <string name="action_select_all">全选</string>
 

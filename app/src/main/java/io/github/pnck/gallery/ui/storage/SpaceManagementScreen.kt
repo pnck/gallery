@@ -2,7 +2,10 @@ package io.github.pnck.gallery.ui.storage
 
 import android.app.Activity
 import android.os.Build
+import android.provider.DocumentsContract
 import android.text.format.Formatter
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -41,6 +44,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -59,7 +63,9 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.pnck.gallery.R
 import io.github.pnck.gallery.domain.StorageSummary
 import io.github.pnck.gallery.ui.util.canManageMedia
+import io.github.pnck.gallery.ui.util.hasStorageTreeAccess
 import io.github.pnck.gallery.ui.util.openManageMediaSettings
+import io.github.pnck.gallery.ui.util.persistStorageTree
 import io.github.pnck.gallery.ui.util.rememberSystemDelete
 
 /**
@@ -77,22 +83,36 @@ fun SpaceManagementScreen(
     val summary by viewModel.summary.collectAsState()
     val device by viewModel.device.collectAsState()
     val freeUris by viewModel.freeUris.collectAsState()
+    val treeUri by viewModel.storageTreeUri.collectAsState()
     val context = LocalContext.current
     val snackbarHost = remember { SnackbarHostState() }
-    // Free-up-space prefers the MANAGE_MEDIA silent path (no system preview dialog).
-    val systemDelete = rememberSystemDelete(preferDirect = true)
+    // Free-up-space prefers silent paths (MANAGE_MEDIA on 31+, SAF tree on 30,
+    // legacy WRITE on ≤29) — no system preview dialog.
+    val systemDelete = rememberSystemDelete(preferDirect = true, treeUri = treeUri)
     var confirmFree by remember { mutableStateOf(false) }
 
-    // Re-check the media-management grant on every resume (it changes in system settings).
-    var manageMedia by remember { mutableStateOf(canManageMedia(context)) }
+    // One-time SAF tree picker (API-30 silent path): grant once, then deletes
+    // run through DocumentsContract with zero system dialogs.
+    val treeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            persistStorageTree(context, uri)
+            viewModel.saveStorageTree(uri.toString())
+        }
+    }
+
+    // Grants change in system settings / the tree picker — re-check on resume
+    // and whenever the stored tree uri changes.
+    var resumeTick by remember { mutableIntStateOf(0) }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) manageMedia = canManageMedia(context)
+            if (event == Lifecycle.Event.ON_RESUME) resumeTick++
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
+    val manageMedia = remember(resumeTick) { canManageMedia(context) }
+    val treeOk = remember(resumeTick, treeUri) { hasStorageTreeAccess(context, treeUri) }
 
     // Refresh device figures each time the screen is shown (a sync may have changed them).
     LaunchedEffect(Unit) { viewModel.refreshDevice() }
@@ -160,8 +180,8 @@ fun SpaceManagementScreen(
                     },
                 )
             }
-            // One-time offer of the media-management grant: with it, batch cleanup
-            // runs with ZERO system dialogs (no preview grid, no per-chunk approve).
+            // One-time offers of the silent-delete grants: with either held, batch
+            // cleanup runs with ZERO system dialogs (no preview grid, no approve).
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !manageMedia) {
                 Spacer(Modifier.height(4.dp))
                 TextButton(
@@ -169,6 +189,22 @@ fun SpaceManagementScreen(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(stringResource(R.string.storage_manage_media_row))
+                }
+            }
+            if (Build.VERSION.SDK_INT == Build.VERSION_CODES.R && !treeOk) {
+                Spacer(Modifier.height(4.dp))
+                TextButton(
+                    onClick = {
+                        treeLauncher.launch(
+                            DocumentsContract.buildTreeDocumentUri(
+                                "com.android.externalstorage.documents",
+                                "primary:",
+                            ),
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.storage_tree_row))
                 }
             }
             Spacer(Modifier.height(8.dp))

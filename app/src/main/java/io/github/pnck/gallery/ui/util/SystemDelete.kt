@@ -27,27 +27,29 @@ data class DeleteConfirm(val ids: List<String>, val notBackedUp: Int)
 /**
  * Scoped-storage local media deletion (PRD §7.3, invariant #7) — ONE action, AT
  * MOST one system dialog, never a chunked confirmation sequence (owner's hard
- * requirement). Three paths, best first:
+ * requirement). Paths, best first:
  *
- *  1. Silent: [preferDirect] + MANAGE_MEDIA held (API 31+), or legacy-model
- *     WRITE_EXTERNAL_STORAGE held (API ≤29, e.g. the MI 9 baseline). Direct
- *     ContentResolver deletes, zero system UI — our in-app confirm (count +
- *     size / not-backed-up warning) is the one and only design-language
- *     confirmation.
- *  2. Android 11+ otherwise: a SINGLE MediaStore.createDeleteRequest system
- *     dialog for the whole batch — the only legal path on API 30 and the
- *     pre-grant path on 31+.
- *  3. Older devices without the write grant: best-effort direct delete.
+ *  1. Silent, [preferDirect] callers: MANAGE_MEDIA held (API 31+), a SAF
+ *     document-tree grant held (API 30 — legacy storage is hard-blocked there
+ *     for targetSdk 30+, so the tree grant is the gallery-app standard), or
+ *     legacy-model WRITE_EXTERNAL_STORAGE held (API ≤29, e.g. the MI 9
+ *     baseline). Zero system UI — our in-app confirm (count + size /
+ *     not-backed-up warning) is the one and only design-language confirmation.
+ *  2. A SINGLE MediaStore.createDeleteRequest dialog for the whole batch
+ *     (API 30+ without any silent grant).
+ *  3. Best-effort direct delete (API ≤29 without the write grant).
  *
- * [onConfirmed] runs once with the confirmed uris (all of them, or empty on
- * cancel).
+ * [onConfirmed] runs once with the uris actually deleted (empty on cancel).
  */
 @Composable
 fun rememberSystemDelete(
     preferDirect: Boolean = false,
+    /** Persisted SAF tree grant (settings.storageTreeUri) — the API-30 silent path. */
+    treeUri: String? = null,
 ): (uris: List<Uri>, onConfirmed: (List<Uri>) -> Unit) -> Unit {
     val context = LocalContext.current
     val direct by rememberUpdatedState(preferDirect)
+    val tree by rememberUpdatedState(treeUri)
     var pending by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     val launcher = rememberLauncherForActivityResult(
@@ -59,17 +61,31 @@ fun rememberSystemDelete(
 
     return remember {
         { uris, onConfirmed ->
-            val silent = (direct && canManageMedia(context)) || hasLegacyWritePermission(context)
+            val treeDelete = direct &&
+                Build.VERSION.SDK_INT == Build.VERSION_CODES.R &&
+                hasStorageTreeAccess(context, tree)
             when {
                 uris.isEmpty() -> onConfirmed(emptyList())
-                silent || Build.VERSION.SDK_INT < Build.VERSION_CODES.R -> {
-                    uris.forEach { runCatching { context.contentResolver.delete(it, null, null) } }
-                    onConfirmed(uris)
+                // Silent: confirm only the uris that ACTUALLY deleted.
+                (direct && canManageMedia(context)) || hasLegacyWritePermission(context) -> {
+                    val resolver = context.contentResolver
+                    onConfirmed(
+                        uris.filter { runCatching { resolver.delete(it, null, null) > 0 }.getOrDefault(false) },
+                    )
                 }
-                else -> {
+                treeDelete -> {
+                    onConfirmed(uris.filter { deleteViaStorageTree(context, it, tree.orEmpty()) })
+                }
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> {
                     pending = { onConfirmed(uris) }
                     val request = MediaStore.createDeleteRequest(context.contentResolver, uris)
                     launcher.launch(IntentSenderRequest.Builder(request.intentSender).build())
+                }
+                else -> {
+                    val resolver = context.contentResolver
+                    onConfirmed(
+                        uris.filter { runCatching { resolver.delete(it, null, null) > 0 }.getOrDefault(false) },
+                    )
                 }
             }
         }

@@ -169,7 +169,8 @@ fun TimelineScreen(
     val probeCompletedAt by viewModel.autostartProbeCompletedAt.collectAsState()
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
-    val systemDelete = rememberSystemDelete(preferDirect = true)
+    val storageTreeUri by viewModel.storageTreeUri.collectAsState()
+    val systemDelete = rememberSystemDelete(preferDirect = true, treeUri = storageTreeUri)
 
     // Autostart probe verdict (recomputed when either probe timestamp moves).
     // The probe was fired the moment the app last went to background, so an

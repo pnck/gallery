@@ -117,6 +117,7 @@
     <string name="free_space_none">Nothing to free up</string>
     <string name="storage_sync_first">Checking cloud state first — try again when sync finishes</string>
     <string name="storage_manage_media_row">Enable one-tap cleanup (media management permission)</string>
+    <string name="storage_tree_row">Enable one-tap cleanup (grant folder access once)</string>
     <string name="action_select">Select</string>
     <string name="action_select_all">Select all</string>
 

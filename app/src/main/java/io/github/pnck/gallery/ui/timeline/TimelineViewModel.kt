@@ -128,6 +128,10 @@ class TimelineViewModel @Inject constructor(
     /** Photos / videos / both — transient session choice, shared with the pager. */
     val mediaType: StateFlow<MediaTypeFilter> = queryHolder.mediaType
 
+    /** The SAF tree grant (API-30 silent-delete path); null when not granted. */
+    val storageTreeUri: StateFlow<String?> = settings.storageTreeUri
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
     /** The scan-allowlist / directory filter (empty = all folders). */
     val scanBuckets: StateFlow<Set<String>> = settings.scanBuckets
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
